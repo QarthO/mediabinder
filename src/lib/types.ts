@@ -35,13 +35,17 @@ export interface Post {
   external_id: string
   created_at: string
 }
+export interface DriveSource {
+  folder_id: string
+  folder_name: string
+  last_synced_at: string | null
+}
 export interface Library {
   media: Media[]
   sets: MediaSet[]
   posts: Post[]
   workspace: {
-    folder_id: string | null
-    folder_name: string | null
+    sources: DriveSource[]
     last_synced_at: string | null
   }
   user: { name: string; email: string; role: string }

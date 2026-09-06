@@ -7,6 +7,7 @@ import {
   Check,
   HardDrive,
   ShieldCheck,
+  Unlink,
 } from "lucide-react"
 import { toast } from "sonner"
 import { action } from "@/lib/api"
@@ -21,7 +22,8 @@ export function DriveSettings({
 }: {
   workspace: Library["workspace"]
 }) {
-  const [folder, setFolder] = useState(workspace.folder_id ?? ""),
+  const [folder, setFolder] = useState(""),
+    [removing, setRemoving] = useState<string | null>(null),
     [browse, setBrowse] = useState(false),
     [search, setSearch] = useState("")
   const client = useQueryClient()
@@ -36,10 +38,31 @@ export function DriveSettings({
     onSuccess: async () => {
       await client.invalidateQueries({ queryKey: ["library"] })
       setBrowse(false)
-      toast.success("Source folder saved. Sync Drive to update your library.")
+      setFolder("")
+      toast.success("Folder linked. Sync Drive to add its media.")
     },
     onError: (e) => toast.error(e.message),
   })
+  const unlink = useMutation({
+    mutationFn: (folderId: string) => action("remove-source", { folderId }),
+    onSuccess: async () => {
+      await client.invalidateQueries({ queryKey: ["library"] })
+      setRemoving(null)
+      toast.success("Folder unlinked. Its metadata is preserved.")
+    },
+    onError: (e) => toast.error(e.message),
+  })
+  const sync = useMutation({
+    mutationFn: () => action<{ count: number }>("sync"),
+    onSuccess: async (result) => {
+      await client.invalidateQueries({ queryKey: ["library"] })
+      toast.success(`Synced ${result.count} media items`)
+    },
+    onError: (e) => toast.error(e.message),
+  })
+  const alreadyLinked = workspace.sources.some(
+    (source) => source.folder_id === folderIdFromInput(folder)
+  )
   return (
     <div className="settings-content">
       <section className="settings-card">
@@ -57,30 +80,79 @@ export function DriveSettings({
           </span>
         </div>
         <div className="settings-body">
-          <h3>Source folder</h3>
+          <div className="section-heading">
+            <h3>
+              Linked folders <span>{workspace.sources.length}</span>
+            </h3>
+            <Button
+              variant="outline"
+              disabled={!workspace.sources.length || sync.isPending}
+              onClick={() => sync.mutate()}
+            >
+              <RefreshCw className={sync.isPending ? "spin" : ""} />
+              {sync.isPending ? "Syncing…" : "Sync all folders"}
+            </Button>
+          </div>
           <p>
-            Sync images and videos from a folder and its subfolders. Shared
-            folders work too, as long as your Google account can access them.
+            Images and videos from these folders and their subfolders appear in
+            your library. Shared folders work too.
           </p>
-          {workspace.folder_name && (
-            <div className="current-folder">
-              <FolderOpen size={20} />
-              <div>
-                <strong>{workspace.folder_name}</strong>
-                <small>
-                  Last synced: {dateValue(workspace.last_synced_at)}
-                </small>
+          <div className="source-list">
+            {workspace.sources.map((source) => (
+              <div className="source-entry" key={source.folder_id}>
+                <div className="current-folder">
+                  <FolderOpen size={20} />
+                  <div>
+                    <strong>{source.folder_name}</strong>
+                    <small>
+                      {source.last_synced_at
+                        ? `Last synced ${dateValue(source.last_synced_at)}`
+                        : "Not synced yet"}
+                    </small>
+                  </div>
+                  <a
+                    href={`https://drive.google.com/drive/folders/${source.folder_id}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label={`Open ${source.folder_name} in Drive`}
+                  >
+                    <ArrowUpRight size={17} />
+                  </a>
+                  <button
+                    className="icon-button"
+                    aria-label={`Unlink ${source.folder_name}`}
+                    title="Unlink folder"
+                    onClick={() => setRemoving(source.folder_id)}
+                    disabled={unlink.isPending || sync.isPending}
+                  >
+                    <Unlink size={17} />
+                  </button>
+                </div>
+                {removing === source.folder_id && (
+                  <div className="unlink-confirm" role="alert">
+                    <p>
+                      Unlink this folder? Its media will be hidden unless it
+                      belongs to another linked folder. Names, tags, sets, and
+                      post links are kept for when you link it again.
+                    </p>
+                    <div className="settings-actions">
+                      <Button variant="ghost" onClick={() => setRemoving(null)}>
+                        Cancel
+                      </Button>
+                      <Button
+                        variant="destructive"
+                        disabled={unlink.isPending}
+                        onClick={() => unlink.mutate(source.folder_id)}
+                      >
+                        {unlink.isPending ? "Unlinking…" : "Unlink folder"}
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </div>
-              <a
-                href={`https://drive.google.com/drive/folders/${workspace.folder_id}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                aria-label="Open source folder in Drive"
-              >
-                <ArrowUpRight size={17} />
-              </a>
-            </div>
-          )}
+            ))}
+          </div>
+          <h3>Link another folder</h3>
           <form
             onSubmit={(e) => {
               e.preventDefault()
@@ -105,8 +177,20 @@ export function DriveSettings({
                 <FolderOpen />
                 Browse folders
               </Button>
-              <Button type="submit" disabled={!folder.trim() || save.isPending}>
-                {save.isPending ? "Saving…" : "Save folder"}
+              <Button
+                type="submit"
+                disabled={
+                  !folder.trim() ||
+                  save.isPending ||
+                  alreadyLinked ||
+                  sync.isPending
+                }
+              >
+                {alreadyLinked
+                  ? "Already linked"
+                  : save.isPending
+                    ? "Linking…"
+                    : "Link folder"}
               </Button>
             </div>
           </form>
@@ -136,6 +220,9 @@ export function DriveSettings({
                     .map((f) => (
                       <button
                         key={f.id}
+                        disabled={workspace.sources.some(
+                          (source) => source.folder_id === f.id
+                        )}
                         onClick={() => setFolder(f.id)}
                         className={folder === f.id ? "chosen" : ""}
                       >
@@ -144,7 +231,10 @@ export function DriveSettings({
                           {f.name}
                           <small>{f.id}</small>
                         </span>
-                        {folder === f.id && <Check size={15} />}
+                        {(folder === f.id ||
+                          workspace.sources.some(
+                            (source) => source.folder_id === f.id
+                          )) && <Check size={15} />}
                       </button>
                     ))}
                   {!folders.data.length && (

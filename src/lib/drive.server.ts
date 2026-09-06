@@ -79,55 +79,70 @@ export async function syncDrive(userId: string, headers: Headers) {
     )
     if (lock[0].acquired !== 1)
       throw new Error("A sync is already running. Try again shortly.")
-    const [source] = await rows<{ folder_id: string }>(
-      "SELECT folder_id FROM drive_source WHERE user_id = ?",
+    const sources = await rows<{ folder_id: string }>(
+      "SELECT folder_id FROM drive_folder WHERE user_id = ?",
       [userId]
     )
-    if (!source?.folder_id)
+    if (!sources.length)
       throw new Error("Choose a Google Drive folder in settings first.")
     const token = await driveToken(headers)
-    const pending = [source.folder_id],
-      visited = new Set<string>(),
-      files: DriveFile[] = []
-    while (pending.length) {
-      const parent = pending.shift()!
-      if (visited.has(parent)) continue
-      visited.add(parent)
-      let pageToken = ""
-      do {
-        const page = await driveJson<{
-          files: DriveFile[]
-          nextPageToken?: string
-        }>(token, "files", {
-          q: `'${parent}' in parents and trashed = false and (mimeType contains 'image/' or mimeType contains 'video/' or mimeType = 'application/vnd.google-apps.folder')`,
-          fields:
-            "nextPageToken,files(id,name,mimeType,createdTime,size,imageMediaMetadata,videoMediaMetadata)",
-          pageSize: "1000",
-          supportsAllDrives: "true",
-          includeItemsFromAllDrives: "true",
-          ...(pageToken ? { pageToken } : {}),
-        })
-        for (const file of page.files) {
-          if (file.mimeType === "application/vnd.google-apps.folder")
-            pending.push(file.id)
-          else files.push(file)
-        }
-        pageToken = page.nextPageToken ?? ""
-      } while (pageToken)
+    const sourceFiles = new Map<string, DriveFile[]>()
+    for (const source of sources) {
+      const pending = [source.folder_id],
+        visited = new Set<string>(),
+        files: DriveFile[] = []
+      while (pending.length) {
+        const parent = pending.shift()!
+        if (visited.has(parent)) continue
+        visited.add(parent)
+        let pageToken = ""
+        do {
+          const page = await driveJson<{
+            files: DriveFile[]
+            nextPageToken?: string
+          }>(token, "files", {
+            q: `'${parent}' in parents and trashed = false and (mimeType contains 'image/' or mimeType contains 'video/' or mimeType = 'application/vnd.google-apps.folder')`,
+            fields:
+              "nextPageToken,files(id,name,mimeType,createdTime,size,imageMediaMetadata,videoMediaMetadata)",
+            pageSize: "1000",
+            supportsAllDrives: "true",
+            includeItemsFromAllDrives: "true",
+            ...(pageToken ? { pageToken } : {}),
+          })
+          for (const file of page.files) {
+            if (file.mimeType === "application/vnd.google-apps.folder")
+              pending.push(file.id)
+            else files.push(file)
+          }
+          pageToken = page.nextPageToken ?? ""
+        } while (pageToken)
+      }
+      sourceFiles.set(source.folder_id, files)
     }
+    const files = [
+      ...new Map(
+        [...sourceFiles.values()].flat().map((file) => [file.id, file])
+      ).values(),
+    ]
     // Only reconcile after every Drive page succeeds; failures preserve the catalog.
     await connection.beginTransaction()
     try {
       const [current] = await connection.query<any[]>(
-        "SELECT folder_id FROM drive_source WHERE user_id = ? FOR UPDATE",
+        "SELECT folder_id FROM drive_folder WHERE user_id = ? FOR UPDATE",
         [userId]
       )
-      if (current[0]?.folder_id !== source.folder_id)
+      if (
+        current.length !== sources.length ||
+        current.some((row) => !sourceFiles.has(row.folder_id))
+      )
         throw new Error("The source folder changed. Run sync again.")
       await connection.execute(
         "UPDATE media SET available = FALSE WHERE user_id = ?",
         [userId]
       )
+      await connection.execute("DELETE FROM media_source WHERE user_id=?", [
+        userId,
+      ])
       for (const file of files) {
         const captured = file.imageMediaMetadata?.time
           ?.replace(/^(\d{4}):(\d{2}):(\d{2})/, "$1-$2-$3")
@@ -157,8 +172,16 @@ export async function syncDrive(userId: string, headers: Headers) {
           ]
         )
       }
+      for (const [folderId, members] of sourceFiles) {
+        for (const file of members) {
+          await connection.execute(
+            "INSERT IGNORE INTO media_source (user_id,folder_id,media_id) SELECT user_id,?,id FROM media WHERE user_id=? AND drive_id=?",
+            [folderId, userId, file.id]
+          )
+        }
+      }
       await connection.execute(
-        "UPDATE drive_source SET last_synced_at = NOW(3) WHERE user_id = ?",
+        "UPDATE drive_folder SET last_synced_at = NOW(3) WHERE user_id = ?",
         [userId]
       )
       await connection.commit()

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto"
 import { pool, rows } from "./database.server"
-import type { Library, Media, MediaSet, Post } from "./types"
+import type { Library, Media, MediaSet, Post, DriveSource } from "./types"
 import { metadata, newPost, newSet, folder, id } from "./validation"
 import { driveJson, driveToken, listFolders, syncDrive } from "./drive.server"
 export async function library(
@@ -8,18 +8,19 @@ export async function library(
 ): Promise<Library> {
   const [media, sets, posts, sources, membership] = await Promise.all([
     rows<Media>(
-      "SELECT m.*, (SELECT COUNT(*) FROM post p WHERE p.media_id=m.id) AS post_count FROM media m WHERE user_id=? ORDER BY uploaded_at DESC",
+      "SELECT m.*, (SELECT COUNT(*) FROM post p WHERE p.media_id=m.id) AS post_count FROM media m WHERE user_id=? AND available=TRUE ORDER BY uploaded_at DESC",
       [user.id]
     ),
     rows<MediaSet>(
-      `SELECT s.*, (SELECT COUNT(*) FROM set_member sm WHERE sm.set_id=s.id) AS media_count, (SELECT sm.media_id FROM set_member sm JOIN media m ON m.id=sm.media_id WHERE sm.set_id=s.id AND m.available=TRUE LIMIT 1) AS cover_id, (SELECT COUNT(*) FROM post p WHERE p.set_id=s.id) AS post_count FROM media_set s WHERE user_id=? ORDER BY created_at DESC`,
+      `SELECT s.*, (SELECT COUNT(*) FROM set_member sm JOIN media m ON m.id=sm.media_id WHERE sm.set_id=s.id AND m.available=TRUE) AS media_count, (SELECT sm.media_id FROM set_member sm JOIN media m ON m.id=sm.media_id WHERE sm.set_id=s.id AND m.available=TRUE LIMIT 1) AS cover_id, (SELECT COUNT(*) FROM post p WHERE p.set_id=s.id) AS post_count FROM media_set s WHERE user_id=? ORDER BY created_at DESC`,
       [user.id]
     ),
-    rows<Post>("SELECT * FROM post WHERE user_id=? ORDER BY created_at DESC", [
-      user.id,
-    ]),
-    rows<Library["workspace"]>(
-      "SELECT folder_id,folder_name,last_synced_at FROM drive_source WHERE user_id=?",
+    rows<Post>(
+      "SELECT p.* FROM post p LEFT JOIN media m ON m.id=p.media_id WHERE p.user_id=? AND (p.set_id IS NOT NULL OR m.available=TRUE) ORDER BY p.created_at DESC",
+      [user.id]
+    ),
+    rows<DriveSource>(
+      "SELECT folder_id,folder_name,last_synced_at FROM drive_folder WHERE user_id=? ORDER BY folder_name",
       [user.id]
     ),
     rows<{ set_id: string; media_id: string }>(
@@ -43,10 +44,14 @@ export async function library(
     })),
     sets,
     posts,
-    workspace: sources[0] ?? {
-      folder_id: null,
-      folder_name: null,
-      last_synced_at: null,
+    workspace: {
+      sources,
+      last_synced_at:
+        sources
+          .map((source) => source.last_synced_at)
+          .filter((date): date is string => Boolean(date))
+          .sort()
+          .at(-1) ?? null,
     },
   }
 }
@@ -78,10 +83,26 @@ export async function mutate(
     })
     if (source.mimeType !== "application/vnd.google-apps.folder")
       throw new Error("Choose a Google Drive folder.")
-    await pool.execute(
-      "INSERT INTO drive_source (user_id,folder_id,folder_name) VALUES (?,?,?) ON DUPLICATE KEY UPDATE folder_id=VALUES(folder_id),folder_name=VALUES(folder_name),last_synced_at=NULL",
-      [userId, source.id, source.name]
-    )
+    await editSources(userId, async (connection) => {
+      await connection.execute(
+        "INSERT INTO drive_folder (user_id,folder_id,folder_name) VALUES (?,?,?) ON DUPLICATE KEY UPDATE folder_name=VALUES(folder_name)",
+        [userId, source.id, source.name]
+      )
+    })
+    return { ok: true }
+  }
+  if (action === "remove-source") {
+    const value = folder.parse(input)
+    await editSources(userId, async (connection) => {
+      await connection.execute(
+        "DELETE FROM drive_folder WHERE user_id=? AND folder_id=?",
+        [userId, value.folderId]
+      )
+      await connection.execute(
+        "UPDATE media m SET available=EXISTS(SELECT 1 FROM media_source s WHERE s.media_id=m.id AND s.user_id=m.user_id) WHERE m.user_id=?",
+        [userId]
+      )
+    })
     return { ok: true }
   }
   if (action === "create-set") {
@@ -171,4 +192,31 @@ export async function mutate(
     return { ok: true }
   }
   throw new Response("Unknown action.", { status: 404 })
+}
+
+// Source edits share the sync lock, so an in-flight scan cannot restore an unlinked folder.
+async function editSources(
+  userId: string,
+  edit: (connection: import("mysql2/promise").PoolConnection) => Promise<void>
+) {
+  const connection = await pool.getConnection()
+  try {
+    const [lock] = await connection.query<any[]>(
+      "SELECT GET_LOCK(?, 0) AS acquired",
+      [`drive:${userId}`]
+    )
+    if (lock[0].acquired !== 1)
+      throw new Error("Drive is syncing. Try again when it finishes.")
+    await connection.beginTransaction()
+    try {
+      await edit(connection)
+      await connection.commit()
+    } catch (error) {
+      await connection.rollback()
+      throw error
+    }
+  } finally {
+    await connection.query("SELECT RELEASE_LOCK(?)", [`drive:${userId}`])
+    connection.release()
+  }
 }

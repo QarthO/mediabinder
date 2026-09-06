@@ -1,12 +1,9 @@
 import { useEffect, useMemo, useState } from "react"
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query"
+import { type SortingState } from "@tanstack/react-table"
+import { DataTable, useMediaTable } from "./data-table"
 import {
-  getCoreRowModel,
-  useReactTable,
-  flexRender,
-  type ColumnDef,
-} from "@tanstack/react-table"
-import {
+  Tags,
   Images,
   ImageIcon,
   Film,
@@ -57,6 +54,7 @@ const navItems = [
   { id: "all", label: "All media", icon: Images },
   { id: "images", label: "Images", icon: ImageIcon },
   { id: "videos", label: "Videos", icon: Film },
+  { id: "tags", label: "Tags", icon: Tags },
   { id: "sets", label: "Sets", icon: FolderOpen },
   { id: "posts", label: "Posts", icon: Link2 },
 ] as const
@@ -67,7 +65,9 @@ export function Workspace() {
     [view, setView] = useState<"grid" | "list">("grid"),
     [search, setSearch] = useState(""),
     [tag, setTag] = useState(""),
-    [sort, setSort] = useState("newest"),
+    [sorting, setSorting] = useState<SortingState>([
+      { id: "uploaded_at", desc: true },
+    ]),
     [command, setCommand] = useState(false),
     [newSet, setNewSet] = useState(false),
     [setName, setSetName] = useState(""),
@@ -78,6 +78,7 @@ export function Workspace() {
     [collapsed, setCollapsed] = useState(false),
     [setId, setSetId] = useState<string | null>(null)
   const changePage = (value: string) => {
+    window.scrollTo({ top: 0 })
     setPage(value)
     setSetId(null)
     setSearch("")
@@ -86,7 +87,15 @@ export function Workspace() {
   }
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+      if (
+        (e.metaKey || e.ctrlKey) &&
+        e.key.toLowerCase() === "b" &&
+        !e.repeat
+      ) {
+        e.preventDefault()
+        setCollapsed((value) => !value)
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault()
         setCommand((v) => !v)
       }
@@ -126,37 +135,48 @@ export function Workspace() {
     }
   }, [data?.sets, setId])
   const allTags = useMemo(
-    () => [...new Set(data?.media.flatMap((m) => m.tags) ?? [])].sort(),
-    [data?.media]
+    () =>
+      [
+        ...new Set(
+          [...(data?.media ?? []), ...(data?.sets ?? [])].flatMap((m) => m.tags)
+        ),
+      ].sort(),
+    [data?.media, data?.sets]
   )
-  const items = useMemo(() => {
-    const term = search.toLowerCase()
-    return (data?.media ?? [])
-      .filter(
+  const scopedMedia = useMemo(
+    () =>
+      (data?.media ?? []).filter(
         (m) =>
           (page !== "images" || m.mime_type.startsWith("image/")) &&
           (page !== "videos" || m.mime_type.startsWith("video/")) &&
           (!setId || m.set_ids.includes(setId)) &&
-          (!tag || m.tags.includes(tag)) &&
-          (!term ||
-            [m.display_name, m.raw_name, ...m.tags].some((t) =>
-              t.toLowerCase().includes(term)
-            ))
-      )
-      .sort((a, b) =>
-        sort === "name"
-          ? a.display_name.localeCompare(b.display_name)
-          : sort === "oldest"
-            ? a.uploaded_at.localeCompare(b.uploaded_at)
-            : b.uploaded_at.localeCompare(a.uploaded_at)
-      )
-  }, [data?.media, page, setId, tag, search, sort])
+          (!tag || m.tags.includes(tag))
+      ),
+    [data?.media, page, setId, tag]
+  )
+  const table = useMediaTable(
+    scopedMedia,
+    search,
+    sorting,
+    setSorting,
+    (media) => setSelected({ id: media.id, kind: "media" })
+  )
+  const items = table.getRowModel().rows.map((row) => row.original)
+  const sort =
+    sorting[0]?.id === "uploaded_at"
+      ? sorting[0].desc
+        ? "newest"
+        : "oldest"
+      : sorting[0]?.id === "display_name" && !sorting[0].desc
+        ? "name"
+        : "custom"
   const currentSet = data?.sets.find((s) => s.id === setId)
   const title =
     currentSet?.display_name ??
     navItems.find((n) => n.id === page)?.label ??
     "Settings"
   const openSet = (set: MediaSet) => {
+    window.scrollTo({ top: 0 })
     setPage("all")
     setSetId(set.id)
     setSearch("")
@@ -183,6 +203,7 @@ export function Workspace() {
     all: data.media.length,
     images: data.media.filter((m) => m.mime_type.startsWith("image/")).length,
     videos: data.media.filter((m) => m.mime_type.startsWith("video/")).length,
+    tags: allTags.length,
     sets: data.sets.length,
     posts: data.posts.length,
   }
@@ -220,60 +241,22 @@ export function Workspace() {
             </button>
           ))}
         </nav>
-        <div className="nav-label sets-label">
-          <span>YOUR SETS</span>
-          <button
-            aria-label="Create set"
-            title="Create set"
-            onClick={() => setNewSet(true)}
-          >
-            <Plus size={14} />
-          </button>
-        </div>
-        <nav aria-label="Your sets">
-          {data.sets.slice(0, 12).map((set) => (
-            <button
-              key={set.id}
-              title={set.display_name}
-              className={`nav-item ${setId === set.id ? "active" : ""}`}
-              onClick={() => openSet(set)}
-            >
-              <span className="set-dot" />
-              <span>{set.display_name}</span>
-              <small>{set.media_count}</small>
-            </button>
-          ))}
-          {!data.sets.length && !collapsed && (
-            <button className="empty-sets" onClick={() => setNewSet(true)}>
-              Create your first set <Plus size={12} />
-            </button>
-          )}
-        </nav>
         <div className="sidebar-bottom">
-          <div className="drive-status">
-            <span
-              className={`status-dot ${data.workspace.folder_id ? "connected" : ""}`}
-            />
-            <span>{data.workspace.folder_name ?? "Drive not configured"}</span>
-          </div>
-          <button
-            className={`nav-item ${page === "settings" ? "active" : ""}`}
-            title="Settings"
-            onClick={() => changePage("settings")}
-          >
-            <Settings size={17} />
-            <span>Settings</span>
-          </button>
           <div className="account">
             <div className="avatar">
               {data.user.name.slice(0, 2).toUpperCase()}
             </div>
             <div>
               <strong>{data.user.name}</strong>
-              <small>
-                {data.user.role === "superuser" ? "Superuser" : "Member"}
-              </small>
             </div>
+            <button
+              className={page === "settings" ? "active" : ""}
+              title="Settings"
+              aria-label="Settings"
+              onClick={() => changePage("settings")}
+            >
+              <Settings size={17} />
+            </button>
             <button
               title="Sign out of MediaBinder"
               aria-label="Sign out of MediaBinder"
@@ -367,7 +350,7 @@ export function Workspace() {
                 <>
                   <Button
                     variant="outline"
-                    disabled={sync.isPending || !data.workspace.folder_id}
+                    disabled={sync.isPending || !data.workspace.sources.length}
                     onClick={() => sync.mutate()}
                   >
                     <RefreshCw className={sync.isPending ? "spin" : ""} />
@@ -383,6 +366,68 @@ export function Workspace() {
           </div>
           {page === "settings" ? (
             <DriveSettings workspace={data.workspace} />
+          ) : page === "tags" ? (
+            <div className="tags-page">
+              <div className="filter-search">
+                <Search size={17} />
+                <input
+                  aria-label="Search tags"
+                  placeholder="Find a tag…"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                />
+              </div>
+              <div className="tag-grid">
+                {allTags
+                  .filter((value) => value.includes(search.toLowerCase()))
+                  .map((value) => {
+                    const matchingSets = data.sets.filter((set) =>
+                      set.tags.includes(value)
+                    )
+                    const count = data.media.filter((media) =>
+                      media.tags.includes(value)
+                    ).length
+                    return (
+                      <article className="tag-card" key={value}>
+                        <button
+                          onClick={() => {
+                            changePage("all")
+                            setTag(value)
+                          }}
+                        >
+                          <Tags size={19} />
+                          <strong>{value}</strong>
+                          <span>
+                            {count} media
+                            <ChevronRight size={15} />
+                          </span>
+                        </button>
+                        {matchingSets.length > 0 && (
+                          <div className="tag-sets">
+                            {matchingSets.map((set) => (
+                              <button key={set.id} onClick={() => openSet(set)}>
+                                <FolderOpen size={14} />
+                                {set.display_name}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </article>
+                    )
+                  })}
+              </div>
+              {!allTags.length && (
+                <Empty
+                  icon={Tags}
+                  title="A little easier to find"
+                  description="Add tags when editing media or sets. They’ll appear here."
+                />
+              )}
+              {allTags.length > 0 &&
+                !allTags.some((value) =>
+                  value.includes(search.toLowerCase())
+                ) && <p className="muted">No tags match your search.</p>}
+            </div>
           ) : page === "posts" ? (
             <div className="posts-page">
               {data.posts.length ? (
@@ -525,8 +570,21 @@ export function Workspace() {
                 <select
                   aria-label="Sort media"
                   value={sort}
-                  onChange={(e) => setSort(e.target.value)}
+                  onChange={(e) =>
+                    setSorting([
+                      {
+                        id:
+                          e.target.value === "name"
+                            ? "display_name"
+                            : "uploaded_at",
+                        desc: e.target.value === "newest",
+                      },
+                    ])
+                  }
                 >
+                  {sort === "custom" && (
+                    <option value="custom">Custom sort</option>
+                  )}
                   <option value="newest">Newest first</option>
                   <option value="oldest">Oldest first</option>
                   <option value="name">Name A–Z</option>
@@ -573,7 +631,7 @@ export function Workspace() {
                       ? "No media found"
                       : setId
                         ? "This set is a blank canvas"
-                        : data.workspace.folder_id
+                        : data.workspace.sources.length
                           ? "Your library starts here"
                           : "Connect your Google Drive"
                   }
@@ -582,7 +640,7 @@ export function Workspace() {
                       ? "Try a different name or tag."
                       : setId
                         ? "Open media from your library and add it to this set."
-                        : data.workspace.folder_id
+                        : data.workspace.sources.length
                           ? "Sync your folder to bring your images and videos into MediaBinder."
                           : "Choose a folder in settings, then sync to bring your images and videos together."
                   }
@@ -591,17 +649,17 @@ export function Workspace() {
                       <Button
                         disabled={sync.isPending}
                         onClick={() =>
-                          data.workspace.folder_id
+                          data.workspace.sources.length
                             ? sync.mutate()
                             : changePage("settings")
                         }
                       >
-                        {data.workspace.folder_id ? (
+                        {data.workspace.sources.length ? (
                           <RefreshCw />
                         ) : (
                           <FolderOpen />
                         )}
-                        {data.workspace.folder_id
+                        {data.workspace.sources.length
                           ? "Sync Drive"
                           : "Choose a folder"}
                       </Button>
@@ -675,7 +733,10 @@ export function Workspace() {
                   ))}
                 </div>
               ) : (
-                <MediaTable items={items} onOpen={openMedia} />
+                <DataTable
+                  table={table}
+                  resetKey={`${page}:${setId}:${tag}:${search}`}
+                />
               )}
               <div className="library-footer">
                 <span>
@@ -837,94 +898,6 @@ function Empty({
       <h2>{title}</h2>
       <p>{description}</p>
       {action}
-    </div>
-  )
-}
-function MediaTable({
-  items,
-  onOpen,
-}: {
-  items: Media[]
-  onOpen: (media: Media) => void
-}) {
-  const columns = useMemo<ColumnDef<Media>[]>(
-    () => [
-      {
-        accessorKey: "display_name",
-        header: "Name",
-        cell: ({ row }) => (
-          <button className="table-name" onClick={() => onOpen(row.original)}>
-            <div className="table-thumbnail">
-              <Thumbnail id={row.original.id} name="" />
-            </div>
-            <div>
-              <strong>{row.original.display_name}</strong>
-              <small>{row.original.raw_name}</small>
-            </div>
-          </button>
-        ),
-      },
-      {
-        accessorKey: "tags",
-        header: "Tags",
-        cell: ({ row }) => (
-          <div className="tags">
-            {row.original.tags.slice(0, 2).map((t) => (
-              <span className="tag" key={t}>
-                {t}
-              </span>
-            ))}
-          </div>
-        ),
-      },
-      {
-        accessorKey: "uploaded_at",
-        header: "Uploaded",
-        cell: ({ row }) => dateValue(row.original.uploaded_at),
-      },
-      {
-        accessorKey: "size",
-        header: "Size",
-        cell: ({ row }) => bytes(row.original.size),
-      },
-      { accessorKey: "post_count", header: "Posts" },
-    ],
-    [onOpen]
-  )
-  const table = useReactTable({
-    data: items,
-    columns,
-    getCoreRowModel: getCoreRowModel(),
-  })
-  return (
-    <div className="table-scroll">
-      <table>
-        <thead>
-          {table.getHeaderGroups().map((group) => (
-            <tr key={group.id}>
-              {group.headers.map((header) => (
-                <th key={header.id}>
-                  {flexRender(
-                    header.column.columnDef.header,
-                    header.getContext()
-                  )}
-                </th>
-              ))}
-            </tr>
-          ))}
-        </thead>
-        <tbody>
-          {table.getRowModel().rows.map((row) => (
-            <tr key={row.id}>
-              {row.getVisibleCells().map((cell) => (
-                <td key={cell.id}>
-                  {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                </td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
     </div>
   )
 }
