@@ -1,13 +1,7 @@
 import { Effect, Option, Schema } from "effect"
-
-export const MAX_PREVIEW_BYTES = 8 * 1024 * 1024
-const PreviewType = Schema.Literals([
-  "image/jpeg",
-  "image/png",
-  "image/webp",
-  "image/gif",
-  "image/avif",
-])
+import { MAX_PREVIEW_BYTES, PREVIEW_TYPES } from "@/lib/media-preview-options"
+export { MAX_PREVIEW_BYTES } from "@/lib/media-preview-options"
+const PreviewType = Schema.Literals(PREVIEW_TYPES)
 export const isPreviewType = (value: string) =>
   Option.isSome(Schema.decodeUnknownOption(PreviewType)(value))
 

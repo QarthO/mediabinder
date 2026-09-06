@@ -19,6 +19,20 @@ const imageResponse = () => new Response(new Uint8Array([1, 2, 3]), {
   headers: { "content-type": "image/jpeg" },
 })
 
+test("canceling before the preview runtime loads never starts a download", async (t) => {
+  const client = new QueryClient()
+  t.after(() => client.clear())
+  let calls = 0
+  t.mock.method(globalThis, "fetch", async () => { calls++; return imageResponse() })
+  const options = previewQuery(client, photo("canceled-before-import"))
+  const rejected = assert.rejects(client.fetchQuery(options))
+  await client.cancelQueries({ queryKey: options.queryKey, exact: true })
+  await rejected
+  await import("./media-preview-download")
+  await delay(0)
+  assert.equal(calls, 0)
+})
+
 test("hover and opening share one photo request; preview downloads run at concurrency two", async (t) => {
   const client = new QueryClient()
   t.after(() => client.clear())

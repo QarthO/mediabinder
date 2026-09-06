@@ -69,65 +69,69 @@ export function MetadataPicker({
     return (
       <Popover.Root open={open} onOpenChange={onOpenChange}>
         <Popover.Trigger asChild>{trigger}</Popover.Trigger>
-        <Popover.Portal>
-          <Popover.Content
-            className="tag-popover"
-            sideOffset={8}
-            align="start"
-            collisionPadding={12}
-            aria-label={title}
-          >
-            <h3>{title}</h3>
-            {bulk && <SelectionAlbum media={media} />}
-            {children}
-          </Popover.Content>
-        </Popover.Portal>
+        {open && (
+          <Popover.Portal>
+            <Popover.Content
+              className="tag-popover"
+              sideOffset={8}
+              align="start"
+              collisionPadding={12}
+              aria-label={title}
+            >
+              <h3>{title}</h3>
+              {bulk && <SelectionAlbum media={media} />}
+              {children}
+            </Popover.Content>
+          </Popover.Portal>
+        )}
       </Popover.Root>
     )
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogTrigger asChild>{trigger}</DialogTrigger>
-      <DialogContent
-        ref={drawer}
-        className="mobile-tag-drawer"
-        overlayClassName="mobile-tag-overlay"
-        style={
-          viewport
-            ? { bottom: viewport.bottom, maxHeight: viewport.height * 0.9 }
-            : undefined
-        }
-        onOpenAutoFocus={(event) => {
-          event.preventDefault()
-          drawer.current?.focus()
-        }}
-      >
-        <div className="mobile-tag-heading">
-          <div className="drawer-handle" aria-hidden="true" />
-          <DialogTitle>{title}</DialogTitle>
-          <DialogDescription className="sr-only">
-            Check to add, uncheck to remove, or search to create. A dash means
-            only some selected media have this item.
-          </DialogDescription>
-          {bulk ? (
-            <SelectionAlbum media={media} />
-          ) : (
-            media[0] && (
-              <div className="drawer-media">
-                <div className="drawer-media-thumbnail">
-                  <Thumbnail
-                    id={media[0].id}
-                    name=""
-                    video={media[0].mime_type.startsWith("video/")}
-                    eager
-                  />
+      {open && (
+        <DialogContent
+          ref={drawer}
+          className="mobile-tag-drawer"
+          overlayClassName="mobile-tag-overlay"
+          style={
+            viewport
+              ? { bottom: viewport.bottom, maxHeight: viewport.height * 0.9 }
+              : undefined
+          }
+          onOpenAutoFocus={(event) => {
+            event.preventDefault()
+            drawer.current?.focus()
+          }}
+        >
+          <div className="mobile-tag-heading">
+            <div className="drawer-handle" aria-hidden="true" />
+            <DialogTitle>{title}</DialogTitle>
+            <DialogDescription className="sr-only">
+              Check to add, uncheck to remove, or search to create. A dash means
+              only some selected media have this item.
+            </DialogDescription>
+            {bulk ? (
+              <SelectionAlbum media={media} />
+            ) : (
+              media[0] && (
+                <div className="drawer-media">
+                  <div className="drawer-media-thumbnail">
+                    <Thumbnail
+                      id={media[0].id}
+                      name=""
+                      video={media[0].mime_type.startsWith("video/")}
+                      eager
+                    />
+                  </div>
+                  <strong>{media[0].display_name}</strong>
                 </div>
-                <strong>{media[0].display_name}</strong>
-              </div>
-            )
-          )}
-        </div>
-        {children}
-      </DialogContent>
+              )
+            )}
+          </div>
+          {children}
+        </DialogContent>
+      )}
     </Dialog>
   )
 }

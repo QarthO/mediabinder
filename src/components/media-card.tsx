@@ -1,5 +1,5 @@
 import type { useMediaPreviewIntent } from "@/lib/media-preview"
-import { memo } from "react"
+import { memo, type CSSProperties } from "react"
 import { Film, ImageIcon, Link2 } from "lucide-react"
 import { Thumbnail } from "./thumbnail"
 import { MediaTags } from "./data-table"
@@ -16,6 +16,7 @@ export const MediaCard = memo(function MediaCard({
   onToggleSelection,
   allTags,
   colors,
+  style,
 }: {
   media: Media
   previewIntent: ReturnType<typeof useMediaPreviewIntent>
@@ -26,9 +27,10 @@ export const MediaCard = memo(function MediaCard({
   onToggleSelection: (id: string) => void
   allTags: string[]
   colors: Record<string, string>
+  style?: CSSProperties
 }) {
   return (
-    <div className="media-card" data-selected={selected || undefined}>
+    <div className="media-card" style={style} data-selected={selected || undefined}>
       {!mobile && (
         <input
           className="media-card-checkbox"

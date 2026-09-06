@@ -1,13 +1,14 @@
-import { useEffect, useState } from "react"
+import { useSyncExternalStore } from "react"
+
+const query = "(max-width: 760px)"
+const subscribe = (notify: () => void) => {
+  const media = window.matchMedia(query)
+  media.addEventListener("change", notify)
+  return () => media.removeEventListener("change", notify)
+}
+const getSnapshot = () => window.matchMedia(query).matches
+const getServerSnapshot = () => false
 
 export function useMobile() {
-  const [mobile, setMobile] = useState(false)
-  useEffect(() => {
-    const query = window.matchMedia("(max-width: 760px)")
-    const update = () => setMobile(query.matches)
-    update()
-    query.addEventListener("change", update)
-    return () => query.removeEventListener("change", update)
-  }, [])
-  return mobile
+  return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot)
 }

@@ -1,5 +1,6 @@
 import { useState } from "react"
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query"
+import { useRouter } from "@tanstack/react-router"
 import {
   FolderOpen,
   ArrowUpRight,
@@ -25,6 +26,7 @@ export function DriveSettings({
     [browse, setBrowse] = useState(false),
     [search, setSearch] = useState("")
   const client = useQueryClient()
+  const router = useRouter()
   const folders = useQuery({
     queryKey: ["drive-folders"],
     queryFn: () => action<{ id: string; name: string }[]>("folders"),
@@ -45,6 +47,7 @@ export function DriveSettings({
     mutationFn: (folderId: string) => action("remove-source", { folderId }),
     onSuccess: async () => {
       await client.invalidateQueries({ queryKey: ["library"] })
+      await router.invalidate()
       setRemoving(null)
       toast.success("Folder unlinked. Its metadata is preserved.")
     },
@@ -61,6 +64,15 @@ export function DriveSettings({
   const alreadyLinked = workspace.sources.some(
     (source) => source.folder_id === folderIdFromInput(folder)
   )
+  const reconnect = useMutation({
+    mutationFn: () =>
+      authClient.linkSocial({ provider: "google", callbackURL: "/" }),
+    onSuccess: (result) => {
+      if (result.error) toast.error(result.error.message)
+    },
+    onError: (error) =>
+      toast.error(error.message || "Could not reconnect Google"),
+  })
   return (
     <div className="settings-content">
       <section className="settings-card">
@@ -69,21 +81,8 @@ export function DriveSettings({
             <h2>Google Drive</h2>
             <Button
               variant="outline"
-              onClick={async () => {
-                try {
-                  const result = await authClient.linkSocial({
-                    provider: "google",
-                    callbackURL: "/",
-                  })
-                  if (result.error) throw new Error(result.error.message)
-                } catch (e) {
-                  toast.error(
-                    e instanceof Error
-                      ? e.message
-                      : "Could not reconnect Google"
-                  )
-                }
-              }}
+              disabled={reconnect.isPending}
+              onClick={() => reconnect.mutate()}
             >
               <RefreshCw />
               Reconnect Google

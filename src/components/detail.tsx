@@ -2,6 +2,7 @@ import { MediaTags } from "./data-table"
 import { MediaSets } from "./media-sets"
 import { useContext, useRef, useState } from "react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { useRouter } from "@tanstack/react-router"
 import {
   ArrowUpRight,
   EyeOff,
@@ -116,6 +117,7 @@ export function Detail({
     [confirmDelete, setConfirmDelete] = useState(false)
   const dialogRef = useRef<HTMLDivElement>(null)
   const client = useQueryClient()
+  const router = useRouter()
   const save = useMutation({
     mutationFn: () =>
       action("metadata", {
@@ -171,6 +173,7 @@ export function Detail({
     onSuccess: async () => {
       await client.invalidateQueries({ queryKey: ["library"] })
       onClose()
+      await router.invalidate()
       toast.success("Set deleted")
     },
     onError: (e) => toast.error(e.message),

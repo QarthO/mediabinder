@@ -6,6 +6,8 @@ import {
 } from "@tanstack/react-router"
 import type { QueryClient } from "@tanstack/react-query"
 import { Toaster } from "sonner"
+import geist from "@fontsource-variable/geist/files/geist-latin-wght-normal.woff2?url"
+import mono from "@fontsource-variable/jetbrains-mono/files/jetbrains-mono-latin-wght-normal.woff2?url"
 import css from "../styles.css?url"
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
   {
@@ -17,6 +19,20 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
         { name: "robots", content: "noindex, nofollow" },
       ],
       links: [
+        {
+          rel: "preload",
+          href: geist,
+          as: "font",
+          type: "font/woff2",
+          crossOrigin: "anonymous",
+        },
+        {
+          rel: "preload",
+          href: mono,
+          as: "font",
+          type: "font/woff2",
+          crossOrigin: "anonymous",
+        },
         { rel: "stylesheet", href: css },
         { rel: "icon", href: "/favicon.svg", type: "image/svg+xml" },
       ],

@@ -22,7 +22,9 @@ export function Select({
         data-active={value !== options[0]?.value || undefined}
       >
         {MobileIcon && <MobileIcon className="mobile-filter-icon" size={18} />}
-        <Primitive.Value />
+        <Primitive.Value>
+          {options.find((option) => option.value === value)?.label}
+        </Primitive.Value>
         <Primitive.Icon>
           <ChevronDown size={14} />
         </Primitive.Icon>

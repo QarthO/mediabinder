@@ -138,3 +138,22 @@ Use **All content / Uncataloged / Cataloged** beside the media-type filter. Rena
 Catalog writes and merge transactions share one database lock to prevent edits being lost during consolidation. Google scans happen outside that lock, and failed scans preserve the existing catalog.
 
 Run `scripts/test-shared-catalog.ts` only against a disposable test database. It uses mocked Google responses and retains catalog fixtures to exercise history preservation.
+
+### Checking UI responsiveness
+
+Development starts React Scan automatically (local package, no CDN). Use its
+on-page toolbar or `window.__mediaBinderRenderAudit.reset()` and
+`window.__mediaBinderRenderAudit.snapshot()` around a single interaction in T3
+Preview. The UI commit checklist is in `AGENTS.md`.
+
+Search keeps keystrokes local and applies results after a 150 ms pause (Enter
+applies immediately). Lists and grids mount only a viewport of cards/rows.
+Compact tags and sets show two rows with a +N overflow; closed pickers do not
+mount their option trees. Native thumbnail completion does not update React
+state. Google requests remain behind the existing authenticated, bounded caches.
+
+Always also check a production build: React Scan is excluded there. User Timing
+marks `mediabinder-hydration-start` and `mediabinder-interactive` distinguish
+JavaScript hydration from first paint and from thumbnail/network completion.
+Validate cold loads, complete filter labels in server HTML, and immediate typing
+and filtering; a fast first paint alone is insufficient.

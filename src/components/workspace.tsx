@@ -1,11 +1,11 @@
+import { LibraryFilters } from "./library-filters"
+import { MediaGrid } from "./media-grid"
 import { useMediaPreviewIntent } from "@/lib/media-preview"
-import { MediaCard } from "./media-card"
+import { MediaSearch } from "./media-search"
 import { flushSync } from "react-dom"
 import { useMobile } from "@/hooks/use-mobile"
 import { SidebarTags } from "./sidebar-tags"
 import { FolderSelector } from "./folder-selector"
-import { SearchSelect } from "./ui/search-select"
-import { Select } from "./ui/select"
 import { tagStyle } from "@/lib/tag-colors"
 import {
   Outlet,
@@ -14,15 +14,15 @@ import {
   useSearch,
   useRouteContext,
 } from "@tanstack/react-router"
-import { useCallback, useEffect, useMemo, useState, useRef } from "react"
-import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query"
+import { lazy, Suspense, useCallback, useMemo, useState, useRef } from "react"
+import {
+  useSuspenseQuery,
+  useQueryClient,
+  useMutation,
+} from "@tanstack/react-query"
 import { type SortingState, type OnChangeFn } from "@tanstack/react-table"
 import { DataTable, MediaSelectionActions, useMediaTable } from "./data-table"
 import {
-  ArrowUpDown,
-  Eye,
-  EyeOff,
-  Inbox,
   Images,
   ImageIcon,
   Film,
@@ -31,15 +31,12 @@ import {
   Settings,
   RefreshCw,
   Plus,
-  LayoutGrid,
-  List,
   ChevronRight,
   PanelLeftClose,
   PanelLeft,
   SlidersHorizontal,
   X,
   LogOut,
-  LoaderCircle,
 } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "./ui/button"
@@ -61,8 +58,14 @@ import {
 } from "./ui/command"
 import { Brand } from "./brand"
 import { Thumbnail, MediaCensorContext } from "./thumbnail"
-import { Detail } from "./detail"
-import { DriveSettings } from "./drive-settings"
+const Detail = lazy(() =>
+  import("./detail").then((module) => ({ default: module.Detail }))
+)
+const DriveSettings = lazy(() =>
+  import("./drive-settings").then((module) => ({
+    default: module.DriveSettings,
+  }))
+)
 import { libraryQuery, action } from "@/lib/api"
 import { authClient } from "@/lib/auth-client"
 import {
@@ -78,26 +81,25 @@ export function Workspace() {
   const { preferences: initialPreferences } = useRouteContext({ from: "/_app" })
   const [preferences, setPreferences] =
     useState<WorkspacePreferences>(initialPreferences)
-  useEffect(() => {
+  const savePreferences = (next: WorkspacePreferences) => {
     document.cookie = workspacePreferencesCookie(
-      preferences,
+      next,
       window.location.protocol === "https:"
     )
-  }, [preferences])
+    setPreferences(next)
+  }
   const setSorting: OnChangeFn<SortingState> = (update) =>
-    setPreferences((current) => ({
-      ...current,
-      sorting: typeof update === "function" ? update(current.sorting) : update,
-    }))
+    savePreferences({
+      ...preferences,
+      sorting:
+        typeof update === "function" ? update(preferences.sorting) : update,
+    })
   return (
     <MediaCensorContext value={preferences.censored}>
       <WorkspaceContent
         mediaCensored={preferences.censored}
         onToggleCensor={() =>
-          setPreferences((current) => ({
-            ...current,
-            censored: !current.censored,
-          }))
+          savePreferences({ ...preferences, censored: !preferences.censored })
         }
         sorting={preferences.sorting}
         setSorting={setSorting}
@@ -125,7 +127,7 @@ function WorkspaceContent({
   const [mobileSearch, setMobileSearch] = useState(false)
   const searchInput = useRef<HTMLInputElement>(null)
   const sidebarButton = useRef<HTMLButtonElement>(null)
-  const query = useQuery(libraryQuery),
+  const query = useSuspenseQuery(libraryQuery),
     client = useQueryClient()
   const navigate = useNavigate()
   const pathname = useRouterState({
@@ -138,6 +140,7 @@ function WorkspaceContent({
   const page = setId || pathname === "/media" ? "all" : pathname.slice(1)
   const [view, setView] = useState<"grid" | "list">(initialView),
     [search, setSearch] = useState(""),
+    [searchVersion, setSearchVersion] = useState(0),
     [selectedTags, setSelectedTags] = useState<string[]>([]),
     [mediaType, setMediaType] = useState("all"),
     [catalogStatus, setCatalogStatus] = useState("all"),
@@ -150,24 +153,38 @@ function WorkspaceContent({
       kind: "media" | "set"
     } | null>(null),
     [collapsed, setCollapsed] = useState(false)
+  const clearSearch = useCallback(() => {
+    setSearch("")
+    setSearchVersion((value) => value + 1)
+  }, [])
+  const changeView = useCallback((view: "grid" | "list") => {
+    setView(view)
+    document.cookie = `mediabinder_view=${view}; Path=/; Max-Age=31536000; SameSite=Lax${window.location.protocol === "https:" ? "; Secure" : ""}`
+  }, [])
+  const closeSearch = useCallback(() => setMobileSearch(false), [])
   const selectionMode = (mobile || view === "grid") && selectionEnabled
   const sidebarCollapsed = !mobile && collapsed
   const toggleSidebar = () => {
     if (mobile) setMobileSidebar((value) => !value)
     else setCollapsed((value) => !value)
   }
-  const changePage = (value: string) => {
-    setMobileSidebar(false)
-    window.scrollTo({ top: 0 })
-    void navigate({
-      to: value === "all" ? "/media" : (`/${value}` as "/media"),
-      search: { folders: selectedFolders },
-    })
-    setSearch("")
-    setSelectedTags([])
-    setCommand(false)
-  }
-  useEffect(() => {
+  const changePage = useCallback(
+    (value: string) => {
+      setMobileSidebar(false)
+      window.scrollTo({ top: 0 })
+      void navigate({
+        to: value === "all" ? "/media" : (`/${value}` as "/media"),
+        search: { folders: selectedFolders },
+      })
+      clearSearch()
+      setSelectedTags([])
+      setCommand(false)
+    },
+    [navigate, selectedFolders, clearSearch]
+  )
+  const keyboardShortcuts = useCallback((node: HTMLDivElement | null) => {
+    if (!node) return
+    performance.mark("mediabinder-interactive")
     const handler = (e: KeyboardEvent) => {
       if (
         (e.metaKey || e.ctrlKey) &&
@@ -200,11 +217,13 @@ function WorkspaceContent({
       if (!automatic || !e.message.startsWith("A sync")) toast.error(e.message)
     },
   })
-  useEffect(() => {
-    setSearch("")
+  const [previousPath, setPreviousPath] = useState(pathname)
+  if (previousPath !== pathname) {
+    setPreviousPath(pathname)
+    clearSearch()
     setSetFilter("")
     setSelected(null)
-  }, [pathname])
+  }
   const createSet = useMutation({
     mutationFn: () =>
       action<{ id: string }>("create-set", { displayName: setName }),
@@ -218,11 +237,6 @@ function WorkspaceContent({
     onError: (e) => toast.error(e.message),
   })
   const data = query.data
-  useEffect(() => {
-    if (data && setId && !data.sets.some((set) => set.id === setId)) {
-      void navigate({ to: "/sets", search: { folders: selectedFolders } })
-    }
-  }, [data?.sets, setId])
   const catalogMedia = useMemo(
     () =>
       (data?.media ?? []).filter(
@@ -232,18 +246,6 @@ function WorkspaceContent({
       ),
     [data?.media, selectedFolders]
   )
-  useEffect(() => {
-    if (!data || !selectedFolders.length) return
-    const folders = selectedFolders.filter((id) =>
-      data.workspace.sources.some((source) => source.folder_id === id)
-    )
-    if (folders.length !== selectedFolders.length)
-      void navigate({
-        to: pathname as "/media",
-        search: { folders },
-        replace: true,
-      })
-  }, [data?.workspace.sources, selectedFolders, pathname, navigate])
   const allTags = useMemo(
     () =>
       [
@@ -326,129 +328,137 @@ function WorkspaceContent({
       params: { setId: set.id },
       search: { folders: [] },
     })
-    setSearch("")
+    clearSearch()
     setSelectedTags([])
     setMediaType("all")
     setCommand(false)
   }
-  if (!data)
-    return (
-      <div className="loading-screen">
-        <Brand />
-        {query.isError ? (
-          <>
-            <p role="alert">{query.error.message}</p>
-            <Button onClick={() => query.refetch()}>Retry</Button>
-          </>
-        ) : (
-          <LoaderCircle className="spin" aria-label="Loading library" />
-        )}
-      </div>
-    )
   const counts: Record<string, number> = {
     all: catalogMedia.length,
     sets: data.sets.length,
   }
-  const sidebar = (
-    <aside className="sidebar">
-      <div className="sidebar-brand">
-        <Brand compact={sidebarCollapsed} />
-      </div>
-      <button
-        className="search-trigger"
-        onClick={() => {
-          setMobileSidebar(false)
-          setCommand(true)
-        }}
-        aria-label="Search and commands"
-      >
-        <Search size={15} />
-        {!sidebarCollapsed && (
-          <>
-            <span>Search anything</span>
-            <kbd>⌘ K</kbd>
-          </>
-        )}
-      </button>
-      <FolderSelector
-        sources={data.workspace.sources}
-        selected={selectedFolders}
-        onChange={(folders) =>
-          void navigate({ to: pathname as "/media", search: { folders } })
-        }
-        compact={sidebarCollapsed}
-      />
-      <div className="nav-label">LIBRARY</div>
-      <nav aria-label="Library">
-        {navItems.map(({ id, label, icon: Icon }) => (
-          <button
-            key={id}
-            title={label}
-            className={`nav-item ${page === id && !setId ? "active" : ""}`}
-            onClick={() => changePage(id)}
-          >
-            <Icon size={17} />
-            <span>{label}</span>
-            <small>{counts[id]}</small>
-          </button>
-        ))}
-      </nav>
-      <SidebarTags
-        tags={allTags}
-        selected={selectedTags}
-        colors={data.tag_colors}
-        counts={tagCounts}
-        compact={sidebarCollapsed}
-        onExpand={() => setCollapsed(false)}
-        onChange={(tags) => {
-          setSelectedTags(tags)
-          if (page !== "all") {
-            setSearch("")
-            setMediaType("all")
-            void navigate({
-              to: "/media",
-              search: { folders: selectedFolders },
-            })
-          }
-        }}
-        onColor={(name, color) => {
-          void action("tag-color", { name, color })
-            .then(() => client.invalidateQueries({ queryKey: ["library"] }))
-            .catch((error) => toast.error(error.message))
-        }}
-      />
-      <div className="sidebar-bottom">
-        <div className="account">
-          <div className="avatar">
-            {data.user.name.slice(0, 2).toUpperCase()}
-          </div>
-          <div>
-            <strong>{data.user.name}</strong>
-          </div>
-          <button
-            className={page === "settings" ? "active" : ""}
-            title="Settings"
-            aria-label="Settings"
-            onClick={() => changePage("settings")}
-          >
-            <Settings size={17} />
-          </button>
-          <button
-            title="Sign out of MediaBinder"
-            aria-label="Sign out of MediaBinder"
-            onClick={async () => {
-              await authClient.signOut()
-              window.location.assign("/")
-            }}
-          >
-            <LogOut size={15} />
-          </button>
+  const sidebar = useMemo(
+    () => (
+      <aside className="sidebar">
+        <div className="sidebar-brand">
+          <Brand compact={sidebarCollapsed} />
         </div>
-      </div>
-    </aside>
+        <button
+          className="search-trigger"
+          onClick={() => {
+            setMobileSidebar(false)
+            setCommand(true)
+          }}
+          aria-label="Search and commands"
+        >
+          <Search size={15} />
+          {!sidebarCollapsed && (
+            <>
+              <span>Search anything</span>
+              <kbd>⌘ K</kbd>
+            </>
+          )}
+        </button>
+        <FolderSelector
+          sources={data.workspace.sources}
+          selected={selectedFolders}
+          onChange={(folders) =>
+            void navigate({ to: pathname as "/media", search: { folders } })
+          }
+          compact={sidebarCollapsed}
+        />
+        <div className="nav-label">LIBRARY</div>
+        <nav aria-label="Library">
+          {navItems.map(({ id, label, icon: Icon }) => (
+            <button
+              key={id}
+              title={label}
+              className={`nav-item ${page === id && !setId ? "active" : ""}`}
+              onClick={() => changePage(id)}
+            >
+              <Icon size={17} />
+              <span>{label}</span>
+              <small>{counts[id]}</small>
+            </button>
+          ))}
+        </nav>
+        <SidebarTags
+          tags={allTags}
+          selected={selectedTags}
+          colors={data.tag_colors}
+          counts={tagCounts}
+          compact={sidebarCollapsed}
+          onExpand={() => setCollapsed(false)}
+          onChange={(tags) => {
+            setSelectedTags(tags)
+            if (page !== "all") {
+              clearSearch()
+              setMediaType("all")
+              void navigate({
+                to: "/media",
+                search: { folders: selectedFolders },
+              })
+            }
+          }}
+          onColor={(name, color) => {
+            void action("tag-color", { name, color })
+              .then(() => client.invalidateQueries({ queryKey: ["library"] }))
+              .catch((error) => toast.error(error.message))
+          }}
+        />
+        <div className="sidebar-bottom">
+          <div className="account">
+            <div className="avatar">
+              {data.user.name.slice(0, 2).toUpperCase()}
+            </div>
+            <div>
+              <strong>{data.user.name}</strong>
+            </div>
+            <button
+              className={page === "settings" ? "active" : ""}
+              title="Settings"
+              aria-label="Settings"
+              onClick={() => changePage("settings")}
+            >
+              <Settings size={17} />
+            </button>
+            <button
+              title="Sign out of MediaBinder"
+              aria-label="Sign out of MediaBinder"
+              onClick={async () => {
+                await authClient.signOut()
+                window.location.assign("/")
+              }}
+            >
+              <LogOut size={15} />
+            </button>
+          </div>
+        </div>
+      </aside>
+    ),
+    [
+      sidebarCollapsed,
+      selectedFolders,
+      pathname,
+      navigate,
+      data.workspace.sources,
+      data.user,
+      data.sets.length,
+      data.tag_colors,
+      catalogMedia.length,
+      page,
+      setId,
+      allTags,
+      selectedTags,
+      tagCounts,
+      changePage,
+      clearSearch,
+      client,
+    ]
   )
   return (
     <div
+      ref={keyboardShortcuts}
       className={`app ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${!sidebarCollapsed ? "sidebar-filter-open" : ""}`}
     >
       {mobile ? (
@@ -490,9 +500,9 @@ function WorkspaceContent({
           <span className="muted">Library</span>
           <ChevronRight size={13} />
           <span className="breadcrumb">{title}</span>
-          {page === "all" && (mobile || view === "grid") && (
+          {page === "all" && (
             <Button
-              className="header-select"
+              className={`header-select ${view === "list" ? "mobile-only-selection" : ""}`}
               variant="outline"
               aria-pressed={selectionMode}
               onClick={() => {
@@ -529,7 +539,11 @@ function WorkspaceContent({
           className={`workspace-content ${page === "all" ? "media-workspace" : ""}`}
         >
           {page === "settings" ? (
-            <DriveSettings workspace={data.workspace} />
+            <Suspense
+              fallback={<div className="empty-state">Loading settings…</div>}
+            >
+              <DriveSettings workspace={data.workspace} />
+            </Suspense>
           ) : page === "sets" ? (
             <>
               {data.sets.length ? (
@@ -606,125 +620,29 @@ function WorkspaceContent({
                 >
                   <Search size={18} />
                 </button>
-                <div className="filter-search">
-                  <Search size={15} />
-                  <input
-                    ref={searchInput}
-                    onKeyDown={(event) => {
-                      if (event.key === "Escape") {
-                        setMobileSearch(false)
-                        setSearch("")
-                      }
-                    }}
-                    aria-label="Search media"
-                    placeholder="Search media…"
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                  />
-                  {(search || (mobile && mobileSearch)) && (
-                    <button
-                      aria-label={
-                        mobile ? "Close media search" : "Clear search"
-                      }
-                      onClick={() => {
-                        setSearch("")
-                        setMobileSearch(false)
-                      }}
-                    >
-                      <X size={13} />
-                    </button>
-                  )}
-                </div>
-                <Select
-                  label="Filter by media type"
-                  mobileIcon={Images}
-                  value={mediaType}
-                  onChange={setMediaType}
-                  options={[
-                    { value: "all", label: "All types" },
-                    { value: "images", label: "Images" },
-                    { value: "videos", label: "Videos" },
-                  ]}
+                <MediaSearch
+                  key={searchVersion}
+                  inputRef={searchInput}
+                  mobile={mobile}
+                  expanded={mobileSearch}
+                  onSearch={setSearch}
+                  onClose={closeSearch}
                 />
-                <Select
-                  label="Filter by catalog status"
-                  mobileIcon={Inbox}
-                  value={catalogStatus}
-                  onChange={setCatalogStatus}
-                  options={[
-                    { value: "all", label: "All content" },
-                    { value: "uncataloged", label: "Uncataloged" },
-                    { value: "cataloged", label: "Cataloged" },
-                  ]}
+                <LibraryFilters
+                  mediaType={mediaType}
+                  setMediaType={setMediaType}
+                  catalogStatus={catalogStatus}
+                  setCatalogStatus={setCatalogStatus}
+                  setFilter={setFilter}
+                  setSetFilter={setSetFilter}
+                  sets={data.sets}
+                  sort={sort}
+                  setSorting={setSorting}
+                  mediaCensored={mediaCensored}
+                  onToggleCensor={onToggleCensor}
+                  view={view}
+                  onView={changeView}
                 />
-                <SearchSelect
-                  label="Filter by set"
-                  mobileIcon={FolderOpen}
-                  value={setFilter || "all"}
-                  onChange={(value) =>
-                    setSetFilter(value === "all" ? "" : value)
-                  }
-                  options={[
-                    { value: "all", label: "All sets" },
-                    ...data.sets.map((set) => ({
-                      value: set.id,
-                      label: set.display_name,
-                    })),
-                  ]}
-                />
-                <div className="toolbar-spacer" />
-                <Select
-                  label="Sort media"
-                  mobileIcon={ArrowUpDown}
-                  value={sort}
-                  onChange={(value) =>
-                    setSorting([
-                      {
-                        id: value === "name" ? "display_name" : "uploaded_at",
-                        desc: value === "newest",
-                      },
-                    ])
-                  }
-                  options={[
-                    { value: "newest", label: "Newest first" },
-                    { value: "oldest", label: "Oldest first" },
-                    { value: "name", label: "Name A–Z" },
-                    ...(sort === "custom"
-                      ? [{ value: "custom", label: "Custom sort" }]
-                      : []),
-                  ]}
-                />
-                <Button
-                  className="thumbnail-blur-toggle"
-                  variant="outline"
-                  size="icon"
-                  aria-label="Censor media"
-                  aria-pressed={mediaCensored}
-                  title={mediaCensored ? "Uncensor media" : "Censor media"}
-                  onClick={onToggleCensor}
-                >
-                  {mediaCensored ? <EyeOff /> : <Eye />}
-                </Button>
-                <div className="view-switch">
-                  {(["grid", "list"] as const).map((v) => (
-                    <button
-                      key={v}
-                      aria-label={`${v === "grid" ? "Grid" : "List"} view`}
-                      aria-pressed={view === v}
-                      className={view === v ? "selected" : ""}
-                      onClick={() => {
-                        setView(v)
-                        document.cookie = `mediabinder_view=${v}; Path=/; Max-Age=31536000; SameSite=Lax${window.location.protocol === "https:" ? "; Secure" : ""}`
-                      }}
-                    >
-                      {v === "grid" ? (
-                        <LayoutGrid size={16} />
-                      ) : (
-                        <List size={17} />
-                      )}
-                    </button>
-                  ))}
-                </div>
               </div>
               {selectedTags.length > 0 && (
                 <div className="active-filter">
@@ -814,22 +732,18 @@ function WorkspaceContent({
                     }
                   />
                 ) : view === "grid" ? (
-                  <div className="media-grid">
-                    {items.map((media) => (
-                      <MediaCard
-                        key={media.id}
-                        media={media}
-                        previewIntent={previewIntent}
-                        mobile={mobile}
-                        selected={table.getRow(media.id).getIsSelected()}
-                        selectionMode={selectionMode}
-                        onOpen={openMedia}
-                        onToggleSelection={toggleSelection}
-                        allTags={allTags}
-                        colors={data.tag_colors}
-                      />
-                    ))}
-                  </div>
+                  <MediaGrid
+                    key={`${page}:${setId}:${selectedTags.join(",")}:${setFilter}:${mediaType}:${catalogStatus}:${search}`}
+                    items={items}
+                    selection={table.getState().rowSelection}
+                    previewIntent={previewIntent}
+                    mobile={mobile}
+                    selectionMode={selectionMode}
+                    onOpen={openMedia}
+                    onToggleSelection={toggleSelection}
+                    allTags={allTags}
+                    colors={data.tag_colors}
+                  />
                 ) : (
                   <DataTable
                     table={table}
@@ -842,148 +756,154 @@ function WorkspaceContent({
           )}
         </div>
       </main>
-      <Dialog open={newSet} onOpenChange={setNewSet}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Create a set</DialogTitle>
-            <DialogDescription>
-              A home for related images and videos.
-            </DialogDescription>
-          </DialogHeader>
-          <form
-            onSubmit={(e) => {
-              e.preventDefault()
-              createSet.mutate()
-            }}
-          >
-            <label className="field">
-              Set name
-              <Input
-                autoFocus
-                required
-                maxLength={255}
-                placeholder="e.g. Summer in the city"
-                value={setName}
-                onChange={(e) => setSetName(e.target.value)}
-              />
-            </label>
-            <div className="dialog-footer">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setNewSet(false)}
-              >
-                Cancel
-              </Button>
-              <Button
-                disabled={createSet.isPending || !setName.trim()}
-                type="submit"
-              >
-                {createSet.isPending ? "Creating…" : "Create set"}
-              </Button>
-            </div>
-          </form>
-        </DialogContent>
-      </Dialog>
-      <Dialog open={command} onOpenChange={setCommand}>
-        <DialogContent className="command-dialog">
-          <DialogTitle className="sr-only">Search and commands</DialogTitle>
-          <DialogDescription className="sr-only">
-            Navigate your library or find media and sets.
-          </DialogDescription>
-          <Command>
-            <div className="command-search">
-              <Search size={18} />
-              <CommandInput
-                placeholder="Search your library or jump to…"
-                autoFocus
-              />
-            </div>
-            <CommandList>
-              <CommandEmpty>No results found.</CommandEmpty>
-              <CommandGroup heading="Navigate">
-                {navItems.map(({ id, label, icon: Icon }) => (
-                  <CommandItem key={id} onSelect={() => changePage(id)}>
-                    <Icon size={16} />
-                    {label}
-                    <ChevronRight size={14} />
-                  </CommandItem>
-                ))}
-                <CommandItem onSelect={() => changePage("settings")}>
-                  <Settings size={16} />
-                  Settings
-                </CommandItem>
-                <CommandItem
-                  onSelect={() => {
-                    setCommand(false)
-                    setNewSet(true)
-                  }}
+      {newSet && (
+        <Dialog open={newSet} onOpenChange={setNewSet}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Create a set</DialogTitle>
+              <DialogDescription>
+                A home for related images and videos.
+              </DialogDescription>
+            </DialogHeader>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault()
+                createSet.mutate()
+              }}
+            >
+              <label className="field">
+                Set name
+                <Input
+                  autoFocus
+                  required
+                  maxLength={255}
+                  placeholder="e.g. Summer in the city"
+                  value={setName}
+                  onChange={(e) => setSetName(e.target.value)}
+                />
+              </label>
+              <div className="dialog-footer">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setNewSet(false)}
                 >
-                  <Plus size={16} />
-                  Create a set
-                </CommandItem>
-              </CommandGroup>
-              <CommandGroup heading="Media">
-                {catalogMedia.map((m) => (
+                  Cancel
+                </Button>
+                <Button
+                  disabled={createSet.isPending || !setName.trim()}
+                  type="submit"
+                >
+                  {createSet.isPending ? "Creating…" : "Create set"}
+                </Button>
+              </div>
+            </form>
+          </DialogContent>
+        </Dialog>
+      )}
+      {command && (
+        <Dialog open={command} onOpenChange={setCommand}>
+          <DialogContent className="command-dialog">
+            <DialogTitle className="sr-only">Search and commands</DialogTitle>
+            <DialogDescription className="sr-only">
+              Navigate your library or find media and sets.
+            </DialogDescription>
+            <Command>
+              <div className="command-search">
+                <Search size={18} />
+                <CommandInput
+                  placeholder="Search your library or jump to…"
+                  autoFocus
+                />
+              </div>
+              <CommandList>
+                <CommandEmpty>No results found.</CommandEmpty>
+                <CommandGroup heading="Navigate">
+                  {navItems.map(({ id, label, icon: Icon }) => (
+                    <CommandItem key={id} onSelect={() => changePage(id)}>
+                      <Icon size={16} />
+                      {label}
+                      <ChevronRight size={14} />
+                    </CommandItem>
+                  ))}
+                  <CommandItem onSelect={() => changePage("settings")}>
+                    <Settings size={16} />
+                    Settings
+                  </CommandItem>
                   <CommandItem
-                    key={m.id}
-                    value={`media ${m.display_name} ${m.raw_name} ${m.tags.join(" ")} ${m.id}`}
                     onSelect={() => {
                       setCommand(false)
-                      openMedia(m)
+                      setNewSet(true)
                     }}
                   >
-                    {m.mime_type.startsWith("video/") ? (
-                      <Film size={16} />
-                    ) : (
-                      <ImageIcon size={16} />
-                    )}
-                    <span>{m.display_name}</span>
+                    <Plus size={16} />
+                    Create a set
                   </CommandItem>
-                ))}
-              </CommandGroup>
-              <CommandGroup heading="Sets">
-                {data.sets.map((s) => (
-                  <CommandItem key={s.id} onSelect={() => openSet(s)}>
-                    <FolderOpen size={16} />
-                    {s.display_name}
-                  </CommandItem>
-                ))}
-              </CommandGroup>
-            </CommandList>
-            <div className="command-footer">
-              <span>↑ ↓ to navigate</span>
-              <span>↵ to open</span>
-              <span>esc to close</span>
-            </div>
-          </Command>
-        </DialogContent>
-      </Dialog>
+                </CommandGroup>
+                <CommandGroup heading="Media">
+                  {catalogMedia.map((m) => (
+                    <CommandItem
+                      key={m.id}
+                      value={`media ${m.display_name} ${m.raw_name} ${m.tags.join(" ")} ${m.id}`}
+                      onSelect={() => {
+                        setCommand(false)
+                        openMedia(m)
+                      }}
+                    >
+                      {m.mime_type.startsWith("video/") ? (
+                        <Film size={16} />
+                      ) : (
+                        <ImageIcon size={16} />
+                      )}
+                      <span>{m.display_name}</span>
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+                <CommandGroup heading="Sets">
+                  {data.sets.map((s) => (
+                    <CommandItem key={s.id} onSelect={() => openSet(s)}>
+                      <FolderOpen size={16} />
+                      {s.display_name}
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              </CommandList>
+              <div className="command-footer">
+                <span>↑ ↓ to navigate</span>
+                <span>↵ to open</span>
+                <span>esc to close</span>
+              </div>
+            </Command>
+          </DialogContent>
+        </Dialog>
+      )}
       <Outlet />
       {selected && (
-        <Detail
-          key={`${selected.kind}-${selected.id}`}
-          selected={selected}
-          data={data}
-          navigation={
-            selected.kind === "media" &&
-            items.some((item) => item.id === selected.id)
-              ? {
-                  index: items.findIndex((item) => item.id === selected.id),
-                  count: items.length,
-                  onStep: (direction) => {
-                    const next =
-                      items[
-                        items.findIndex((item) => item.id === selected.id) +
-                          direction
-                      ]
-                    if (next) openMedia(next)
-                  },
-                }
-              : undefined
-          }
-          onClose={() => setSelected(null)}
-        />
+        <Suspense fallback={null}>
+          <Detail
+            key={`${selected.kind}-${selected.id}`}
+            selected={selected}
+            data={data}
+            navigation={
+              selected.kind === "media" &&
+              items.some((item) => item.id === selected.id)
+                ? {
+                    index: items.findIndex((item) => item.id === selected.id),
+                    count: items.length,
+                    onStep: (direction) => {
+                      const next =
+                        items[
+                          items.findIndex((item) => item.id === selected.id) +
+                            direction
+                        ]
+                      if (next) openMedia(next)
+                    },
+                  }
+                : undefined
+            }
+            onClose={() => setSelected(null)}
+          />
+        </Suspense>
       )}
     </div>
   )

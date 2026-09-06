@@ -5,44 +5,30 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query"
-import { Effect, Semaphore } from "effect"
-import {
-  isPreviewType,
-  MAX_PREVIEW_BYTES,
-  readMediaPreview,
-} from "@/effect/media-preview"
+import { MAX_PREVIEW_BYTES, PREVIEW_TYPES } from "./media-preview-options"
 import type { Media } from "./types"
 
 export const MAX_CACHED_PREVIEWS = 6
 const PREVIEW_KEY = "media-preview"
-const semaphores = new WeakMap<QueryClient, Semaphore.Semaphore>()
 const previewKey = (media: Media) =>
   [PREVIEW_KEY, media.id, media.drive_id, media.sha256, media.uploaded_at] as const
 
 export function canPreview(media: Media) {
   return (
     media.available &&
-    isPreviewType(media.mime_type) &&
+    (PREVIEW_TYPES as readonly string[]).includes(media.mime_type) &&
     media.size > 0 &&
     media.size <= MAX_PREVIEW_BYTES
   )
 }
 
 export function previewQuery(client: QueryClient, media: Media) {
-  let semaphore = semaphores.get(client)
-  if (!semaphore) {
-    semaphore = Effect.runSync(Semaphore.make(2))
-    semaphores.set(client, semaphore)
-  }
   return queryOptions({
     queryKey: previewKey(media),
     queryFn: ({ signal }) => {
       makePreviewRoom(client, media)
-      return Effect.runPromise(
-        readMediaPreview(`/api/media/${encodeURIComponent(media.id)}`).pipe(
-          Semaphore.withPermits(semaphore, 1)
-        ),
-        { signal }
+      return import("./media-preview-download").then(({ downloadMediaPreview }) =>
+        downloadMediaPreview(client, media.id, signal)
       )
     },
     staleTime: 60_000,
