@@ -14,7 +14,7 @@ export const Route = createFileRoute("/api/media/$id")({
           mime_type: string
           available: number
         }>(
-          "SELECT drive_id,mime_type,available FROM media WHERE id=? AND user_id=?",
+          "SELECT drive_id,mime_type,available FROM media WHERE catalog_id=? AND user_id=? AND available=TRUE ORDER BY uploaded_at DESC,id LIMIT 1",
           [params.id, session.user.id]
         )
         if (!media?.available)

@@ -4,6 +4,23 @@ import { test, after } from "node:test"
 import { pool, rows } from "../src/lib/database.server"
 import { library, mutate } from "../src/lib/library.server"
 
+async function seedCatalog(userId: string) {
+  await pool.execute(
+    "INSERT IGNORE INTO catalog(id,display_name,tags,created_at) SELECT id,display_name,tags,created_at FROM media WHERE user_id=?",
+    [userId]
+  )
+  await pool.execute(
+    "UPDATE media SET catalog_id=id WHERE user_id=? AND catalog_id IS NULL",
+    [userId]
+  )
+  await pool.execute(
+    "INSERT IGNORE INTO catalog_set_member SELECT sm.set_id,sm.media_id FROM set_member sm JOIN media m ON m.id=sm.media_id WHERE m.user_id=?",
+    [userId]
+  )
+  await pool.execute("UPDATE post SET catalog_id=media_id WHERE user_id=?", [
+    userId,
+  ])
+}
 after(() => pool.end())
 test("tag additions and unlinking preserve metadata and user isolation", async () => {
   const userId = randomUUID(),
@@ -42,6 +59,7 @@ test("tag additions and unlinking preserve metadata and user isolation", async (
       "INSERT INTO media_source (user_id,folder_id,media_id) VALUES (?,'a',?), (?,'b',?)",
       [userId, mediaId, userId, mediaId]
     )
+    await seedCatalog(userId)
     await mutate(
       "add-tags",
       { ids: [mediaId, mediaId], tags: ["KEPT", "bulk"] },
@@ -55,11 +73,13 @@ test("tag additions and unlinking preserve metadata and user isolation", async (
       userId,
       new Headers()
     )
-    await mutate(
-      "tag-color",
-      { name: "bulk", color: "#ff0000" },
-      otherUser,
-      new Headers()
+    await assert.rejects(() =>
+      mutate(
+        "tag-color",
+        { name: "bulk", color: "#ff0000" },
+        otherUser,
+        new Headers()
+      )
     )
     await mutate(
       "add-tags",
@@ -209,6 +229,7 @@ test("equal upload dates keep their order across tag and set edits", async () =>
         "INSERT INTO media (id,user_id,drive_id,display_name,raw_name,mime_type,tags,created_at,uploaded_at,size,available,synced_at) VALUES (?,?,?,'Same name','same.jpg','image/jpeg','[]','2026-09-01','2026-09-01',42,TRUE,NOW(3))",
         [id, userId, id]
       )
+    await seedCatalog(userId)
     const orderedIds = async () =>
       (await library(user)).media.map((media) => media.id)
     assert.deepEqual(await orderedIds(), ids)
@@ -266,6 +287,7 @@ test("one set can contain media from separate Drive folders", async () => {
         [userId, folderId, id]
       )
     }
+    await seedCatalog(userId)
     const set = (await mutate(
       "set-membership",
       { id: first, displayName: "Across folders" },
