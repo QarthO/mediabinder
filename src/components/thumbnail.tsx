@@ -1,5 +1,7 @@
-import { useEffect, useState } from "react"
+import { createContext, useContext, useEffect, useState } from "react"
 import { Film, ImageIcon } from "lucide-react"
+export const MediaCensorContext = createContext(false)
+
 export function Thumbnail({
   id,
   name,
@@ -11,6 +13,7 @@ export function Thumbnail({
   video?: boolean
   eager?: boolean
 }) {
+  const blurred = useContext(MediaCensorContext)
   const [failed, setFailed] = useState(false)
   const [loaded, setLoaded] = useState(false)
   const [attempt, setAttempt] = useState(0)
@@ -34,6 +37,7 @@ export function Thumbnail({
     </div>
   ) : (
     <img
+      data-blurred={blurred || undefined}
       src={`/api/media/${id}?thumbnail${attempt ? `&retry=${attempt}` : ""}`}
       className={loaded ? undefined : "thumbnail-loading"}
       ref={(image) => {
