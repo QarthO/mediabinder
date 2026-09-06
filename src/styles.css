@@ -3610,3 +3610,134 @@ html {
     padding-left: 12px;
   }
 }
+
+.mobile-tag-overlay {
+  z-index: 110;
+}
+.mobile-tag-drawer {
+  z-index: 111;
+  inset: auto 0 0;
+  transform: none;
+  width: 100%;
+  max-width: none;
+  height: min(620px, 80dvh);
+  max-height: 90dvh;
+  padding: 10px 20px max(16px, env(safe-area-inset-bottom));
+  border-radius: 20px 20px 0 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.mobile-tag-drawer[data-state="open"] {
+  animation: tag-drawer-in 200ms ease-out;
+}
+.mobile-tag-drawer[data-state="closed"] {
+  animation: tag-drawer-out 150ms ease-in;
+}
+.drawer-handle {
+  width: 36px;
+  height: 4px;
+  flex-shrink: 0;
+  margin: 0 auto 16px;
+  border-radius: 4px;
+  background: var(--muted-foreground);
+  opacity: 0.4;
+}
+.mobile-tag-heading {
+  flex-shrink: 0;
+  text-align: center;
+  padding: 0 24px 16px;
+}
+.mobile-tag-heading h2 {
+  font-size: 18px;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+.drawer-selection-count {
+  display: inline-flex;
+  padding: 7px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--accent);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+.drawer-media {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  min-width: 0;
+}
+.drawer-media-thumbnail {
+  width: 48px;
+  height: 56px;
+  flex: 0 0 48px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.drawer-media-thumbnail img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.drawer-media strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 15px;
+  font-weight: 500;
+}
+.mobile-tag-drawer [cmdk-root] {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+.mobile-tag-drawer .tag-options {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+  padding: 4px 0 16px;
+  overscroll-behavior: contain;
+}
+.mobile-tag-drawer [cmdk-item] {
+  min-height: 48px;
+  padding: 12px;
+  font-size: 16px;
+  border-radius: 8px;
+}
+.mobile-tag-drawer [cmdk-input] {
+  order: 2;
+  flex-shrink: 0;
+  width: 100%;
+  max-width: 480px;
+  margin: 0 auto;
+  padding: 12px 16px;
+  min-height: 48px;
+  text-align: center;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--background);
+  font-size: 16px;
+}
+@keyframes tag-drawer-in {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+@keyframes tag-drawer-out {
+  to {
+    transform: translateY(100%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mobile-tag-drawer[data-state] {
+    animation: none;
+  }
+}

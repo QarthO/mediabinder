@@ -477,6 +477,7 @@ export function MediaTags({
   return (
     <div className="table-tags">
       <TagPopover
+        media={media}
         ids={[media.id]}
         existing={media.tags}
         allTags={allTags}
