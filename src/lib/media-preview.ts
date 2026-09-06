@@ -48,6 +48,7 @@ export function previewQuery(client: QueryClient, media: Media) {
     staleTime: 60_000,
     gcTime: 60_000,
     retry: false,
+    retryOnMount: false,
     refetchOnMount: false,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
@@ -64,6 +65,24 @@ export function prefetchMediaPreview(client: QueryClient, media: Media) {
   if (existing?.state.status === "error") return
   if (!existing && !makePreviewRoom(client)) return
   void client.prefetchQuery(options)
+}
+
+// A clicked photo must not wait behind downloads started by earlier hovers.
+// Keep its existing request, including one already queued by its own hover.
+export function prioritizeMediaPreview(client: QueryClient, media: Media) {
+  const current = client.getQueryCache().find({
+    queryKey: previewKey(media),
+    exact: true,
+  })
+  if (current?.state.fetchStatus !== "fetching") return
+  for (const query of client.getQueryCache().findAll({ queryKey: [PREVIEW_KEY] })) {
+    if (
+      query !== current &&
+      query.getObserversCount() === 0 &&
+      query.state.fetchStatus === "fetching"
+    )
+      void client.cancelQueries({ queryKey: query.queryKey, exact: true })
+  }
 }
 
 function makePreviewRoom(client: QueryClient, current?: Media) {
@@ -131,6 +150,9 @@ export function useMediaPreview(media: Media) {
   const client = useQueryClient()
   const options = previewQuery(client, media)
   const preview = useQuery(options)
+  useEffect(() => {
+    if (preview.isFetching) prioritizeMediaPreview(client, media)
+  }, [client, media, preview.isFetching])
   const [objectUrl, setObjectUrl] = useState<{ blob: Blob; url: string }>()
   useEffect(() => {
     if (!preview.data) return

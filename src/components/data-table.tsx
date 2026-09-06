@@ -441,8 +441,9 @@ function SelectionCheckbox({
   )
 }
 function UploadedDate({ value }: { value: string }) {
-  const [now, setNow] = useState(() => Date.now())
+  const [now, setNow] = useState<number | null>(null)
   useEffect(() => {
+    setNow(Date.now())
     const timer = window.setInterval(() => setNow(Date.now()), 60_000)
     return () => window.clearInterval(timer)
   }, [])

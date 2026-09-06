@@ -6,6 +6,7 @@ import {
   createMediaPreviewIntent,
   MAX_CACHED_PREVIEWS,
   prefetchMediaPreview,
+  prioritizeMediaPreview,
   previewQuery,
 } from "./media-preview"
 
@@ -127,4 +128,74 @@ test("a failed prefetch is not retried by repeated hover", async (t) => {
   prefetchMediaPreview(client, photo("one"))
   await delay(0)
   assert.equal(calls, 1)
+})
+
+test("opening a failed hover does not retry the Blob request before native fallback", async (t) => {
+  const client = new QueryClient()
+  let unsubscribe = () => {}
+  t.after(() => {
+    unsubscribe()
+    client.clear()
+  })
+  let calls = 0
+  t.mock.method(globalThis, "fetch", async () => {
+    calls++
+    throw new Error("offline")
+  })
+  const media = photo("failed-open")
+  const options = previewQuery(client, media)
+  prefetchMediaPreview(client, media)
+  await assert.rejects(client.fetchQuery(options))
+  const observer = new QueryObserver(client, options)
+  unsubscribe = observer.subscribe(() => {})
+  await delay(0)
+  assert.equal(calls, 1)
+  assert.equal(observer.getCurrentResult().isError, true)
+  assert.equal(observer.getCurrentResult().isFetching, false)
+})
+
+test("opening a queued hover cancels other speculation and starts immediately", async (t) => {
+  const client = new QueryClient()
+  let unsubscribe = () => {}
+  t.after(() => {
+    unsubscribe()
+    client.clear()
+  })
+  const started: string[] = []
+  const aborted: string[] = []
+  let active = 0, peak = 0
+  t.mock.method(globalThis, "fetch", async (url: unknown, init: RequestInit) => {
+    const id = String(url).split("/").at(-1)!
+    started.push(id)
+    active++
+    peak = Math.max(peak, active)
+    if (id === "clicked") {
+      active--
+      return imageResponse()
+    }
+    return new Promise<Response>((_resolve, reject) => {
+      init.signal!.addEventListener("abort", () => {
+        active--
+        aborted.push(id)
+        reject(new Error("aborted"))
+      }, { once: true })
+    })
+  })
+  prefetchMediaPreview(client, photo("hover-a"))
+  prefetchMediaPreview(client, photo("hover-b"))
+  await delay(0)
+  const media = photo("clicked")
+  prefetchMediaPreview(client, media)
+  await delay(0)
+  assert.deepEqual(started, ["hover-a", "hover-b"])
+
+  const options = previewQuery(client, media)
+  const observer = new QueryObserver(client, options)
+  unsubscribe = observer.subscribe(() => {})
+  prioritizeMediaPreview(client, media)
+  const result = await client.fetchQuery(options)
+  assert.deepEqual(started, ["hover-a", "hover-b", "clicked"])
+  assert.deepEqual(aborted.sort(), ["hover-a", "hover-b"])
+  assert.equal(result.size, 3)
+  assert.ok(peak <= 2)
 })
