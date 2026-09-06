@@ -1,7 +1,15 @@
 import { randomUUID } from "node:crypto"
 import { pool, rows } from "./database.server"
 import type { Library, Media, MediaSet, Post, DriveSource } from "./types"
-import { metadata, newPost, newSet, folder, id } from "./validation"
+import {
+  metadata,
+  newPost,
+  newSet,
+  folder,
+  id,
+  addMediaTags,
+  tags,
+} from "./validation"
 import { driveJson, driveToken, listFolders, syncDrive } from "./drive.server"
 export async function library(
   user: Library["user"] & { id: string }
@@ -119,6 +127,35 @@ export async function mutate(
       ]
     )
     return { id: setId }
+  }
+  if (action === "add-tags") {
+    const value = addMediaTags.parse(input)
+    const connection = await pool.getConnection()
+    try {
+      await connection.beginTransaction()
+      const [media] = await connection.query<import("mysql2").RowDataPacket[]>(
+        `SELECT id,tags FROM media WHERE user_id=? AND available=TRUE AND id IN (${value.ids.map(() => "?").join(",")}) ORDER BY id FOR UPDATE`,
+        [userId, ...value.ids]
+      )
+      if (media.length !== value.ids.length)
+        throw new Error(
+          "Some selected media is no longer available. Refresh and try again."
+        )
+      for (const item of media) {
+        const merged = tags.parse([...new Set([...item.tags, ...value.tags])])
+        await connection.execute(
+          "UPDATE media SET tags=? WHERE id=? AND user_id=?",
+          [JSON.stringify(merged), item.id, userId]
+        )
+      }
+      await connection.commit()
+    } catch (error) {
+      await connection.rollback()
+      throw error
+    } finally {
+      connection.release()
+    }
+    return { count: value.ids.length }
   }
   if (action === "metadata") {
     const value = metadata.parse(input)

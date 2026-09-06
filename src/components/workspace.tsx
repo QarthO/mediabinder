@@ -16,7 +16,6 @@ import {
   LayoutGrid,
   List,
   ChevronRight,
-  ArrowUpRight,
   PanelLeftClose,
   PanelLeft,
   SlidersHorizontal,
@@ -48,7 +47,7 @@ import { Detail } from "./detail"
 import { DriveSettings } from "./drive-settings"
 import { libraryQuery, action } from "@/lib/api"
 import { authClient } from "@/lib/auth-client"
-import { bytes, dateValue } from "@/lib/utils"
+import { bytes } from "@/lib/utils"
 import type { Media, MediaSet } from "@/lib/types"
 const navItems = [
   { id: "all", label: "All media", icon: Images },
@@ -56,7 +55,6 @@ const navItems = [
   { id: "videos", label: "Videos", icon: Film },
   { id: "tags", label: "Tags", icon: Tags },
   { id: "sets", label: "Sets", icon: FolderOpen },
-  { id: "posts", label: "Posts", icon: Link2 },
 ] as const
 export function Workspace() {
   const query = useQuery(libraryQuery),
@@ -159,7 +157,8 @@ export function Workspace() {
     search,
     sorting,
     setSorting,
-    (media) => setSelected({ id: media.id, kind: "media" })
+    (media) => setSelected({ id: media.id, kind: "media" }),
+    allTags
   )
   const items = table.getRowModel().rows.map((row) => row.original)
   const sort =
@@ -205,7 +204,6 @@ export function Workspace() {
     videos: data.media.filter((m) => m.mime_type.startsWith("video/")).length,
     tags: allTags.length,
     sets: data.sets.length,
-    posts: data.posts.length,
   }
   return (
     <div className={`app ${collapsed ? "sidebar-collapsed" : ""}`}>
@@ -284,86 +282,10 @@ export function Workspace() {
           <span className="muted">Library</span>
           <ChevronRight size={13} />
           <span className="breadcrumb">{title}</span>
-          <div className="header-right">
-            <span className="sync-status">
-              {sync.isPending
-                ? "Syncing Drive…"
-                : data.workspace.last_synced_at
-                  ? `Synced ${dateValue(data.workspace.last_synced_at)}`
-                  : "Ready when you are"}
-            </span>
-            <button
-              className="icon-button"
-              title="Search and commands (⌘K)"
-              aria-label="Open command menu"
-              onClick={() => setCommand(true)}
-            >
-              <Search size={17} />
-            </button>
-          </div>
         </header>
-        <div className="workspace-content">
-          <div className="page-heading">
-            <div>
-              <div className="eyebrow">
-                {page === "settings"
-                  ? "PREFERENCES"
-                  : setId
-                    ? "YOUR SET"
-                    : "YOUR LIBRARY"}
-              </div>
-              <h1>
-                {title}
-                <span className="heading-count">
-                  {page === "settings"
-                    ? ""
-                    : setId
-                      ? items.length
-                      : counts[page]}
-                </span>
-              </h1>
-              <p>
-                {page === "settings"
-                  ? "Make yourself at home."
-                  : setId
-                    ? "A collection of things that belong together."
-                    : page === "sets"
-                      ? "Bring related media together, your way."
-                      : page === "posts"
-                        ? "Keep track of where your media goes."
-                        : "Every image. Every video. All in one place."}
-              </p>
-            </div>
-            <div className="heading-actions">
-              {currentSet && (
-                <Button
-                  variant="outline"
-                  onClick={() =>
-                    setSelected({ id: currentSet.id, kind: "set" })
-                  }
-                >
-                  <SlidersHorizontal />
-                  Edit set
-                </Button>
-              )}
-              {page !== "settings" && (
-                <>
-                  <Button
-                    variant="outline"
-                    disabled={sync.isPending || !data.workspace.sources.length}
-                    onClick={() => sync.mutate()}
-                  >
-                    <RefreshCw className={sync.isPending ? "spin" : ""} />
-                    Sync Drive
-                  </Button>
-                  <Button onClick={() => setNewSet(true)}>
-                    <Plus />
-                    New set
-                  </Button>
-                </>
-              )}
-            </div>
-          </div>
+        <div
+          className={`workspace-content ${["all", "images", "videos"].includes(page) ? "media-workspace" : ""}`}
+        >
           {page === "settings" ? (
             <DriveSettings workspace={data.workspace} />
           ) : page === "tags" ? (
@@ -428,57 +350,6 @@ export function Workspace() {
                   value.includes(search.toLowerCase())
                 ) && <p className="muted">No tags match your search.</p>}
             </div>
-          ) : page === "posts" ? (
-            <div className="posts-page">
-              {data.posts.length ? (
-                <>
-                  <div className="section-caption">
-                    {data.posts.length} linked posts
-                  </div>
-                  {data.posts.map((post) => {
-                    const target =
-                      data.media.find((m) => m.id === post.media_id) ??
-                      data.sets.find((s) => s.id === post.set_id)
-                    return (
-                      <div className="post-row" key={post.id}>
-                        <div className="post-icon">
-                          <Link2 size={18} />
-                        </div>
-                        <div>
-                          <strong>{post.platform}</strong>
-                          <button
-                            className="text-button"
-                            onClick={() =>
-                              setSelected({
-                                id: (post.media_id ?? post.set_id)!,
-                                kind: post.media_id ? "media" : "set",
-                              })
-                            }
-                          >
-                            {target?.display_name ?? "View item"}
-                          </button>
-                        </div>
-                        <span>{dateValue(post.created_at)}</span>
-                        <a
-                          href={post.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="external-link"
-                        >
-                          View post <ArrowUpRight size={15} />
-                        </a>
-                      </div>
-                    )
-                  })}
-                </>
-              ) : (
-                <Empty
-                  icon={Link2}
-                  title="Your posts, connected"
-                  description="Open an image, video, or set and add a post link to keep its story together."
-                />
-              )}
-            </div>
           ) : page === "sets" ? (
             <>
               {data.sets.length ? (
@@ -539,6 +410,17 @@ export function Workspace() {
           ) : (
             <>
               <div className="library-toolbar">
+                {currentSet && (
+                  <Button
+                    variant="outline"
+                    onClick={() =>
+                      setSelected({ id: currentSet.id, kind: "set" })
+                    }
+                  >
+                    <SlidersHorizontal />
+                    Edit set
+                  </Button>
+                )}
                 <div className="filter-search">
                   <Search size={15} />
                   <input
@@ -556,6 +438,14 @@ export function Workspace() {
                     </button>
                   )}
                 </div>
+                <Button
+                  variant="outline"
+                  disabled={sync.isPending || !data.workspace.sources.length}
+                  onClick={() => sync.mutate()}
+                >
+                  <RefreshCw className={sync.isPending ? "spin" : ""} />
+                  {sync.isPending ? "Syncing…" : "Sync Drive"}
+                </Button>
                 <select
                   aria-label="Filter by tag"
                   value={tag}
@@ -735,18 +625,10 @@ export function Workspace() {
               ) : (
                 <DataTable
                   table={table}
+                  allTags={allTags}
                   resetKey={`${page}:${setId}:${tag}:${search}`}
                 />
               )}
-              <div className="library-footer">
-                <span>
-                  {items.length} {items.length === 1 ? "item" : "items"}
-                  {setId ? " in this set" : ""}
-                </span>
-                <span>
-                  Originals stay in Google Drive <ArrowUpRight size={12} />
-                </span>
-              </div>
             </>
           )}
         </div>

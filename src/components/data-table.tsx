@@ -9,11 +9,14 @@ import {
   type OnChangeFn,
   type SortingState,
   type Table,
+  type RowSelectionState,
 } from "@tanstack/react-table"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react"
 import { Thumbnail } from "./thumbnail"
-import { bytes, dateValue } from "@/lib/utils"
+import { bytes } from "@/lib/utils"
+import { TagPopover } from "./tag-popover"
+import { mediaDate } from "@/lib/media-date"
 import type { Media } from "@/lib/types"
 
 export function useMediaTable(
@@ -21,10 +24,33 @@ export function useMediaTable(
   search: string,
   sorting: SortingState,
   onSortingChange: OnChangeFn<SortingState>,
-  onOpen: (media: Media) => void
+  onOpen: (media: Media) => void,
+  allTags: string[]
 ) {
+  const [rowSelection, setRowSelection] = useState<RowSelectionState>({})
+  useEffect(() => setRowSelection({}), [items, search])
   const columns = useMemo<ColumnDef<Media>[]>(
     () => [
+      {
+        id: "select",
+        enableSorting: false,
+        enableGlobalFilter: false,
+        header: ({ table }) => (
+          <SelectionCheckbox
+            label="Select all matching media"
+            checked={table.getIsAllRowsSelected()}
+            mixed={table.getIsSomeRowsSelected()}
+            onChange={table.getToggleAllRowsSelectedHandler()}
+          />
+        ),
+        cell: ({ row }) => (
+          <SelectionCheckbox
+            label={`Select ${row.original.display_name}`}
+            checked={row.getIsSelected()}
+            onChange={row.getToggleSelectedHandler()}
+          />
+        ),
+      },
       {
         accessorKey: "display_name",
         header: "Name",
@@ -39,7 +65,10 @@ export function useMediaTable(
             </div>
             <div>
               <strong>{row.original.display_name}</strong>
-              <small>{row.original.raw_name}</small>
+              <small>
+                <span className="raw-filename">{row.original.raw_name}</span>
+                <span className="file-size"> · {bytes(row.original.size)}</span>
+              </small>
             </div>
           </button>
         ),
@@ -49,36 +78,39 @@ export function useMediaTable(
         header: "Tags",
         enableSorting: false,
         cell: ({ row }) => (
-          <div className="tags">
-            {row.original.tags.slice(0, 2).map((tag) => (
-              <span className="tag" key={tag}>
-                {tag}
-              </span>
-            ))}
-            {row.original.tags.length > 2 && (
-              <span>+{row.original.tags.length - 2}</span>
+          <div className="table-tags">
+            {row.original.tags.length ? (
+              row.original.tags.map((tag) => (
+                <span className="tag" key={tag} title={tag}>
+                  {tag}
+                </span>
+              ))
+            ) : (
+              <span className="no-tags">None</span>
             )}
+            <TagPopover
+              ids={[row.original.id]}
+              existing={row.original.tags}
+              allTags={allTags}
+              label={`Add tags to ${row.original.display_name}`}
+            />
           </div>
         ),
       },
       {
         accessorKey: "uploaded_at",
         header: "Uploaded",
-        cell: ({ row }) => dateValue(row.original.uploaded_at),
+        cell: ({ row }) => <UploadedDate value={row.original.uploaded_at} />,
       },
-      {
-        accessorKey: "size",
-        header: "Size",
-        cell: ({ row }) => bytes(row.original.size),
-      },
-      { accessorKey: "post_count", header: "Posts" },
     ],
-    [onOpen]
+    [onOpen, allTags]
   )
   return useReactTable({
     data: items,
     columns,
-    state: { globalFilter: search, sorting },
+    state: { globalFilter: search, sorting, rowSelection },
+    onRowSelectionChange: setRowSelection,
+    enableRowSelection: true,
     onSortingChange,
     getRowId: (row) => row.id,
     getCoreRowModel: getCoreRowModel(),
@@ -95,16 +127,21 @@ export function useMediaTable(
 }
 
 // Kiln's table structure: shared column tracks, fixed header, and a measured virtual body.
-export function DataTable<T>({
+export function DataTable({
   table,
   resetKey,
+  allTags,
 }: {
-  table: Table<T>
+  table: Table<Media>
   resetKey: string
+  allTags: string[]
 }) {
   const body = useRef<HTMLTableSectionElement>(null)
   const [scrollbar, setScrollbar] = useState(0)
   const rows = table.getRowModel().rows
+  const selected = table
+    .getFilteredSelectedRowModel()
+    .rows.map((row) => row.original.id)
   const sorting = JSON.stringify(table.getState().sorting)
   const virtual = useVirtualizer({
     count: rows.length,
@@ -189,6 +226,8 @@ export function DataTable<T>({
               <tr
                 key={row.id}
                 data-index={item.index}
+                aria-selected={row.getIsSelected()}
+                data-selected={row.getIsSelected() || undefined}
                 ref={virtual.measureElement}
                 aria-rowindex={item.index + 2}
                 style={{ transform: `translateY(${item.start}px)` }}
@@ -203,10 +242,69 @@ export function DataTable<T>({
           })}
         </tbody>
       </table>
-      <div className="table-footer">
-        {rows.length} {rows.length === 1 ? "item" : "items"}
-        <span>Click a column heading to sort</span>
+      <div className="table-footer" aria-label="Table selection">
+        <span aria-live="polite">
+          {selected.length} of {rows.length} selected
+        </span>
+        {selected.length > 0 && (
+          <div className="selection-actions">
+            <button onClick={() => table.resetRowSelection()}>
+              Clear selection
+            </button>
+            <TagPopover
+              ids={selected}
+              allTags={allTags}
+              label="Add tags to selected media"
+              bulk
+            />
+          </div>
+        )}
       </div>
     </div>
+  )
+}
+
+function SelectionCheckbox({
+  label,
+  checked,
+  mixed = false,
+  onChange,
+}: {
+  label: string
+  checked: boolean
+  mixed?: boolean
+  onChange: (event: React.ChangeEvent<HTMLInputElement>) => void
+}) {
+  const input = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    if (input.current) input.current.indeterminate = mixed && !checked
+  }, [checked, mixed])
+  return (
+    <input
+      ref={input}
+      className="row-checkbox"
+      type="checkbox"
+      aria-label={label}
+      checked={checked}
+      onChange={onChange}
+    />
+  )
+}
+function UploadedDate({ value }: { value: string }) {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 60_000)
+    return () => window.clearInterval(timer)
+  }, [])
+  const date = mediaDate(value, now)
+  return (
+    <time
+      dateTime={date.iso}
+      title={date.timestamp}
+      tabIndex={0}
+      aria-label={date.timestamp}
+    >
+      {date.label}
+    </time>
   )
 }

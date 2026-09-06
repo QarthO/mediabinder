@@ -1,6 +1,6 @@
 # MediaBinder
 
-A private media library for Google Drive. TanStack Start, React Query, Table, and Virtual, shadcn/Radix, Better Auth, and MySQL. A compact blue workspace inspired by Kiln, with grid/list views, search, tags, sets, ⌘K, and ⌘B to toggle the sidebar.
+A private media library for Google Drive. TanStack Start, React Query, Table, and Virtual, shadcn/Radix, Better Auth, and MySQL. A compact blue workspace inspired by Kiln, with grid/list views, search, inline and bulk tagging, sets, ⌘K, and ⌘B to toggle the sidebar.
 
 Original images and videos stay in Drive. MediaBinder stores display names, raw filenames, tags, dates, set membership, and social post links in its own database. Sets are flat, and a media item can belong to any number of sets. Posts accept any platform name, an HTTP(S) link, an optional post ID, and a date; both media and sets can have posts.
 
@@ -33,7 +33,9 @@ Google may expire refresh tokens after seven days for External apps in Testing t
 
 - Sync is manual. It paginates Drive results and walks all linked folders and their subfolders, then reconciles in a transaction. Concurrent syncs for the same account are prevented with a MySQL lock.
 - Re-sync updates technical file metadata without overwriting your display names, tags, creation dates, sets, or post links. Media outside the linked folders is hidden from the library, search, tags, and set counts; its metadata remains intact. Unlinking a folder hides its media immediately, except items also present in another linked folder. Re-link and sync to restore it. Overlapping folders never create duplicate media. A failed Drive scan does not mark files unavailable.
-- “Uploaded to Drive” uses Drive's `createdTime`. “Date created” initially uses image capture metadata when available, otherwise the Drive creation time. You can edit it. Dates display in UTC. Locally created sets have no Drive upload date or underlying Drive file; their raw name records the name they were created with.
+- The list supports selection, additive bulk tagging, inline tag popovers, and sorting. Selection resets when the search or media scope changes.
+- Uploaded dates in the list are relative for the first 30 days, then use the browser’s local calendar date. Hover for the full local timestamp, including seconds and timezone.
+- “Uploaded to Drive” uses Drive's `createdTime`. “Date created” initially uses image capture metadata when available, otherwise the Drive creation time. You can edit it. Editor date fields display in UTC. Locally created sets have no Drive upload date or underlying Drive file; their raw name records the name they were created with.
 - Thumbnail and original endpoints require a session and check file ownership. Tokens are refreshed on the server and encrypted at rest.
 - Video originals stream through the server with backpressure, cancellation, and HTTP byte ranges. Playback/seek does not buffer the entire file or save it to disk. There is no transcoding or persistent media cache; browser codec support and Drive bandwidth/quota still apply. Unsupported formats can be opened in Drive. A bounded cache or transcoding can be added later if needed.
 
@@ -43,7 +45,7 @@ Node 24 and pnpm 11 are used in Docker. On the host, `pnpm install --frozen-lock
 
 Use T3 Code's browser preview at http://localhost:3100 to check the real Google login and Drive flows. No development authentication bypass is included. `/api/health` checks the database connection. Back up MySQL before upgrading; versioned application migrations are in `migrations/`, and Better Auth manages its own tables during startup. The multiple-folder migration preserves your existing source and catalog.
 
-The focused database regression check runs with `docker compose exec web pnpm exec tsx scripts/test-drive-folders.ts` against a migrated database. It creates and cleans up isolated fixtures to verify unlinking, overlapping folder membership, metadata retention, and user isolation.
+The focused database regression check runs with `docker compose exec web pnpm exec tsx scripts/test-drive-folders.ts` against a migrated database. It creates and cleans up isolated fixtures to verify additive tagging, rejected partial or unauthorized edits, unlinking, overlapping folder membership, metadata retention, and user isolation.
 
 ## Preview fixtures
 

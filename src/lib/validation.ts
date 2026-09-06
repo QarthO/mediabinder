@@ -40,3 +40,12 @@ export const folder = z.object({
 export function folderIdFromInput(value: string) {
   return value.match(/\/folders\/([\w-]+)/)?.[1] ?? value.trim()
 }
+
+export const addMediaTags = z.object({
+  ids: z
+    .array(id)
+    .min(1)
+    .max(1000)
+    .transform((ids) => [...new Set(ids)]),
+  tags: tags.refine((tags) => tags.length > 0, "Choose at least one tag"),
+})

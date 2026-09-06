@@ -5,7 +5,7 @@ import { pool, rows } from "../src/lib/database.server"
 import { library, mutate } from "../src/lib/library.server"
 
 after(() => pool.end())
-test("unlink preserves metadata, overlapping media, and other users' folders", async () => {
+test("tag additions and unlinking preserve metadata and user isolation", async () => {
   const userId = randomUUID(),
     otherUser = randomUUID(),
     mediaId = randomUUID(),
@@ -42,6 +42,29 @@ test("unlink preserves metadata, overlapping media, and other users' folders", a
       "INSERT INTO media_source (user_id,folder_id,media_id) VALUES (?,'a',?), (?,'b',?)",
       [userId, mediaId, userId, mediaId]
     )
+    await mutate(
+      "add-tags",
+      { ids: [mediaId, mediaId], tags: ["KEPT", "bulk"] },
+      userId,
+      new Headers()
+    )
+    await assert.rejects(() =>
+      mutate(
+        "add-tags",
+        { ids: [mediaId], tags: ["unauthorized"] },
+        otherUser,
+        new Headers()
+      )
+    )
+    await assert.rejects(() =>
+      mutate(
+        "add-tags",
+        { ids: [mediaId, randomUUID()], tags: ["partial"] },
+        userId,
+        new Headers()
+      )
+    )
+    assert.deepEqual((await library(user)).media[0].tags, ["kept", "bulk"])
     await mutate("remove-source", { folderId: "a" }, userId, new Headers())
     let result = await library(user)
     assert.equal(result.media.length, 1)
@@ -68,7 +91,7 @@ test("unlink preserves metadata, overlapping media, and other users' folders", a
       available: number
     }>("SELECT display_name,tags,available FROM media WHERE id=?", [mediaId])
     assert.equal(retained.display_name, "Edited name")
-    assert.deepEqual(retained.tags, ["kept"])
+    assert.deepEqual(retained.tags, ["kept", "bulk"])
     assert.equal(retained.available, 0)
     assert.equal(
       (await rows("SELECT id FROM post WHERE id=?", [postId])).length,
