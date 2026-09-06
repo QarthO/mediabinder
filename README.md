@@ -13,7 +13,44 @@ Original images and videos stay in Drive. MediaBinder stores display names, raw 
 
 The first verified Google account becomes the superuser. Further sign-ups are rejected unless `ALLOW_SIGNUPS=true` is explicitly configured. Existing accounts can still sign in. Libraries and Drive connections are scoped to each user; there is no public registration or landing page. Claim the first account before exposing a fresh instance to the internet.
 
-MySQL data persists in the `mysql-data` volume. `pnpm dev:docker:down` stops development without deleting the database. For a deployment behind a reverse proxy, set `BETTER_AUTH_URL` to the public HTTPS origin and add its exact callback URL in Google Cloud. Keep the app and database on the private Docker network; the default host binding is loopback only.
+MySQL data persists in the `mysql-data` volume. `pnpm dev:docker:down` stops development without deleting the database. For a deployment behind a reverse proxy, set `MEDIABINDER_URL` to the public HTTPS origin and add its exact callback URL in Google Cloud. Keep the app and database on the private Docker network; the default host binding is loopback only.
+
+## Coolify: Dockerfile with separate MySQL
+
+Choose the **Dockerfile** build pack, base directory `/`, Dockerfile `/Dockerfile`, and **Ports Exposes `3100`**. Leave the build target at its default (the final `production` stage), and leave the start command and pre/post-deploy commands empty. Set the application's domain to your public HTTPS URL. If configuring Coolify's health check, use HTTP `GET /api/health` on port `3100`. The image also supplies its own Docker health check.
+
+Create a MySQL 8 service/database with a persistent volume, and make it reachable from the app's Docker network. `DB_HOST` is its internal hostname, not `localhost` and not a `mysql://` URL. The database must exist and its user needs permissions to create/alter tables, indexes and constraints as well as read/write data; the app creates its schema automatically.
+
+Set these **eight runtime environment variables** in Coolify (build-time availability is unnecessary):
+
+```dotenv
+MEDIABINDER_URL=https://media.example.com
+DB_HOST=your-mysql-internal-hostname
+DB_NAME=mediabinder
+DB_USER=mediabinder
+DB_PASS=your-database-password
+BETTER_AUTH_SECRET=your-generated-secret-at-least-32-characters
+GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=your-google-client-secret
+```
+
+Generate the auth secret with `openssl rand -hex 32` and retain it across deployments. If importing an existing MediaBinder database, retain that database's original secret so encrypted Google tokens remain readable. Enter `DB_PASS` literally; do not URL-encode it. `DB_PORT` defaults to `3306`.
+
+In the Google Web application OAuth client, add the authorized redirect URI **`https://media.example.com/api/auth/callback/google`**. Keep the localhost redirect too if using the same OAuth client for development. The app domain, `MEDIABINDER_URL`, and the redirect URI must agree. Enable the Drive API in that Google project; the Google credentials are separate from Coolify's GitHub App credentials.
+
+The image validates runtime configuration, retries transient MySQL connection failures up to 30 times with a two-second delay (following Kiln’s startup pattern), applies migrations under a database lock, and starts both the web server and Drive worker. Applied application migrations are recorded and skipped on redeployment. It stops the container if either service fails, allowing Coolify to restart it. No separate worker service or app volume is needed; MySQL holds persistent state, and thumbnails use an ephemeral memory cache. No `DATABASE_URL`, `BETTER_AUTH_URL`, `MYSQL_PASSWORD`, `MYSQL_ROOT_PASSWORD`, `PORT`, or `HOST` is required in the standalone app's environment. Existing `DATABASE_URL` and `BETTER_AUTH_URL` deployments remain supported; `DB_*` and `MEDIABINDER_URL` take precedence.
+
+Optional runtime variables:
+
+| Variable                             | Default / purpose                                                                                                                                                               |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DB_PORT`                            | `3306`; override for a different database port.                                                                                                                                 |
+| `DRIVE_WEBHOOK_URL`                  | Defaults to `MEDIABINDER_URL` + `/api/drive/webhook` for HTTPS deployments. Optional override for a separate public callback URL. HTTP/local development disables registration. |
+| `ALLOW_SIGNUPS`                      | Disabled. First verified Google user becomes superuser; `true` permits additional accounts.                                                                                     |
+| `DRIVE_WORKER_ENABLED`               | Enabled. Set `false` only when running a separate worker; the repository's Docker Compose setup does this for its web container.                                                |
+| `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | Unset. Optional thumbnail span export, described below.                                                                                                                         |
+
+Configuration references: [Coolify Dockerfile build pack](https://coolify.io/docs/applications/build-packs/dockerfile), [Better Auth Google callback setup](https://better-auth.com/docs/authentication/google).
 
 ## Google OAuth
 
@@ -49,15 +86,15 @@ The optional `worker` Docker service runs automatically with Compose. It uses Be
 
 To enable notifications after deploying:
 
-1. Set `DRIVE_WEBHOOK_URL=https://your-domain.example/api/drive/webhook` in `.env`. Use a publicly reachable HTTPS endpoint with a trusted certificate, routed to the web service. This endpoint validates Google's channel credentials itself and must not be blocked by proxy-level login or a robots.txt disallow rule.
-2. Set `BETTER_AUTH_URL` and the Google OAuth callback to your deployment's origin as described above, then recreate both services with `docker compose up -d --build`.
+1. Set `MEDIABINDER_URL=https://your-domain.example`. The callback automatically uses `/api/drive/webhook` on that origin; no extra webhook variable is needed. Use a publicly reachable HTTPS endpoint with a trusted certificate, routed to the web service. This endpoint validates Google's channel credentials itself and must not be blocked by proxy-level login or a robots.txt disallow rule.
+2. Configure the Google OAuth callback for your deployment as described above, then redeploy the app (or recreate Compose services with `docker compose up -d --build`).
 3. Link your Drive folders and check **Settings → Automatic sync**. The worker registers watches for the user's changes feed and any shared-drive scopes containing linked folders. It checks renewal schedules and creates replacement channels before Google's maximum seven-day expiration. Old channels are stopped after replacement.
 
 Notifications are authenticated using a random per-channel token (only its hash is stored), channel/resource IDs, expiry, and message numbers. The endpoint commits a coalesced job to MySQL before acknowledging; duplicate notifications are ignored. A worker reconciles the linked folders with the same sync lock used by manual sync. Jobs survive restarts, retry with backoff, and preserve the catalog if a Drive scan fails. Notifications arriving during a sync remain queued for another pass. Registration and renewal queue a full reconciliation to cover the handshake window.
 
 The worker checks its MySQL queue every ten seconds; it **does not poll Google Drive for media changes**. Watch setup and renewal are separate scheduled API calls. Open browsers refresh their catalog on query refetch (such as returning focus to the tab), manual sync, or reload. Google notification delivery is not guaranteed, so fresh-load and manual reconciliation remain available. Token expiry or revoked access appears in Settings; use Reconnect Google if needed.
 
-Without `DRIVE_WEBHOOK_URL`, watch registration stays disabled and fresh-load/manual sync still work. Registration, early handshakes, forged/duplicate messages, renewal, queue processing, and failure retries are tested locally with simulated Google responses. Actual Google-to-server delivery requires your public domain and has not been tested locally. See [Google's push-notification guide](https://developers.google.com/workspace/drive/api/guides/push).
+For HTTP or localhost application URLs, watch registration stays disabled and fresh-load/manual sync still work. `DRIVE_WEBHOOK_URL` can override the derived callback, for example when using an HTTPS tunnel. Registration, early handshakes, forged/duplicate messages, renewal, queue processing, and failure retries are tested locally with simulated Google responses. Actual Google-to-server delivery requires your public domain and has not been tested locally. See [Google's push-notification guide](https://developers.google.com/workspace/drive/api/guides/push).
 
 ## Development and checks
 

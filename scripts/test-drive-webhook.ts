@@ -14,6 +14,7 @@ test("Drive webhooks handle early handshakes, validation, duplicates, renewal an
   const userId = randomUUID(),
     connection = await pool.getConnection()
   const originalUrl = process.env.DRIVE_WEBHOOK_URL
+  const originalAppUrl = process.env.MEDIABINDER_URL
   const registrations: { id: string; token: string }[] = []
   let failScan = false,
     stops = 0
@@ -30,7 +31,8 @@ test("Drive webhooks handle early handshakes, validation, duplicates, renewal an
       "x-goog-message-number": message,
     })
   await connection.query("SELECT GET_LOCK('mediabinder-drive-worker',30)")
-  process.env.DRIVE_WEBHOOK_URL = "https://example.com/api/drive/webhook"
+  delete process.env.DRIVE_WEBHOOK_URL
+  process.env.MEDIABINDER_URL = "https://example.com"
   mock.method(auth.api, "getAccessToken", async () => ({
     accessToken: "test-access-token",
   }))
@@ -44,7 +46,7 @@ test("Drive webhooks handle early handshakes, validation, duplicates, renewal an
         return Response.json({ startPageToken: "start" })
       if (url.pathname.endsWith("/changes/watch")) {
         const channel = JSON.parse(String(init?.body))
-        assert.equal(channel.address, process.env.DRIVE_WEBHOOK_URL)
+        assert.equal(channel.address, "https://example.com/api/drive/webhook")
         assert.equal(url.searchParams.get("pageToken"), "start")
         assert.equal(
           await receiveDriveNotification(headers(channel, "sync", "1")),
@@ -144,6 +146,8 @@ test("Drive webhooks handle early handshakes, validation, duplicates, renewal an
     assert.equal(stops, 2)
   } finally {
     mock.restoreAll()
+    if (originalAppUrl === undefined) delete process.env.MEDIABINDER_URL
+    else process.env.MEDIABINDER_URL = originalAppUrl
     if (originalUrl === undefined) delete process.env.DRIVE_WEBHOOK_URL
     else process.env.DRIVE_WEBHOOK_URL = originalUrl
     await pool.execute("DELETE FROM drive_watch WHERE user_id=?", [userId])
