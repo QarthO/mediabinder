@@ -192,3 +192,48 @@ test("tag additions and unlinking preserve metadata and user isolation", async (
     await pool.execute("DELETE FROM media_set WHERE user_id=?", [userId])
   }
 })
+
+test("equal upload dates keep their order across tag and set edits", async () => {
+  const userId = randomUUID()
+  const user = {
+    id: userId,
+    name: "Ordering regression",
+    email: "ordering@example.com",
+    role: "user",
+  }
+  const ids = Array.from({ length: 30 }, () => randomUUID()).sort()
+  try {
+    // Insert in reverse order, with equal names/dates/sizes and different tag lengths.
+    for (const id of [...ids].reverse())
+      await pool.execute(
+        "INSERT INTO media (id,user_id,drive_id,display_name,raw_name,mime_type,tags,created_at,uploaded_at,size,available,synced_at) VALUES (?,?,?,'Same name','same.jpg','image/jpeg','[]','2026-09-01','2026-09-01',42,TRUE,NOW(3))",
+        [id, userId, id]
+      )
+    const orderedIds = async () =>
+      (await library(user)).media.map((media) => media.id)
+    assert.deepEqual(await orderedIds(), ids)
+    for (const id of ids.slice(0, 3)) {
+      await mutate(
+        "add-tags",
+        {
+          ids: [id],
+          tags: ["a tag that changes the row payload", "another tag"],
+        },
+        userId,
+        new Headers()
+      )
+      assert.deepEqual(await orderedIds(), ids)
+      await mutate(
+        "set-membership",
+        { id, displayName: "Ordering set" },
+        userId,
+        new Headers()
+      )
+      assert.deepEqual(await orderedIds(), ids)
+    }
+  } finally {
+    await pool.execute("DELETE FROM media WHERE user_id=?", [userId])
+    await pool.execute("DELETE FROM media_set WHERE user_id=?", [userId])
+    await pool.execute("DELETE FROM tag_definition WHERE user_id=?", [userId])
+  }
+})

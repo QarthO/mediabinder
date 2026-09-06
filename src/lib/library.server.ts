@@ -29,8 +29,9 @@ export async function library(
     watches,
     syncStatus,
   ] = await Promise.all([
+    // React Table uses input order to break sort ties. Keep it stable across metadata edits.
     rows<Media>(
-      "SELECT m.*, (SELECT COUNT(*) FROM post p WHERE p.media_id=m.id) AS post_count FROM media m WHERE user_id=? AND available=TRUE ORDER BY uploaded_at DESC",
+      "SELECT m.*, (SELECT COUNT(*) FROM post p WHERE p.media_id=m.id) AS post_count FROM media m WHERE user_id=? AND available=TRUE ORDER BY m.uploaded_at DESC, m.id ASC",
       [user.id]
     ),
     rows<MediaSet>(
