@@ -13,7 +13,7 @@ import {
 import { useEffect, useMemo, useState, useRef } from "react"
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query"
 import { type SortingState } from "@tanstack/react-table"
-import { DataTable, useMediaTable } from "./data-table"
+import { DataTable, MediaSelectionActions, useMediaTable } from "./data-table"
 import {
   ArrowUpDown,
   Inbox,
@@ -68,6 +68,7 @@ const navItems = [
 ] as const
 export function Workspace() {
   const mobile = useMobile()
+  const [selectionMode, setSelectionMode] = useState(false)
   const [mobileSidebar, setMobileSidebar] = useState(false)
   const [mobileSearch, setMobileSearch] = useState(false)
   const searchInput = useRef<HTMLInputElement>(null)
@@ -247,7 +248,8 @@ export function Workspace() {
     (media) => setSelected({ id: media.id, kind: "media" }),
     allTags,
     data?.tag_colors ?? {},
-    data?.sets ?? []
+    data?.sets ?? [],
+    selectionMode
   )
   const items = table.getRowModel().rows.map((row) => row.original)
   const sort =
@@ -445,6 +447,19 @@ export function Workspace() {
           <span className="muted">Library</span>
           <ChevronRight size={13} />
           <span className="breadcrumb">{title}</span>
+          {page === "all" && (
+            <Button
+              className="header-select"
+              variant="outline"
+              aria-pressed={selectionMode}
+              onClick={() => {
+                setSelectionMode(!selectionMode)
+                table.resetRowSelection()
+              }}
+            >
+              {selectionMode ? "Done" : "Select"}
+            </Button>
+          )}
           {currentSet && (
             <Button
               variant="outline"
@@ -680,137 +695,158 @@ export function Workspace() {
                   ))}
                 </div>
               )}
-              {!items.length ? (
-                <Empty
-                  icon={setId ? FolderOpen : Images}
-                  title={
-                    search ||
-                    selectedTags.length ||
-                    setFilter ||
-                    mediaType !== "all" ||
-                    catalogStatus !== "all"
-                      ? "No media found"
-                      : setId
-                        ? "This set is a blank canvas"
-                        : data.workspace.sources.length
-                          ? "Your library starts here"
-                          : "Connect your Google Drive"
-                  }
-                  description={
-                    search ||
-                    selectedTags.length ||
-                    setFilter ||
-                    mediaType !== "all" ||
-                    catalogStatus !== "all"
-                      ? "Try a different name, tag, or set."
-                      : setId
-                        ? "Open media from your library and add it to this set."
-                        : data.workspace.sources.length
-                          ? "Sync your folder to bring your images and videos into MediaBinder."
-                          : "Choose a folder in settings, then sync to bring your images and videos together."
-                  }
-                  action={
-                    !search &&
-                    !selectedTags.length &&
-                    !setFilter &&
-                    !setId &&
-                    mediaType === "all" &&
-                    catalogStatus === "all" ? (
-                      <Button
-                        disabled={sync.isPending}
+              <div
+                className="media-stage"
+                data-selecting={selectionMode || undefined}
+                data-has-selection={
+                  table.getFilteredSelectedRowModel().rows.length > 0 ||
+                  undefined
+                }
+              >
+                {!items.length ? (
+                  <Empty
+                    icon={setId ? FolderOpen : Images}
+                    title={
+                      search ||
+                      selectedTags.length ||
+                      setFilter ||
+                      mediaType !== "all" ||
+                      catalogStatus !== "all"
+                        ? "No media found"
+                        : setId
+                          ? "This set is a blank canvas"
+                          : data.workspace.sources.length
+                            ? "Your library starts here"
+                            : "Connect your Google Drive"
+                    }
+                    description={
+                      search ||
+                      selectedTags.length ||
+                      setFilter ||
+                      mediaType !== "all" ||
+                      catalogStatus !== "all"
+                        ? "Try a different name, tag, or set."
+                        : setId
+                          ? "Open media from your library and add it to this set."
+                          : data.workspace.sources.length
+                            ? "Sync your folder to bring your images and videos into MediaBinder."
+                            : "Choose a folder in settings, then sync to bring your images and videos together."
+                    }
+                    action={
+                      !search &&
+                      !selectedTags.length &&
+                      !setFilter &&
+                      !setId &&
+                      mediaType === "all" &&
+                      catalogStatus === "all" ? (
+                        <Button
+                          disabled={sync.isPending}
+                          onClick={() =>
+                            data.workspace.sources.length
+                              ? sync.mutate()
+                              : changePage("settings")
+                          }
+                        >
+                          {data.workspace.sources.length ? (
+                            <RefreshCw />
+                          ) : (
+                            <FolderOpen />
+                          )}
+                          {data.workspace.sources.length
+                            ? "Sync Drive"
+                            : "Choose a folder"}
+                        </Button>
+                      ) : undefined
+                    }
+                  />
+                ) : view === "grid" ? (
+                  <div className="media-grid">
+                    {items.map((media) => (
+                      <button
+                        key={media.id}
+                        className="media-card"
+                        aria-pressed={
+                          selectionMode
+                            ? table.getRow(media.id).getIsSelected()
+                            : undefined
+                        }
+                        data-selected={
+                          table.getRow(media.id).getIsSelected() || undefined
+                        }
                         onClick={() =>
-                          data.workspace.sources.length
-                            ? sync.mutate()
-                            : changePage("settings")
+                          selectionMode
+                            ? table.getRow(media.id).toggleSelected()
+                            : openMedia(media)
                         }
                       >
-                        {data.workspace.sources.length ? (
-                          <RefreshCw />
-                        ) : (
-                          <FolderOpen />
-                        )}
-                        {data.workspace.sources.length
-                          ? "Sync Drive"
-                          : "Choose a folder"}
-                      </Button>
-                    ) : undefined
-                  }
-                />
-              ) : view === "grid" ? (
-                <div className="media-grid">
-                  {items.map((media) => (
-                    <button
-                      key={media.id}
-                      className="media-card"
-                      onClick={() => openMedia(media)}
-                    >
-                      <div className="media-image">
-                        <Thumbnail
-                          id={media.id}
-                          name={media.display_name}
-                          video={media.mime_type.startsWith("video/")}
-                        />
-                        {media.mime_type.startsWith("video/") && (
-                          <span className="media-type">
-                            <Film size={12} />
-                            {media.duration_ms
-                              ? `${Math.floor(media.duration_ms / 60000)}:${String(Math.floor(media.duration_ms / 1000) % 60).padStart(2, "0")}`
-                              : "VIDEO"}
-                          </span>
-                        )}
-                        {!media.available && (
-                          <span className="unavailable">
-                            Unavailable in Drive
-                          </span>
-                        )}
-                        {media.post_count > 0 && (
-                          <span className="posted-indicator">
-                            <Link2 size={11} />
-                            {media.post_count}
-                          </span>
-                        )}
-                      </div>
-                      <div className="media-info">
-                        <strong>{media.display_name}</strong>
-                        <span>
-                          {media.mime_type.startsWith("video/") ? (
-                            <Film size={12} />
-                          ) : (
-                            <ImageIcon size={12} />
-                          )}
-                          <span>
-                            {media.raw_name.split(".").pop()?.toUpperCase()}
-                            {media.copy_count > 1 &&
-                              ` · ${media.copy_count} copies`}
-                          </span>
-                          <span className="dot-separator">·</span>
-                          {bytes(media.size)}
-                        </span>
-                      </div>
-                      {media.tags.length > 0 && (
-                        <div className="tags">
-                          {media.tags.slice(0, 3).map((t) => (
-                            <span key={t} className="tag">
-                              {t}
+                        <div className="media-image">
+                          <Thumbnail
+                            id={media.id}
+                            name={media.display_name}
+                            video={media.mime_type.startsWith("video/")}
+                          />
+                          {media.mime_type.startsWith("video/") && (
+                            <span className="media-type">
+                              <Film size={12} />
+                              {media.duration_ms
+                                ? `${Math.floor(media.duration_ms / 60000)}:${String(Math.floor(media.duration_ms / 1000) % 60).padStart(2, "0")}`
+                                : "VIDEO"}
                             </span>
-                          ))}
-                          {media.tags.length > 3 && (
-                            <span className="tag">
-                              +{media.tags.length - 3}
+                          )}
+                          {!media.available && (
+                            <span className="unavailable">
+                              Unavailable in Drive
+                            </span>
+                          )}
+                          {media.post_count > 0 && (
+                            <span className="posted-indicator">
+                              <Link2 size={11} />
+                              {media.post_count}
                             </span>
                           )}
                         </div>
-                      )}
-                    </button>
-                  ))}
-                </div>
-              ) : (
-                <DataTable
-                  table={table}
-                  allTags={allTags}
-                  resetKey={`${page}:${setId}:${selectedTags.join(",")}:${setFilter}:${mediaType}:${catalogStatus}:${search}`}
-                />
-              )}
+                        <div className="media-info">
+                          <strong>{media.display_name}</strong>
+                          <span>
+                            {media.mime_type.startsWith("video/") ? (
+                              <Film size={12} />
+                            ) : (
+                              <ImageIcon size={12} />
+                            )}
+                            <span>
+                              {media.raw_name.split(".").pop()?.toUpperCase()}
+                              {media.copy_count > 1 &&
+                                ` · ${media.copy_count} copies`}
+                            </span>
+                            <span className="dot-separator">·</span>
+                            {bytes(media.size)}
+                          </span>
+                        </div>
+                        {media.tags.length > 0 && (
+                          <div className="tags">
+                            {media.tags.slice(0, 3).map((t) => (
+                              <span key={t} className="tag">
+                                {t}
+                              </span>
+                            ))}
+                            {media.tags.length > 3 && (
+                              <span className="tag">
+                                +{media.tags.length - 3}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <DataTable
+                    table={table}
+                    resetKey={`${page}:${setId}:${selectedTags.join(",")}:${setFilter}:${mediaType}:${catalogStatus}:${search}`}
+                  />
+                )}
+                <MediaSelectionActions table={table} allTags={allTags} />
+              </div>
             </>
           )}
         </div>
