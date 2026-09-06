@@ -1,3 +1,5 @@
+import { useMediaPreviewIntent } from "@/lib/media-preview"
+import { MediaCard } from "./media-card"
 import { flushSync } from "react-dom"
 import { useMobile } from "@/hooks/use-mobile"
 import { SidebarTags } from "./sidebar-tags"
@@ -12,15 +14,10 @@ import {
   useSearch,
   useRouteContext,
 } from "@tanstack/react-router"
-import { useEffect, useMemo, useState, useRef } from "react"
+import { useCallback, useEffect, useMemo, useState, useRef } from "react"
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query"
 import { type SortingState, type OnChangeFn } from "@tanstack/react-table"
-import {
-  DataTable,
-  MediaTags,
-  MediaSelectionActions,
-  useMediaTable,
-} from "./data-table"
+import { DataTable, MediaSelectionActions, useMediaTable } from "./data-table"
 import {
   ArrowUpDown,
   Eye,
@@ -30,7 +27,6 @@ import {
   ImageIcon,
   Film,
   FolderOpen,
-  Link2,
   Search,
   Settings,
   RefreshCw,
@@ -73,7 +69,6 @@ import {
   workspacePreferencesCookie,
   type WorkspacePreferences,
 } from "@/lib/workspace-preferences"
-import { bytes } from "@/lib/utils"
 import type { Media, MediaSet } from "@/lib/types"
 const navItems = [
   { id: "sets", label: "Sets", icon: FolderOpen },
@@ -122,6 +117,8 @@ function WorkspaceContent({
   sorting: SortingState
   setSorting: OnChangeFn<SortingState>
 }) {
+  const { view: initialView } = useRouteContext({ from: "/_app" })
+  const previewIntent = useMediaPreviewIntent()
   const mobile = useMobile()
   const [selectionEnabled, setSelectionMode] = useState(false)
   const [mobileSidebar, setMobileSidebar] = useState(false)
@@ -139,7 +136,7 @@ function WorkspaceContent({
     ? decodeURIComponent(pathname.slice(6))
     : null
   const page = setId || pathname === "/media" ? "all" : pathname.slice(1)
-  const [view, setView] = useState<"grid" | "list">("grid"),
+  const [view, setView] = useState<"grid" | "list">(initialView),
     [search, setSearch] = useState(""),
     [selectedTags, setSelectedTags] = useState<string[]>([]),
     [mediaType, setMediaType] = useState("all"),
@@ -188,8 +185,6 @@ function WorkspaceContent({
       }
     }
     window.addEventListener("keydown", handler)
-    const stored = localStorage.getItem("mediabinder-view")
-    if (stored === "list") setView("list")
     return () => window.removeEventListener("keydown", handler)
   }, [])
   const sync = useMutation({
@@ -205,15 +200,6 @@ function WorkspaceContent({
       if (!automatic || !e.message.startsWith("A sync")) toast.error(e.message)
     },
   })
-  const freshSync = useRef(false)
-  useEffect(() => {
-    if (query.data && !freshSync.current) {
-      freshSync.current = true
-      if (query.data.workspace.sources.length) {
-        sync.mutate(true)
-      }
-    }
-  }, [query.data, client])
   useEffect(() => {
     setSearch("")
     setSetFilter("")
@@ -292,18 +278,33 @@ function WorkspaceContent({
       selectedFolders,
     ]
   )
+  const openMedia = useCallback(
+    (media: Media) => setSelected({ id: media.id, kind: "media" }),
+    []
+  )
   const table = useMediaTable(
     scopedMedia,
     search,
     sorting,
     setSorting,
-    (media) => setSelected({ id: media.id, kind: "media" }),
+    openMedia,
     allTags,
     data?.tag_colors ?? {},
     data?.sets ?? [],
     selectionMode
   )
-  const items = table.getRowModel().rows.map((row) => row.original)
+  const rows = table.getRowModel().rows
+  const items = useMemo(() => rows.map((row) => row.original), [rows])
+  const toggleSelection = useCallback(
+    (id: string) => table.getRow(id).toggleSelected(),
+    [table]
+  )
+  const tagCounts = useMemo(() => {
+    const counts: Record<string, number> = {}
+    for (const media of catalogMedia)
+      for (const tag of media.tags) counts[tag] = (counts[tag] ?? 0) + 1
+    return counts
+  }, [catalogMedia])
   const sort =
     sorting[0]?.id === "uploaded_at"
       ? sorting[0].desc
@@ -330,8 +331,6 @@ function WorkspaceContent({
     setMediaType("all")
     setCommand(false)
   }
-  const openMedia = (media: Media) =>
-    setSelected({ id: media.id, kind: "media" })
   if (!data)
     return (
       <div className="loading-screen">
@@ -398,12 +397,7 @@ function WorkspaceContent({
         tags={allTags}
         selected={selectedTags}
         colors={data.tag_colors}
-        counts={Object.fromEntries(
-          allTags.map((tag) => [
-            tag,
-            catalogMedia.filter((media) => media.tags.includes(tag)).length,
-          ])
-        )}
+        counts={tagCounts}
         compact={sidebarCollapsed}
         onExpand={() => setCollapsed(false)}
         onChange={(tags) => {
@@ -720,7 +714,7 @@ function WorkspaceContent({
                       className={view === v ? "selected" : ""}
                       onClick={() => {
                         setView(v)
-                        localStorage.setItem("mediabinder-view", v)
+                        document.cookie = `mediabinder_view=${v}; Path=/; Max-Age=31536000; SameSite=Lax${window.location.protocol === "https:" ? "; Secure" : ""}`
                       }}
                     >
                       {v === "grid" ? (
@@ -822,90 +816,18 @@ function WorkspaceContent({
                 ) : view === "grid" ? (
                   <div className="media-grid">
                     {items.map((media) => (
-                      <div
+                      <MediaCard
                         key={media.id}
-                        className="media-card"
-                        data-selected={
-                          table.getRow(media.id).getIsSelected() || undefined
-                        }
-                      >
-                        {!mobile && (
-                          <input
-                            className="media-card-checkbox"
-                            type="checkbox"
-                            aria-label={`Select ${media.display_name}`}
-                            checked={table.getRow(media.id).getIsSelected()}
-                            onChange={() =>
-                              table.getRow(media.id).toggleSelected()
-                            }
-                          />
-                        )}
-                        <button
-                          className="media-card-open"
-                          aria-pressed={
-                            selectionMode
-                              ? table.getRow(media.id).getIsSelected()
-                              : undefined
-                          }
-                          onClick={() =>
-                            selectionMode
-                              ? table.getRow(media.id).toggleSelected()
-                              : openMedia(media)
-                          }
-                        >
-                          <div className="media-image">
-                            <Thumbnail
-                              id={media.id}
-                              name={media.display_name}
-                              video={media.mime_type.startsWith("video/")}
-                            />
-                            {media.mime_type.startsWith("video/") && (
-                              <span className="media-type">
-                                <Film size={12} />
-                                {media.duration_ms
-                                  ? `${Math.floor(media.duration_ms / 60000)}:${String(Math.floor(media.duration_ms / 1000) % 60).padStart(2, "0")}`
-                                  : "VIDEO"}
-                              </span>
-                            )}
-                            {!media.available && (
-                              <span className="unavailable">
-                                Unavailable in Drive
-                              </span>
-                            )}
-                            {media.post_count > 0 && (
-                              <span className="posted-indicator">
-                                <Link2 size={11} />
-                                {media.post_count}
-                              </span>
-                            )}
-                          </div>
-                          <div className="media-info">
-                            <strong>{media.display_name}</strong>
-                            <span>
-                              {media.mime_type.startsWith("video/") ? (
-                                <Film size={12} />
-                              ) : (
-                                <ImageIcon size={12} />
-                              )}
-                              <span>
-                                {media.raw_name.split(".").pop()?.toUpperCase()}
-                                {media.copy_count > 1 &&
-                                  ` · ${media.copy_count} copies`}
-                              </span>
-                              <span className="dot-separator">·</span>
-                              {bytes(media.size)}
-                            </span>
-                          </div>
-                        </button>
-                        <div className="media-card-tags">
-                          <MediaTags
-                            media={media}
-                            allTags={allTags}
-                            colors={data.tag_colors}
-                            compact
-                          />
-                        </div>
-                      </div>
+                        media={media}
+                        previewIntent={previewIntent}
+                        mobile={mobile}
+                        selected={table.getRow(media.id).getIsSelected()}
+                        selectionMode={selectionMode}
+                        onOpen={openMedia}
+                        onToggleSelection={toggleSelection}
+                        allTags={allTags}
+                        colors={data.tag_colors}
+                      />
                     ))}
                   </div>
                 ) : (

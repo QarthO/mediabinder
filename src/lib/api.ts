@@ -1,7 +1,16 @@
 import { queryOptions } from "@tanstack/react-query"
+import { createServerFn } from "@tanstack/react-start"
 import { Effect } from "effect"
 import { jsonRequest } from "@/effect/http"
 import type { Library } from "./types"
+
+const loadLibrary = createServerFn({ method: "GET" }).handler(async () => {
+  const { getRequestHeaders } = await import("@tanstack/react-start/server")
+  const { requireSession } = await import("./auth.server")
+  const { library } = await import("./library.server")
+  const session = await requireSession(getRequestHeaders())
+  return library(session.user)
+})
 
 const signedIn = <A>(
   effect: Effect.Effect<A, import("@/effect/http").NetworkError>
@@ -17,21 +26,24 @@ const signedIn = <A>(
 export const libraryQuery = queryOptions({
   queryKey: ["library"],
   queryFn: ({ signal }): Promise<Library> =>
-    Effect.runPromise(
-      signedIn(
-        jsonRequest<Library>(
-          new URL("/api/library", window.location.origin).href,
-          {
-            errorMessage: (status) =>
-              status === 401
-                ? "Sign in to continue."
-                : "Could not load your library. Please retry.",
-          }
-        )
-      ),
-      { signal }
-    ),
+    typeof window === "undefined"
+      ? loadLibrary({ signal })
+      : Effect.runPromise(
+          signedIn(
+            jsonRequest<Library>(
+              new URL("/api/library", window.location.origin).href,
+              {
+                errorMessage: (status) =>
+                  status === 401
+                    ? "Sign in to continue."
+                    : "Could not load your library. Please retry.",
+              }
+            )
+          ),
+          { signal }
+        ),
   staleTime: 30_000,
+  refetchOnWindowFocus: true,
 })
 export function action<T = { ok: boolean }>(
   action: string,

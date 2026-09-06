@@ -1,3 +1,4 @@
+import { useMediaPreviewIntent } from "@/lib/media-preview"
 import { formatNameList } from "@/lib/name-list"
 import { useMobile } from "@/hooks/use-mobile"
 import { ChipOverflow } from "./chip-overflow"
@@ -9,7 +10,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
 } from "./ui/dropdown-menu"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { memo, useEffect, useMemo, useRef, useState } from "react"
 import {
   flexRender,
   getCoreRowModel,
@@ -57,6 +58,7 @@ export function useMediaTable(
   sets: MediaSet[],
   selectionMode: boolean
 ) {
+  const previewIntent = useMediaPreviewIntent()
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({})
   const itemIds = items.map((item) => item.id).join(",")
   useEffect(() => setRowSelection({}), [itemIds, search])
@@ -87,6 +89,11 @@ export function useMediaTable(
         header: "Name",
         cell: ({ row, table }) => (
           <button
+            {...(!(table.options.meta as MediaTableMeta).selectionMode
+              ? (table.options.meta as MediaTableMeta).previewIntent(
+                  row.original
+                )
+              : {})}
             className="table-name"
             aria-pressed={
               (table.options.meta as MediaTableMeta).selectionMode
@@ -176,6 +183,7 @@ export function useMediaTable(
   return useReactTable({
     data: items,
     meta: {
+      previewIntent,
       onOpen,
       allTags,
       tagColors,
@@ -219,6 +227,8 @@ export function DataTable({
     .rows.map((row) => row.original.id)
   const sorting = JSON.stringify(table.getState().sorting)
   const virtual = useVirtualizer({
+    // Render the first screen during SSR, then measure the real scroll area.
+    initialRect: { width: 0, height: 720 },
     count: rows.length,
     getScrollElement: () => body.current,
     estimateSize: () => (mobile ? 76 : 96),
@@ -328,6 +338,11 @@ export function DataTable({
                     <>
                       <td className="mobile-media-main">
                         <button
+                          {...(!selectionMode
+                            ? (
+                                table.options.meta as MediaTableMeta
+                              ).previewIntent(row.original)
+                            : {})}
                           className="mobile-media-open"
                           aria-pressed={
                             selectionMode ? row.getIsSelected() : undefined
@@ -445,13 +460,14 @@ function UploadedDate({ value }: { value: string }) {
 }
 
 type MediaTableMeta = {
+  previewIntent: ReturnType<typeof useMediaPreviewIntent>
   onOpen: (media: Media) => void
   allTags: string[]
   tagColors: Record<string, string>
   sets: MediaSet[]
   selectionMode: boolean
 }
-export function MediaTags({
+export const MediaTags = memo(function MediaTags({
   media,
   allTags,
   colors,
@@ -503,7 +519,7 @@ export function MediaTags({
       </div>
     </div>
   )
-}
+})
 
 function MediaActions({
   media,
