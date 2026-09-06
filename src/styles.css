@@ -460,6 +460,7 @@ select {
   gap: 20px 17px;
 }
 .media-card {
+  position: relative;
   text-align: left;
   min-width: 0;
   border: 1px solid #292f39;
@@ -515,7 +516,7 @@ select {
   flex-wrap: wrap;
   gap: 5px;
 }
-.media-card > .tags,
+.media-card-open > .tags,
 .set-card > .tags {
   padding: 0 12px 12px;
 }
@@ -1549,7 +1550,7 @@ tr:hover td {
   .media-info > span {
     font-size: 0.75rem;
   }
-  .media-card > .tags {
+  .media-card-open > .tags {
     padding: 0 9px 9px;
     gap: 3px;
   }
@@ -3846,4 +3847,29 @@ html {
 }
 .sidebar-tags-heading:hover {
   background: transparent;
+}
+
+.media-card-open {
+  display: block;
+  width: 100%;
+  text-align: left;
+}
+.media-card-checkbox {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 1;
+  width: 18px;
+  height: 18px;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+
+@media (min-width: 761px) and (max-width: 1000px) {
+  .sidebar-filter-open .media-workspace .data-table-frame {
+    overflow-x: auto;
+  }
+  .sidebar-filter-open .data-table {
+    min-width: 800px;
+  }
 }
