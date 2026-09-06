@@ -4,7 +4,6 @@ import { useState } from "react"
 import { authClient } from "@/lib/auth-client"
 import { Brand } from "@/components/brand"
 import { Effect } from "effect"
-import { LockKeyhole } from "lucide-react"
 const loginStatus = createServerFn({ method: "GET" }).handler(async () => {
   const { getRequestHeaders } = await import("@tanstack/react-start/server")
   const { auth } = await import("@/lib/auth.server")
@@ -26,20 +25,11 @@ function Login() {
     [error, setError] = useState("")
   return (
     <main className="login">
-      <div className="login-top">
-        <Brand />
-        <span className="eyebrow">YOUR PRIVATE MEDIA LIBRARY</span>
-      </div>
       <section className="login-card">
         <div className="login-emblem">
           <Brand compact />
         </div>
-        <h1>A place for every frame.</h1>
-        <p>
-          Your media, thoughtfully organized.
-          <br />
-          Sign in to open your binder.
-        </p>
+        <h1>MediaBinder</h1>
         <button
           type="button"
           aria-label="Sign in with Google"
@@ -92,15 +82,10 @@ function Login() {
             {error || "Sign-in was not completed. Check access and try again."}
           </p>
         )}
-        <div className="login-private">
-          <LockKeyhole size={13} />
-          Private by design. Access is restricted.
-        </div>
+        <a className="login-privacy" href="/privacy">
+          Privacy policy
+        </a>
       </section>
-      <footer className="login-footer">
-        <span>STORED IN DRIVE. ORGANIZED HERE.</span>
-        <a href="/privacy">Privacy</a>
-      </footer>
     </main>
   )
 }
