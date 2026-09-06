@@ -1,3 +1,4 @@
+import { MediaSets } from "./media-sets"
 import { tagStyle } from "@/lib/tag-colors"
 import {
   DropdownMenu,
@@ -40,7 +41,7 @@ import { Thumbnail } from "./thumbnail"
 import { bytes } from "@/lib/utils"
 import { TagPopover } from "./tag-popover"
 import { mediaDate } from "@/lib/media-date"
-import type { Media } from "@/lib/types"
+import type { Media, MediaSet } from "@/lib/types"
 
 export function useMediaTable(
   items: Media[],
@@ -49,7 +50,8 @@ export function useMediaTable(
   onSortingChange: OnChangeFn<SortingState>,
   onOpen: (media: Media) => void,
   allTags: string[],
-  tagColors: Record<string, string>
+  tagColors: Record<string, string>,
+  sets: MediaSet[]
 ) {
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({})
   const itemIds = items.map((item) => item.id).join(",")
@@ -115,6 +117,18 @@ export function useMediaTable(
         ),
       },
       {
+        id: "sets",
+        header: "Sets",
+        enableSorting: false,
+        enableGlobalFilter: false,
+        cell: ({ row, table }) => (
+          <MediaSets
+            media={row.original}
+            sets={(table.options.meta as MediaTableMeta).sets}
+          />
+        ),
+      },
+      {
         accessorKey: "uploaded_at",
         header: "Uploaded",
         cell: ({ row }) => <UploadedDate value={row.original.uploaded_at} />,
@@ -138,7 +152,7 @@ export function useMediaTable(
   )
   return useReactTable({
     data: items,
-    meta: { onOpen, allTags, tagColors } satisfies MediaTableMeta,
+    meta: { onOpen, allTags, tagColors, sets } satisfies MediaTableMeta,
     columns,
     state: { globalFilter: search, sorting, rowSelection },
     onRowSelectionChange: setRowSelection,
@@ -352,8 +366,9 @@ type MediaTableMeta = {
   onOpen: (media: Media) => void
   allTags: string[]
   tagColors: Record<string, string>
+  sets: MediaSet[]
 }
-function MediaTags({
+export function MediaTags({
   media,
   allTags,
   colors,
@@ -382,6 +397,7 @@ function MediaTags({
             <span className="tag" style={tagStyle(colors[tag])} key={tag}>
               <span title={tag}>{tag}</span>
               <button
+                type="button"
                 aria-label={`Remove ${tag} tag from ${media.display_name}`}
                 disabled={remove.isPending}
                 onClick={() => remove.mutate(tag)}

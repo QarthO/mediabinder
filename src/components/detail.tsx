@@ -1,3 +1,5 @@
+import { MediaTags } from "./data-table"
+import { MediaSets } from "./media-sets"
 import { useRef, useState } from "react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import {
@@ -54,11 +56,8 @@ export function Detail({
     [created, setCreated] = useState(
       item ? isoDate(item.created_at).slice(0, 10) : ""
     ),
-    [sets, setSets] = useState(media?.set_ids ?? []),
     [addPost, setAddPost] = useState(false),
-    [platform, setPlatform] = useState(""),
     [url, setUrl] = useState(""),
-    [postId, setPostId] = useState(""),
     [postDate, setPostDate] = useState(new Date().toISOString().slice(0, 10)),
     [failed, setFailed] = useState(false),
     [confirmDelete, setConfirmDelete] = useState(false)
@@ -69,15 +68,18 @@ export function Detail({
       action("metadata", {
         ...selected,
         displayName: name,
-        tags: tags
-          .split(",")
-          .map((t) => t.trim())
-          .filter(Boolean),
+        ...(!media
+          ? {
+              tags: tags
+                .split(",")
+                .map((t) => t.trim())
+                .filter(Boolean),
+            }
+          : {}),
         createdAt:
           item && created === isoDate(item.created_at).slice(0, 10)
             ? isoDate(item.created_at)
             : new Date(created).toISOString(),
-        ...(media ? { setIds: sets } : {}),
       }),
     onSuccess: async () => {
       await client.invalidateQueries({ queryKey: ["library"] })
@@ -90,17 +92,15 @@ export function Detail({
       action("create-post", {
         targetId: selected.id,
         kind: selected.kind,
-        platform,
+        platform: new URL(url).hostname.replace(/^www\./, ""),
         url,
-        externalId: postId,
+        externalId: "",
         createdAt: new Date(postDate).toISOString(),
       }),
     onSuccess: async () => {
       await client.invalidateQueries({ queryKey: ["library"] })
       setAddPost(false)
       setUrl("")
-      setPlatform("")
-      setPostId("")
       toast.success("Post linked")
     },
     onError: (e) => toast.error(e.message),
@@ -132,15 +132,14 @@ export function Detail({
       return
     const dirty =
       name !== item!.display_name ||
-      tags
-        .split(",")
-        .map((tag) => tag.trim())
-        .filter(Boolean)
-        .join(",") !== item!.tags.join(",") ||
+      (!media &&
+        tags
+          .split(",")
+          .map((tag) => tag.trim())
+          .filter(Boolean)
+          .join(",") !== item!.tags.join(",")) ||
       created !== isoDate(item!.created_at).slice(0, 10) ||
-      [...sets].sort().join(",") !==
-        [...(media?.set_ids ?? [])].sort().join(",") ||
-      (addPost && Boolean(platform || url || postId))
+      (addPost && Boolean(url))
     if (dirty || save.isPending || createPost.isPending) {
       toast.info("Save your changes before moving to another item", {
         id: "media-navigation-draft",
@@ -172,6 +171,7 @@ export function Detail({
         }}
         onKeyDown={(event) => {
           if (
+            addPost ||
             !navigation ||
             event.defaultPrevented ||
             event.altKey ||
@@ -334,15 +334,26 @@ export function Detail({
                     onChange={(e) => setName(e.target.value)}
                   />
                 </label>
-                <label className="field">
-                  Tags
-                  <Input
-                    value={tags}
-                    onChange={(e) => setTags(e.target.value)}
-                    placeholder="portrait, summer, campaign"
-                  />
-                  <small>Separate tags with commas.</small>
-                </label>
+                {media ? (
+                  <div className="field">
+                    <span>Tags</span>
+                    <MediaTags
+                      media={media}
+                      allTags={Object.keys(data.tag_colors)}
+                      colors={data.tag_colors}
+                    />
+                  </div>
+                ) : (
+                  <label className="field">
+                    Tags
+                    <Input
+                      value={tags}
+                      onChange={(e) => setTags(e.target.value)}
+                      placeholder="portrait, summer, campaign"
+                    />
+                    <small>Separate tags with commas.</small>
+                  </label>
+                )}
                 <label className="field">
                   Date created
                   <Input
@@ -383,30 +394,10 @@ export function Detail({
                   )}
                 </dl>
                 {media && (
-                  <fieldset className="set-checkboxes">
-                    <legend>Sets</legend>
-                    {data.sets.length ? (
-                      data.sets.map((set) => (
-                        <label key={set.id}>
-                          <input
-                            type="checkbox"
-                            checked={sets.includes(set.id)}
-                            onChange={(e) =>
-                              setSets(
-                                e.target.checked
-                                  ? [...sets, set.id]
-                                  : sets.filter((id) => id !== set.id)
-                              )
-                            }
-                          />
-                          <FolderOpen size={14} />
-                          {set.display_name}
-                        </label>
-                      ))
-                    ) : (
-                      <p>Create a set from the library to group this item.</p>
-                    )}
-                  </fieldset>
+                  <div className="field">
+                    <span>Sets</span>
+                    <MediaSets media={media} sets={data.sets} />
+                  </div>
                 )}
               </form>
               <section className="detail-posts">
@@ -456,65 +447,60 @@ export function Detail({
                         No posts linked yet. Add a link from any platform.
                       </p>
                     )}
-                {addPost && (
-                  <form
-                    className="post-form"
-                    onSubmit={(e) => {
-                      e.preventDefault()
-                      createPost.mutate()
-                    }}
+                <Dialog open={addPost} onOpenChange={setAddPost}>
+                  <DialogContent
+                    className="post-link-dialog"
+                    overlayClassName="post-link-overlay"
+                    onKeyDown={(event) => event.stopPropagation()}
                   >
-                    <label className="field">
-                      Platform
-                      <Input
-                        required
-                        maxLength={100}
-                        placeholder="Instagram, TikTok, or anywhere"
-                        value={platform}
-                        onChange={(e) => setPlatform(e.target.value)}
-                      />
-                    </label>
-                    <label className="field">
-                      Post link
-                      <Input
-                        type="url"
-                        required
-                        placeholder="https://…"
-                        value={url}
-                        onChange={(e) => setUrl(e.target.value)}
-                      />
-                    </label>
-                    <label className="field">
-                      Post ID <span className="muted">(optional)</span>
-                      <Input
-                        maxLength={255}
-                        value={postId}
-                        onChange={(e) => setPostId(e.target.value)}
-                      />
-                    </label>
-                    <label className="field">
-                      Date posted
-                      <Input
-                        required
-                        type="date"
-                        value={postDate}
-                        onChange={(e) => setPostDate(e.target.value)}
-                      />
-                    </label>
-                    <div className="dialog-footer">
-                      <Button
-                        variant="ghost"
-                        type="button"
-                        onClick={() => setAddPost(false)}
-                      >
-                        Cancel
-                      </Button>
-                      <Button type="submit" disabled={createPost.isPending}>
-                        Add post link
-                      </Button>
-                    </div>
-                  </form>
-                )}
+                    <DialogHeader>
+                      <DialogTitle>Link a post</DialogTitle>
+                      <DialogDescription>
+                        Paste a post URL from any platform.
+                      </DialogDescription>
+                    </DialogHeader>
+                    <form
+                      className="post-form"
+                      onSubmit={(e) => {
+                        e.preventDefault()
+                        createPost.mutate()
+                      }}
+                    >
+                      <label className="field">
+                        Post link
+                        <Input
+                          type="url"
+                          required
+                          maxLength={2048}
+                          placeholder="https://…"
+                          value={url}
+                          onChange={(e) => setUrl(e.target.value)}
+                        />
+                      </label>
+                      <label className="field">
+                        Date posted
+                        <Input
+                          required
+                          type="date"
+                          value={postDate}
+                          onChange={(e) => setPostDate(e.target.value)}
+                        />
+                      </label>
+                      <div className="dialog-footer">
+                        <Button
+                          variant="ghost"
+                          type="button"
+                          onClick={() => setAddPost(false)}
+                        >
+                          Cancel
+                        </Button>
+                        <Button type="submit" disabled={createPost.isPending}>
+                          Link post
+                        </Button>
+                      </div>
+                    </form>
+                  </DialogContent>
+                </Dialog>
               </section>
               {selected.kind === "set" && (
                 <div className="delete-set">

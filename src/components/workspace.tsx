@@ -1,4 +1,5 @@
 import { FolderSelector } from "./folder-selector"
+import { SearchSelect } from "./ui/search-select"
 import { Select } from "./ui/select"
 import { tagStyle } from "@/lib/tag-colors"
 import {
@@ -80,6 +81,7 @@ export function Workspace() {
   const [view, setView] = useState<"grid" | "list">("grid"),
     [search, setSearch] = useState(""),
     [tag, setTag] = useState(""),
+    [setFilter, setSetFilter] = useState(""),
     [sorting, setSorting] = useState<SortingState>([
       { id: "uploaded_at", desc: true },
     ]),
@@ -146,6 +148,7 @@ export function Workspace() {
   useEffect(() => {
     setSearch("")
     setTag("")
+    setSetFilter("")
     setSelected(null)
   }, [pathname])
   const createSet = useMutation({
@@ -204,10 +207,11 @@ export function Workspace() {
           (page !== "videos" || m.mime_type.startsWith("video/")) &&
           (!setId || m.set_ids.includes(setId)) &&
           (!tag || m.tags.includes(tag)) &&
+          (!setFilter || m.set_ids.includes(setFilter)) &&
           (!selectedFolders.length ||
             m.source_ids.some((id) => selectedFolders.includes(id)))
       ),
-    [catalogMedia, page, setId, tag, selectedFolders]
+    [catalogMedia, page, setId, tag, setFilter, selectedFolders]
   )
   const table = useMediaTable(
     scopedMedia,
@@ -216,7 +220,8 @@ export function Workspace() {
     setSorting,
     (media) => setSelected({ id: media.id, kind: "media" }),
     allTags,
-    data?.tag_colors ?? {}
+    data?.tag_colors ?? {},
+    data?.sets ?? []
   )
   const items = table.getRowModel().rows.map((row) => row.original)
   const sort =
@@ -541,7 +546,7 @@ export function Workspace() {
                   <RefreshCw className={sync.isPending ? "spin" : ""} />
                   {sync.isPending ? "Syncing…" : "Sync Drive"}
                 </Button>
-                <Select
+                <SearchSelect
                   label="Filter by tag"
                   value={tag ? `tag:${tag}` : "all"}
                   onChange={(value) =>
@@ -552,6 +557,20 @@ export function Workspace() {
                     ...allTags.map((value) => ({
                       value: `tag:${value}`,
                       label: value,
+                    })),
+                  ]}
+                />
+                <SearchSelect
+                  label="Filter by set"
+                  value={setFilter || "all"}
+                  onChange={(value) =>
+                    setSetFilter(value === "all" ? "" : value)
+                  }
+                  options={[
+                    { value: "all", label: "All sets" },
+                    ...data.sets.map((set) => ({
+                      value: set.id,
+                      label: set.display_name,
                     })),
                   ]}
                 />
@@ -614,7 +633,7 @@ export function Workspace() {
                 <Empty
                   icon={setId ? FolderOpen : Images}
                   title={
-                    search || tag
+                    search || tag || setFilter
                       ? "No media found"
                       : setId
                         ? "This set is a blank canvas"
@@ -623,8 +642,8 @@ export function Workspace() {
                           : "Connect your Google Drive"
                   }
                   description={
-                    search || tag
-                      ? "Try a different name or tag."
+                    search || tag || setFilter
+                      ? "Try a different name, tag, or set."
                       : setId
                         ? "Open media from your library and add it to this set."
                         : data.workspace.sources.length
@@ -632,7 +651,7 @@ export function Workspace() {
                           : "Choose a folder in settings, then sync to bring your images and videos together."
                   }
                   action={
-                    !search && !tag && !setId ? (
+                    !search && !tag && !setFilter && !setId ? (
                       <Button
                         disabled={sync.isPending}
                         onClick={() =>
@@ -723,7 +742,7 @@ export function Workspace() {
                 <DataTable
                   table={table}
                   allTags={allTags}
-                  resetKey={`${page}:${setId}:${tag}:${search}`}
+                  resetKey={`${page}:${setId}:${tag}:${setFilter}:${search}`}
                 />
               )}
             </>

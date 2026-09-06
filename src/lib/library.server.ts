@@ -172,6 +172,60 @@ export async function mutate(
     )
     return { ok: true }
   }
+  if (action === "set-membership") {
+    const value = z
+      .object({
+        id,
+        setId: id.optional(),
+        displayName: z.string().trim().min(1).max(255).optional(),
+        remove: z.boolean().default(false),
+      })
+      .refine(
+        (v) =>
+          Boolean(v.setId) !== Boolean(v.displayName) &&
+          (!v.remove || Boolean(v.setId))
+      )
+      .parse(input)
+    const connection = await pool.getConnection()
+    try {
+      await connection.beginTransaction()
+      const [media] = await connection.query<import("mysql2").RowDataPacket[]>(
+        "SELECT id FROM media WHERE id=? AND user_id=? AND available=TRUE FOR UPDATE",
+        [value.id, userId]
+      )
+      if (!media.length) throw new Error("This media is no longer available.")
+      const setId = value.setId ?? randomUUID()
+      if (value.setId) {
+        const [sets] = await connection.query<import("mysql2").RowDataPacket[]>(
+          "SELECT id FROM media_set WHERE id=? AND user_id=? FOR UPDATE",
+          [setId, userId]
+        )
+        if (!sets.length) throw new Error("This set is no longer available.")
+      } else {
+        await connection.execute(
+          "INSERT INTO media_set (id,user_id,display_name,raw_name,tags,created_at) VALUES (?,?,?,?,?,NOW(3))",
+          [setId, userId, value.displayName!, value.displayName!, "[]"]
+        )
+      }
+      if (value.remove)
+        await connection.execute(
+          "DELETE FROM set_member WHERE set_id=? AND media_id=?",
+          [setId, value.id]
+        )
+      else
+        await connection.execute(
+          "INSERT IGNORE INTO set_member (set_id,media_id) VALUES (?,?)",
+          [setId, value.id]
+        )
+      await connection.commit()
+      return { id: setId }
+    } catch (error) {
+      await connection.rollback()
+      throw error
+    } finally {
+      connection.release()
+    }
+  }
   if (action === "create-set") {
     const value = newSet.parse(input),
       setId = randomUUID()
@@ -256,16 +310,16 @@ export async function mutate(
     try {
       await connection.beginTransaction()
       await connection.execute(
-        `UPDATE ${value.kind === "media" ? "media" : "media_set"} SET display_name=?,tags=?,created_at=? WHERE id=? AND user_id=?`,
+        `UPDATE ${value.kind === "media" ? "media" : "media_set"} SET display_name=?,${value.tags ? "tags=?," : ""}created_at=? WHERE id=? AND user_id=?`,
         [
           value.displayName,
-          JSON.stringify(value.tags),
+          ...(value.tags ? [JSON.stringify(value.tags)] : []),
           new Date(value.createdAt),
           value.id,
           userId,
         ]
       )
-      await ensureTags(userId, value.tags, connection)
+      if (value.tags) await ensureTags(userId, value.tags, connection)
       if (value.kind === "media" && value.setIds) {
         await connection.execute("DELETE FROM set_member WHERE media_id=?", [
           value.id,

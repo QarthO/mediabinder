@@ -9,7 +9,7 @@ export const metadata = z.object({
   id,
   kind: z.enum(["media", "set"]),
   displayName: z.string().trim().min(1).max(255),
-  tags,
+  tags: tags.optional(),
   createdAt: date,
   setIds: z.array(id).max(200).optional(),
 })

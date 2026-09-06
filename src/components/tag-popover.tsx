@@ -72,6 +72,7 @@ export function TagPopover({
     >
       <Popover.Trigger asChild>
         <button
+          type="button"
           className={bulk ? "bulk-tag-trigger" : "tag-add"}
           aria-label={label}
           disabled={!ids.length}

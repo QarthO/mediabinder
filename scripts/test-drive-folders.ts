@@ -100,6 +100,47 @@ test("tag additions and unlinking preserve metadata and user isolation", async (
       new Headers()
     )
     assert.deepEqual((await library(user)).media[0].tags, ["kept"])
+    const membership = (input: unknown, owner = userId) =>
+      mutate("set-membership", input, owner, new Headers())
+    await assert.rejects(() =>
+      membership({ id: mediaId, setId, remove: true }, otherUser)
+    )
+    await membership({ id: mediaId, setId })
+    assert.deepEqual((await library(user)).media[0].set_ids, [setId])
+    const createdSet = (await membership({
+      id: mediaId,
+      displayName: "New inline set",
+    })) as { id: string }
+    await mutate(
+      "metadata",
+      {
+        id: mediaId,
+        kind: "media",
+        displayName: "Edited name",
+        createdAt: new Date().toISOString(),
+      },
+      userId,
+      new Headers()
+    )
+    assert.deepEqual((await library(user)).media[0].tags, ["kept"])
+    assert.equal((await library(user)).media[0].set_ids.length, 2)
+    await membership({ id: mediaId, setId: createdSet.id, remove: true })
+    assert.deepEqual((await library(user)).media[0].set_ids, [setId])
+    await mutate("delete-set", { id: createdSet.id }, userId, new Headers())
+    await assert.rejects(() => membership({ id: mediaId, setId: randomUUID() }))
+    await assert.rejects(() =>
+      membership({ id: mediaId, displayName: "Unauthorized" }, otherUser)
+    )
+    assert.equal(
+      (
+        await rows<{ count: number }>(
+          "SELECT COUNT(*) AS count FROM media_set WHERE user_id=?",
+          [otherUser]
+        )
+      )[0].count,
+      0
+    )
+
     await mutate("remove-source", { folderId: "a" }, userId, new Headers())
     let result = await library(user)
     assert.equal(result.media.length, 1)

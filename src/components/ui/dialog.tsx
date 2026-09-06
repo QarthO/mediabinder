@@ -23,13 +23,15 @@ export function DialogContent({
   children,
   className,
   showCloseButton = true,
+  overlayClassName,
   ...props
 }: React.ComponentProps<typeof Primitive.Content> & {
+  overlayClassName?: string
   showCloseButton?: boolean
 }) {
   return (
     <Primitive.Portal>
-      <Primitive.Overlay className="dialog-overlay" />
+      <Primitive.Overlay className={cn("dialog-overlay", overlayClassName)} />
       <Primitive.Content className={cn("dialog-content", className)} {...props}>
         {children}
         {showCloseButton && (
