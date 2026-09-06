@@ -1291,16 +1291,6 @@ tr:hover td {
     radial-gradient(ellipse at 50% 45%, #1a263833, transparent 60%),
     var(--background);
 }
-.login-top {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 29px 38px;
-}
-.login-top .eyebrow {
-  font-size: 0.75rem;
-  color: #556882;
-}
 .login-card {
   width: 330px;
   max-width: calc(100% - 48px);
@@ -1358,23 +1348,20 @@ tr:hover td {
   opacity: 0.5;
   cursor: wait;
 }
-.login-private {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  color: #5e7491;
-  font-size: 0.75rem;
-  margin-top: 19px;
+.login-privacy {
+  display: inline-block;
+  margin-top: 20px;
+  color: var(--muted-foreground);
+  font-size: 0.875rem;
+  text-underline-offset: 4px;
 }
-.login-footer {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 28px 38px;
-  font: 0.75rem var(--font-mono);
-  letter-spacing: 1px;
-  color: #485b73;
+.login-privacy:hover {
+  color: var(--foreground);
+  text-decoration: underline;
+}
+.login-privacy:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 4px;
 }
 .form-error {
   color: #f5b4a8 !important;
@@ -1638,16 +1625,6 @@ tr:hover td {
   }
   .external-link {
     margin-left: auto;
-  }
-  .login-top {
-    padding: 24px;
-  }
-  .login-top .eyebrow {
-    display: none;
-  }
-  .login-footer {
-    padding: 24px;
-    font-size: 0.75rem;
   }
   .set-grid {
     grid-template-columns: 1fr;
