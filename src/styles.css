@@ -2329,7 +2329,8 @@ html {
   font-size: 0.75rem;
 }
 .table-footer {
-  min-height: 54px;
+  height: 60px;
+  min-height: 60px;
   align-items: center;
   gap: 12px;
   flex-shrink: 0;
@@ -2460,7 +2461,11 @@ html {
   }
   .table-footer {
     padding: 10px 8px;
-    flex-wrap: wrap;
+    height: 88px;
+    min-height: 88px;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
     gap: 8px;
     font-size: 0.6875rem;
   }
@@ -2935,5 +2940,31 @@ html {
   }
   .library-toolbar .toolbar-spacer {
     display: none;
+  }
+}
+
+.detail-navigation {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.detail-navigation span {
+  min-width: 52px;
+  text-align: center;
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+.detail-navigation button:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+@media (max-width: 760px) {
+  .detail-navigation {
+    gap: 0;
+  }
+  .detail-navigation span {
+    min-width: 38px;
   }
 }

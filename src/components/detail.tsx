@@ -1,7 +1,9 @@
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import {
   ArrowUpRight,
+  ChevronLeft,
+  ChevronRight,
   Link2,
   Plus,
   Trash2,
@@ -28,10 +30,16 @@ export function Detail({
   selected,
   data,
   onClose,
+  navigation,
 }: {
   selected: { id: string; kind: "media" | "set" }
   data: Library
   onClose: () => void
+  navigation?: {
+    index: number
+    count: number
+    onStep: (direction: number) => void
+  }
 }) {
   const item =
     selected.kind === "media"
@@ -54,6 +62,7 @@ export function Detail({
     [postDate, setPostDate] = useState(new Date().toISOString().slice(0, 10)),
     [failed, setFailed] = useState(false),
     [confirmDelete, setConfirmDelete] = useState(false)
+  const dialogRef = useRef<HTMLDivElement>(null)
   const client = useQueryClient()
   const save = useMutation({
     mutationFn: () =>
@@ -114,6 +123,32 @@ export function Detail({
     onError: (e) => toast.error(e.message),
   })
   if (!item) return null
+  function step(direction: number) {
+    if (
+      !navigation ||
+      navigation.index + direction < 0 ||
+      navigation.index + direction >= navigation.count
+    )
+      return
+    const dirty =
+      name !== item!.display_name ||
+      tags
+        .split(",")
+        .map((tag) => tag.trim())
+        .filter(Boolean)
+        .join(",") !== item!.tags.join(",") ||
+      created !== isoDate(item!.created_at).slice(0, 10) ||
+      [...sets].sort().join(",") !==
+        [...(media?.set_ids ?? [])].sort().join(",") ||
+      (addPost && Boolean(platform || url || postId))
+    if (dirty || save.isPending || createPost.isPending) {
+      toast.info("Save your changes before moving to another item", {
+        id: "media-navigation-draft",
+      })
+      return
+    }
+    navigation.onStep(direction)
+  }
   const posts = data.posts.filter((p) =>
     selected.kind === "media"
       ? p.media_id === selected.id
@@ -127,7 +162,42 @@ export function Detail({
         if (!open) onClose()
       }}
     >
-      <DialogContent className="detail-dialog" showCloseButton={false}>
+      <DialogContent
+        ref={dialogRef}
+        className="detail-dialog"
+        showCloseButton={false}
+        onOpenAutoFocus={(event) => {
+          event.preventDefault()
+          dialogRef.current?.focus()
+        }}
+        onKeyDown={(event) => {
+          if (
+            !navigation ||
+            event.defaultPrevented ||
+            event.altKey ||
+            event.ctrlKey ||
+            event.metaKey ||
+            event.shiftKey
+          )
+            return
+          const target = event.target as HTMLElement
+          if (
+            target.closest(
+              'input, textarea, select, [contenteditable="true"], video, audio, [role="slider"], [role="combobox"], [role="menu"], [role="listbox"]'
+            ) ||
+            !event.currentTarget.contains(target)
+          )
+            return
+          if (
+            ["ArrowLeft", "ArrowUp", "ArrowRight", "ArrowDown"].includes(
+              event.key
+            )
+          ) {
+            event.preventDefault()
+            step(event.key === "ArrowLeft" || event.key === "ArrowUp" ? -1 : 1)
+          }
+        }}
+      >
         <header className="detail-header">
           <DialogHeader>
             <div className="eyebrow">
@@ -144,6 +214,31 @@ export function Detail({
                 : `${members.length} items · A collection in your library`}
             </DialogDescription>
           </DialogHeader>
+          {navigation && (
+            <div className="detail-navigation" aria-label="Media navigation">
+              <button
+                className="icon-button"
+                aria-label="Previous media"
+                title="Previous media (← or ↑)"
+                disabled={navigation.index === 0}
+                onClick={() => step(-1)}
+              >
+                <ChevronLeft size={20} />
+              </button>
+              <span aria-live="polite">
+                {navigation.index + 1} / {navigation.count}
+              </span>
+              <button
+                className="icon-button"
+                aria-label="Next media"
+                title="Next media (→ or ↓)"
+                disabled={navigation.index === navigation.count - 1}
+                onClick={() => step(1)}
+              >
+                <ChevronRight size={20} />
+              </button>
+            </div>
+          )}
           {media && (
             <a
               className="detail-drive-link"

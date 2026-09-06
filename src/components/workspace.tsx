@@ -853,6 +853,23 @@ export function Workspace() {
           key={`${selected.kind}-${selected.id}`}
           selected={selected}
           data={data}
+          navigation={
+            selected.kind === "media" &&
+            items.some((item) => item.id === selected.id)
+              ? {
+                  index: items.findIndex((item) => item.id === selected.id),
+                  count: items.length,
+                  onStep: (direction) => {
+                    const next =
+                      items[
+                        items.findIndex((item) => item.id === selected.id) +
+                          direction
+                      ]
+                    if (next) openMedia(next)
+                  },
+                }
+              : undefined
+          }
           onClose={() => setSelected(null)}
         />
       )}
