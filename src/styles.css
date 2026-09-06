@@ -3873,3 +3873,40 @@ html {
     min-width: 800px;
   }
 }
+
+.media-card-tags {
+  padding: 0 12px 12px;
+}
+.media-card-tags > .table-tags {
+  height: 62px;
+  min-width: 0;
+  flex-wrap: nowrap;
+}
+.media-card-tags .table-tags > .tag-chips {
+  flex: 1;
+  align-items: flex-start;
+}
+.media-card .media-info > span {
+  white-space: nowrap;
+  overflow: hidden;
+}
+.media-card .media-info > span > span:first-of-type {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.settings-top h2 {
+  font-size: 1rem;
+}
+.settings-folders {
+  margin-top: 24px;
+  padding-top: 24px;
+  border-top: 1px solid var(--border);
+}
+.settings-folders .source-list {
+  margin-bottom: 0;
+}
+.settings-folders .section-heading {
+  flex-wrap: wrap;
+  gap: 12px;
+}

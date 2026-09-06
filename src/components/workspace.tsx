@@ -14,7 +14,12 @@ import {
 import { useEffect, useMemo, useState, useRef } from "react"
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query"
 import { type SortingState } from "@tanstack/react-table"
-import { DataTable, MediaSelectionActions, useMediaTable } from "./data-table"
+import {
+  DataTable,
+  MediaTags,
+  MediaSelectionActions,
+  useMediaTable,
+} from "./data-table"
 import {
   ArrowUpDown,
   Inbox,
@@ -69,8 +74,7 @@ const navItems = [
 ] as const
 export function Workspace() {
   const mobile = useMobile()
-  const [mobileSelectionMode, setSelectionMode] = useState(false)
-  const selectionMode = mobile && mobileSelectionMode
+  const [selectionEnabled, setSelectionMode] = useState(false)
   const [mobileSidebar, setMobileSidebar] = useState(false)
   const [mobileSearch, setMobileSearch] = useState(false)
   const searchInput = useRef<HTMLInputElement>(null)
@@ -103,6 +107,7 @@ export function Workspace() {
       kind: "media" | "set"
     } | null>(null),
     [collapsed, setCollapsed] = useState(false)
+  const selectionMode = (mobile || view === "grid") && selectionEnabled
   const sidebarCollapsed = !mobile && collapsed
   const toggleSidebar = () => {
     if (mobile) setMobileSidebar((value) => !value)
@@ -445,7 +450,7 @@ export function Workspace() {
           <span className="muted">Library</span>
           <ChevronRight size={13} />
           <span className="breadcrumb">{title}</span>
-          {page === "all" && mobile && (
+          {page === "all" && (mobile || view === "grid") && (
             <Button
               className="header-select"
               variant="outline"
@@ -834,25 +839,15 @@ export function Workspace() {
                               {bytes(media.size)}
                             </span>
                           </div>
-                          {media.tags.length > 0 && (
-                            <div className="tags">
-                              {media.tags.slice(0, 3).map((t) => (
-                                <span
-                                  key={t}
-                                  className="tag"
-                                  style={tagStyle(data.tag_colors[t])}
-                                >
-                                  {t}
-                                </span>
-                              ))}
-                              {media.tags.length > 3 && (
-                                <span className="tag">
-                                  +{media.tags.length - 3}
-                                </span>
-                              )}
-                            </div>
-                          )}
                         </button>
+                        <div className="media-card-tags">
+                          <MediaTags
+                            media={media}
+                            allTags={allTags}
+                            colors={data.tag_colors}
+                            compact
+                          />
+                        </div>
                       </div>
                     ))}
                   </div>

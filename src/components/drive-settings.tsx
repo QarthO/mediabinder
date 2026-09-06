@@ -65,73 +65,29 @@ export function DriveSettings({
     <div className="settings-content">
       <section className="settings-card">
         <div className="settings-body">
-          <div className="section-heading">
-            <h3>
-              Google Drive folders <span>{workspace.sources.length}</span>
-            </h3>
+          <div className="section-heading settings-top">
+            <h2>Google Drive</h2>
             <Button
               variant="outline"
-              disabled={!workspace.sources.length || sync.isPending}
-              onClick={() => sync.mutate()}
+              onClick={async () => {
+                try {
+                  const result = await authClient.linkSocial({
+                    provider: "google",
+                    callbackURL: "/",
+                  })
+                  if (result.error) throw new Error(result.error.message)
+                } catch (e) {
+                  toast.error(
+                    e instanceof Error
+                      ? e.message
+                      : "Could not reconnect Google"
+                  )
+                }
+              }}
             >
-              <RefreshCw className={sync.isPending ? "spin" : ""} />
-              {sync.isPending ? "Syncing…" : "Sync all folders"}
+              <RefreshCw />
+              Reconnect Google
             </Button>
-          </div>
-          {!workspace.sources.length && <p>No folders linked yet.</p>}
-          <div className="source-list">
-            {workspace.sources.map((source) => (
-              <div className="source-entry" key={source.folder_id}>
-                <div className="current-folder">
-                  <FolderOpen size={20} />
-                  <div>
-                    <strong>{source.folder_name}</strong>
-                    <small>
-                      {source.last_synced_at
-                        ? `Last synced ${dateValue(source.last_synced_at)}`
-                        : "Not synced yet"}
-                    </small>
-                  </div>
-                  <a
-                    href={`https://drive.google.com/drive/folders/${source.folder_id}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    aria-label={`Open ${source.folder_name} in Drive`}
-                  >
-                    <ArrowUpRight size={17} />
-                  </a>
-                  <button
-                    className="icon-button"
-                    aria-label={`Unlink ${source.folder_name}`}
-                    title="Unlink folder"
-                    onClick={() => setRemoving(source.folder_id)}
-                    disabled={unlink.isPending || sync.isPending}
-                  >
-                    <Unlink size={17} />
-                  </button>
-                </div>
-                {removing === source.folder_id && (
-                  <div className="unlink-confirm" role="alert">
-                    <p>
-                      Unlink this folder? Media unique to it will be hidden.
-                      Your edits are kept if you link it again.
-                    </p>
-                    <div className="settings-actions">
-                      <Button variant="ghost" onClick={() => setRemoving(null)}>
-                        Cancel
-                      </Button>
-                      <Button
-                        variant="destructive"
-                        disabled={unlink.isPending}
-                        onClick={() => unlink.mutate(source.folder_id)}
-                      >
-                        {unlink.isPending ? "Unlinking…" : "Unlink folder"}
-                      </Button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            ))}
           </div>
           <h3>Link folder</h3>
           <form
@@ -226,27 +182,79 @@ export function DriveSettings({
               )}
             </div>
           )}
-        </div>
-        <div className="settings-card-footer">
-          <Button
-            variant="outline"
-            onClick={async () => {
-              try {
-                const result = await authClient.linkSocial({
-                  provider: "google",
-                  callbackURL: "/",
-                })
-                if (result.error) throw new Error(result.error.message)
-              } catch (e) {
-                toast.error(
-                  e instanceof Error ? e.message : "Could not reconnect Google"
-                )
-              }
-            }}
-          >
-            <RefreshCw />
-            Reconnect Google
-          </Button>
+          <div className="settings-folders">
+            <div className="section-heading">
+              <h3>
+                Linked folders <span>{workspace.sources.length}</span>
+              </h3>
+              <Button
+                variant="outline"
+                disabled={!workspace.sources.length || sync.isPending}
+                onClick={() => sync.mutate()}
+              >
+                <RefreshCw className={sync.isPending ? "spin" : ""} />
+                {sync.isPending ? "Syncing…" : "Sync all folders"}
+              </Button>
+            </div>
+            {!workspace.sources.length && <p>No folders linked yet.</p>}
+            <div className="source-list">
+              {workspace.sources.map((source) => (
+                <div className="source-entry" key={source.folder_id}>
+                  <div className="current-folder">
+                    <FolderOpen size={20} />
+                    <div>
+                      <strong>{source.folder_name}</strong>
+                      <small>
+                        {source.last_synced_at
+                          ? `Last synced ${dateValue(source.last_synced_at)}`
+                          : "Not synced yet"}
+                      </small>
+                    </div>
+                    <a
+                      href={`https://drive.google.com/drive/folders/${source.folder_id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      aria-label={`Open ${source.folder_name} in Drive`}
+                    >
+                      <ArrowUpRight size={17} />
+                    </a>
+                    <button
+                      className="icon-button"
+                      aria-label={`Unlink ${source.folder_name}`}
+                      title="Unlink folder"
+                      onClick={() => setRemoving(source.folder_id)}
+                      disabled={unlink.isPending || sync.isPending}
+                    >
+                      <Unlink size={17} />
+                    </button>
+                  </div>
+                  {removing === source.folder_id && (
+                    <div className="unlink-confirm" role="alert">
+                      <p>
+                        Unlink this folder? Media unique to it will be hidden.
+                        Your edits are kept if you link it again.
+                      </p>
+                      <div className="settings-actions">
+                        <Button
+                          variant="ghost"
+                          onClick={() => setRemoving(null)}
+                        >
+                          Cancel
+                        </Button>
+                        <Button
+                          variant="destructive"
+                          disabled={unlink.isPending}
+                          onClick={() => unlink.mutate(source.folder_id)}
+                        >
+                          {unlink.isPending ? "Unlinking…" : "Unlink folder"}
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       </section>
     </div>
