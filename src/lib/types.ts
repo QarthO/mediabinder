@@ -11,6 +11,10 @@ export interface Media {
   height: number | null
   duration_ms: number | null
   available: boolean
+  cataloged: boolean
+  cataloged_at: string | null
+  sha256: string | null
+  copy_count: number
   drive_id: string
   source_ids: string[]
   parent_ids: string[]

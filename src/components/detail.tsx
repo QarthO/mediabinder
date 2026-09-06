@@ -366,7 +366,12 @@ export function Detail({
                 <dl className="file-facts">
                   <div>
                     <dt>Raw name</dt>
-                    <dd>{item.raw_name}</dd>
+                    <dd>
+                      {item.raw_name}
+                      {media && media.copy_count > 1
+                        ? ` · ${media.copy_count} copies`
+                        : ""}
+                    </dd>
                   </div>
                   <div>
                     <dt>Uploaded to Drive</dt>

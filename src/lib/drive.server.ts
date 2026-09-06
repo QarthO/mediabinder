@@ -1,9 +1,13 @@
+import {
+  catalogTransaction,
+  resolveCatalog,
+  withDriveLock,
+} from "./catalog.server"
 import { runServer } from "@/effect/runtime.server"
 import { Effect } from "effect"
 import { jsonRequest } from "@/effect/http"
 import { randomUUID } from "node:crypto"
 import { auth } from "./auth.server"
-import { pool, rows } from "./database.server"
 export interface DriveFile {
   id: string
   name: string
@@ -17,6 +21,7 @@ export interface DriveFile {
     durationMillis?: string
   }
   parents?: string[]
+  sha256Checksum?: string
   thumbnailLink?: string
 }
 export async function driveToken(headers?: Headers, userId?: string) {
@@ -83,22 +88,14 @@ export async function listFolders(headers: Headers) {
   return folders.sort((a, b) => a.name.localeCompare(b.name))
 }
 export async function syncDrive(userId: string, headers?: Headers) {
-  const connection = await pool.getConnection()
-  const lockName = `drive:${userId}`
-  try {
-    const [lock] = await connection.query<any[]>(
-      "SELECT GET_LOCK(?, 0) AS acquired",
-      [lockName]
-    )
-    if (lock[0].acquired !== 1)
-      throw new Error("A sync is already running. Try again shortly.")
-    const sources = await rows<{ folder_id: string }>(
+  const token = await driveToken(headers, userId)
+  return withDriveLock(userId, async (connection) => {
+    const [sources] = await connection.query<import("mysql2").RowDataPacket[]>(
       "SELECT folder_id FROM drive_folder WHERE user_id = ?",
       [userId]
     )
     if (!sources.length)
       throw new Error("Choose a Google Drive folder in settings first.")
-    const token = await driveToken(headers, userId)
     const sourceFiles = new Map<string, DriveFile[]>()
     for (const source of sources) {
       const pending = [source.folder_id],
@@ -116,7 +113,7 @@ export async function syncDrive(userId: string, headers?: Headers) {
           }>(token, "files", {
             q: `'${parent}' in parents and trashed = false and (mimeType contains 'image/' or mimeType contains 'video/' or mimeType = 'application/vnd.google-apps.folder')`,
             fields:
-              "nextPageToken,files(id,name,mimeType,createdTime,size,parents,imageMediaMetadata,videoMediaMetadata)",
+              "nextPageToken,files(id,name,mimeType,createdTime,size,parents,sha256Checksum,imageMediaMetadata,videoMediaMetadata)",
             pageSize: "1000",
             supportsAllDrives: "true",
             includeItemsFromAllDrives: "true",
@@ -138,8 +135,7 @@ export async function syncDrive(userId: string, headers?: Headers) {
       ).values(),
     ]
     // Only reconcile after every Drive page succeeds; failures preserve the catalog.
-    await connection.beginTransaction()
-    try {
+    await catalogTransaction(async (connection) => {
       const [current] = await connection.query<any[]>(
         "SELECT folder_id FROM drive_folder WHERE user_id = ? FOR UPDATE",
         [userId]
@@ -157,6 +153,7 @@ export async function syncDrive(userId: string, headers?: Headers) {
         userId,
       ])
       for (const file of files) {
+        const catalogId = await resolveCatalog(connection, file)
         const captured = file.imageMediaMetadata?.time
           ?.replace(/^(\d{4}):(\d{2}):(\d{2})/, "$1-$2-$3")
           .replace(" ", "T")
@@ -166,8 +163,8 @@ export async function syncDrive(userId: string, headers?: Headers) {
             : new Date(file.createdTime)
         const dimensions = file.imageMediaMetadata ?? file.videoMediaMetadata
         await connection.execute(
-          `INSERT INTO media (id,user_id,drive_id,display_name,raw_name,mime_type,tags,created_at,uploaded_at,size,width,height,duration_ms,available,synced_at)
-          VALUES (?,?,?,?,?,?,?, ?,?,?,?,?,?,TRUE,NOW(3)) ON DUPLICATE KEY UPDATE raw_name=VALUES(raw_name),mime_type=VALUES(mime_type),size=VALUES(size),width=VALUES(width),height=VALUES(height),duration_ms=VALUES(duration_ms),available=TRUE,synced_at=NOW(3)`,
+          `INSERT INTO media (id,user_id,drive_id,display_name,raw_name,mime_type,tags,created_at,uploaded_at,size,width,height,duration_ms,available,synced_at,catalog_id)
+          VALUES (?,?,?,?,?,?,?, ?,?,?,?,?,?,TRUE,NOW(3),?) ON DUPLICATE KEY UPDATE catalog_id=VALUES(catalog_id), raw_name=VALUES(raw_name),mime_type=VALUES(mime_type),size=VALUES(size),width=VALUES(width),height=VALUES(height),duration_ms=VALUES(duration_ms),available=TRUE,synced_at=NOW(3)`,
           [
             randomUUID(),
             userId,
@@ -182,6 +179,7 @@ export async function syncDrive(userId: string, headers?: Headers) {
             dimensions?.width ?? null,
             dimensions?.height ?? null,
             Number(file.videoMediaMetadata?.durationMillis) || null,
+            catalogId,
           ]
         )
       }
@@ -203,14 +201,7 @@ export async function syncDrive(userId: string, headers?: Headers) {
         "UPDATE drive_folder SET last_synced_at = NOW(3) WHERE user_id = ?",
         [userId]
       )
-      await connection.commit()
-    } catch (error) {
-      await connection.rollback()
-      throw error
-    }
+    }, connection)
     return { count: files.length }
-  } finally {
-    await connection.query("SELECT RELEASE_LOCK(?)", [lockName])
-    connection.release()
-  }
+  })
 }

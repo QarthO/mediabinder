@@ -2,7 +2,13 @@ import { driveWebhookUrl } from "./config"
 import { z } from "zod"
 import { ensureTags } from "./tags.server"
 import { randomUUID } from "node:crypto"
-import { pool, rows } from "./database.server"
+import { rows } from "./database.server"
+import {
+  catalogTransaction,
+  accessible,
+  markCataloged,
+  withDriveLock,
+} from "./catalog.server"
 import type { Library, Media, MediaSet, Post, DriveSource } from "./types"
 import {
   metadata,
@@ -15,54 +21,52 @@ import {
   tags,
 } from "./validation"
 import { driveJson, driveToken, listFolders, syncDrive } from "./drive.server"
+import type { RowDataPacket } from "mysql2/promise"
+
 export async function library(
   user: Library["user"] & { id: string }
 ): Promise<Library> {
   const [
-    media,
+    copies,
     sets,
     posts,
     sources,
     membership,
-    locations,
-    sourceMembership,
     definitions,
     watches,
     syncStatus,
   ] = await Promise.all([
-    // React Table uses input order to break sort ties. Keep it stable across metadata edits.
-    rows<Media>(
-      "SELECT m.*, (SELECT COUNT(*) FROM post p WHERE p.media_id=m.id) AS post_count FROM media m WHERE user_id=? AND available=TRUE ORDER BY m.uploaded_at DESC, m.id ASC",
+    rows<Media & { physical_id: string }>(
+      `SELECT m.*,m.id AS physical_id,c.id,c.display_name,c.tags,c.created_at,c.cataloged_at,c.sha256,
+      COALESCE(l.parent_ids,JSON_ARRAY()) AS parent_ids,
+      (SELECT COUNT(*) FROM post p WHERE p.catalog_id=c.id) AS post_count
+      FROM media m JOIN catalog c ON c.id=m.catalog_id LEFT JOIN media_location l ON l.media_id=m.id
+      WHERE m.user_id=? AND m.available=TRUE ORDER BY m.uploaded_at DESC,m.id ASC`,
       [user.id]
     ),
     rows<MediaSet>(
-      `SELECT s.*, (SELECT COUNT(*) FROM set_member sm JOIN media m ON m.id=sm.media_id WHERE sm.set_id=s.id AND m.available=TRUE) AS media_count, (SELECT sm.media_id FROM set_member sm JOIN media m ON m.id=sm.media_id WHERE sm.set_id=s.id AND m.available=TRUE LIMIT 1) AS cover_id, (SELECT COUNT(*) FROM post p WHERE p.set_id=s.id) AS post_count FROM media_set s WHERE user_id=? ORDER BY created_at DESC`,
-      [user.id]
+      `SELECT s.* FROM media_set s WHERE s.user_id=? OR EXISTS(
+      SELECT 1 FROM catalog_set_member sm JOIN media m ON m.catalog_id=sm.catalog_id
+      WHERE sm.set_id=s.id AND m.user_id=? AND m.available=TRUE) ORDER BY s.created_at DESC,s.id`,
+      [user.id, user.id]
     ),
     rows<Post>(
-      "SELECT p.* FROM post p LEFT JOIN media m ON m.id=p.media_id WHERE p.user_id=? AND (p.set_id IS NOT NULL OR m.available=TRUE) ORDER BY p.created_at DESC",
-      [user.id]
+      `SELECT p.id,p.catalog_id AS media_id,p.set_id,p.platform,p.url,p.external_id,p.created_at FROM post p
+      WHERE EXISTS(SELECT 1 FROM media m WHERE m.catalog_id=p.catalog_id AND m.user_id=? AND m.available=TRUE)
+      OR EXISTS(SELECT 1 FROM media_set s WHERE s.id=p.set_id AND (s.user_id=? OR EXISTS(
+        SELECT 1 FROM catalog_set_member sm JOIN media m ON m.catalog_id=sm.catalog_id WHERE sm.set_id=s.id AND m.user_id=? AND m.available=TRUE)))
+      ORDER BY p.created_at DESC,p.id`,
+      [user.id, user.id, user.id]
     ),
     rows<DriveSource>(
       "SELECT folder_id,folder_name,last_synced_at FROM drive_folder WHERE user_id=? ORDER BY folder_name",
       [user.id]
     ),
-    rows<{ set_id: string; media_id: string }>(
-      "SELECT sm.* FROM set_member sm JOIN media m ON m.id=sm.media_id WHERE m.user_id=?",
+    rows<{ set_id: string; catalog_id: string }>(
+      "SELECT sm.* FROM catalog_set_member sm WHERE EXISTS(SELECT 1 FROM media m WHERE m.catalog_id=sm.catalog_id AND m.user_id=? AND m.available=TRUE)",
       [user.id]
     ),
-    rows<{ media_id: string; parent_ids: string[] }>(
-      "SELECT l.* FROM media_location l JOIN media m ON m.id=l.media_id WHERE m.user_id=?",
-      [user.id]
-    ),
-    rows<{ media_id: string; folder_id: string }>(
-      "SELECT media_id,folder_id FROM media_source WHERE user_id=?",
-      [user.id]
-    ),
-    rows<{ name: string; color: string }>(
-      "SELECT name,color FROM tag_definition WHERE user_id=?",
-      [user.id]
-    ),
+    rows<{ name: string; color: string }>("SELECT name,color FROM catalog_tag"),
     rows<{ count: number }>(
       "SELECT COUNT(*) AS count FROM drive_watch WHERE user_id=? AND resource_id IS NOT NULL AND expires_at>NOW(3)",
       [user.id]
@@ -72,28 +76,68 @@ export async function library(
       [user.id]
     ),
   ])
-  const memberships = new Map<string, string[]>()
-  for (const row of membership)
-    memberships.set(row.media_id, [
-      ...(memberships.get(row.media_id) ?? []),
-      row.set_id,
+  const sourceMembership = await rows<{ media_id: string; folder_id: string }>(
+    "SELECT media_id,folder_id FROM media_source WHERE user_id=?",
+    [user.id]
+  )
+  const foldersByCopy = new Map<string, string[]>()
+  for (const source of sourceMembership)
+    foldersByCopy.set(source.media_id, [
+      ...(foldersByCopy.get(source.media_id) ?? []),
+      source.folder_id,
     ])
+  const setsByCatalog = new Map<string, string[]>()
+  for (const member of membership)
+    setsByCatalog.set(member.catalog_id, [
+      ...(setsByCatalog.get(member.catalog_id) ?? []),
+      member.set_id,
+    ])
+  const grouped = new Map<string, Media>()
+  for (const copy of copies) {
+    const sourceIds = foldersByCopy.get(copy.physical_id) ?? []
+    const existing = grouped.get(copy.id)
+    if (existing) {
+      existing.source_ids = [...new Set([...existing.source_ids, ...sourceIds])]
+      existing.parent_ids = [
+        ...new Set([...existing.parent_ids, ...copy.parent_ids]),
+      ]
+      existing.copy_count++
+    } else
+      grouped.set(copy.id, {
+        ...copy,
+        size: Number(copy.size),
+        available: true,
+        cataloged: Boolean(copy.cataloged_at),
+        copy_count: 1,
+        source_ids: sourceIds,
+        set_ids: setsByCatalog.get(copy.id) ?? [],
+      })
+  }
+  const media = [...grouped.values()].sort(
+    (a, b) =>
+      b.uploaded_at.localeCompare(a.uploaded_at) || a.id.localeCompare(b.id)
+  )
   return {
     user: { name: user.name, email: user.email, role: user.role },
-    media: media.map((m) => ({
-      ...m,
-      size: Number(m.size),
-      available: Boolean(m.available),
-      set_ids: memberships.get(m.id) ?? [],
-      source_ids: sourceMembership
-        .filter((s) => s.media_id === m.id)
-        .map((s) => s.folder_id),
-      parent_ids: locations.find((l) => l.media_id === m.id)?.parent_ids ?? [],
-    })),
+    media,
     tag_colors: Object.fromEntries(
-      definitions.map((tag) => [tag.name, tag.color])
+      definitions
+        .filter(
+          (t) =>
+            media.some((m) => m.tags.includes(t.name)) ||
+            sets.some((s) => s.tags.includes(t.name))
+        )
+        .map((t) => [t.name, t.color])
     ),
-    sets,
+    sets: sets.map((s) => {
+      const members = media.filter((m) => m.set_ids.includes(s.id))
+      return {
+        ...s,
+        media_count: members.length,
+        cover_id: members[0]?.id ?? null,
+        post_count: posts.filter((p) => p.set_id === s.id).length,
+      }
+    }),
     posts,
     workspace: {
       sources,
@@ -104,20 +148,14 @@ export async function library(
       },
       last_synced_at:
         sources
-          .map((source) => source.last_synced_at)
-          .filter((date): date is string => Boolean(date))
+          .map((s) => s.last_synced_at)
+          .filter((d): d is string => Boolean(d))
           .sort()
           .at(-1) ?? null,
     },
   }
 }
-async function owned(userId: string, kind: "media" | "set", target: string) {
-  const [item] = await rows<{ id: string }>(
-    `SELECT id FROM ${kind === "media" ? "media" : "media_set"} WHERE id=? AND user_id=?`,
-    [target, userId]
-  )
-  if (!item) throw new Response("Item not found.", { status: 404 })
-}
+
 export async function mutate(
   action: string,
   input: unknown,
@@ -141,7 +179,7 @@ export async function mutate(
       throw new Error("Choose a Google Drive folder.")
     await editSources(userId, async (connection) => {
       await connection.execute(
-        "INSERT INTO drive_folder (user_id,folder_id,folder_name) VALUES (?,?,?) ON DUPLICATE KEY UPDATE folder_name=VALUES(folder_name)",
+        "INSERT INTO drive_folder(user_id,folder_id,folder_name) VALUES (?,?,?) ON DUPLICATE KEY UPDATE folder_name=VALUES(folder_name)",
         [userId, source.id, source.name]
       )
     })
@@ -161,221 +199,198 @@ export async function mutate(
     })
     return { ok: true }
   }
-  if (action === "tag-color") {
-    const value = z
-      .object({
-        name: z.string().trim().min(1).max(50),
-        color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
-      })
-      .parse(input)
-    await pool.execute(
-      "UPDATE tag_definition SET color=? WHERE user_id=? AND name=?",
-      [value.color, userId, value.name]
-    )
-    return { ok: true }
-  }
-  if (action === "set-membership") {
-    const value = z
-      .object({
-        id,
-        setId: id.optional(),
-        displayName: z.string().trim().min(1).max(255).optional(),
-        remove: z.boolean().default(false),
-      })
-      .refine(
-        (v) =>
-          Boolean(v.setId) !== Boolean(v.displayName) &&
-          (!v.remove || Boolean(v.setId))
+  return catalogTransaction(async (connection) => {
+    if (action === "tag-color") {
+      const value = z
+        .object({
+          name: z.string().trim().min(1).max(50),
+          color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+        })
+        .parse(input)
+      const [visible] = await connection.query<RowDataPacket[]>(
+        `SELECT name FROM catalog_tag t WHERE name=? AND (
+        EXISTS(SELECT 1 FROM catalog c JOIN media m ON m.catalog_id=c.id WHERE m.user_id=? AND m.available=TRUE AND JSON_CONTAINS(c.tags,JSON_QUOTE(t.name))) OR
+        EXISTS(SELECT 1 FROM media_set s WHERE JSON_CONTAINS(s.tags,JSON_QUOTE(t.name)) AND (s.user_id=? OR EXISTS(
+          SELECT 1 FROM catalog_set_member sm JOIN media m ON m.catalog_id=sm.catalog_id WHERE sm.set_id=s.id AND m.user_id=? AND m.available=TRUE))))`,
+        [value.name, userId, userId, userId]
       )
-      .parse(input)
-    const connection = await pool.getConnection()
-    try {
-      await connection.beginTransaction()
-      const [media] = await connection.query<import("mysql2").RowDataPacket[]>(
-        "SELECT id FROM media WHERE id=? AND user_id=? AND available=TRUE FOR UPDATE",
-        [value.id, userId]
+      if (!visible.length) throw new Response("Tag not found.", { status: 404 })
+      await connection.execute("UPDATE catalog_tag SET color=? WHERE name=?", [
+        value.color,
+        value.name,
+      ])
+      return { ok: true }
+    }
+    if (action === "create-set") {
+      const value = newSet.parse(input),
+        setId = randomUUID()
+      await connection.execute(
+        "INSERT INTO media_set(id,user_id,display_name,raw_name,tags,created_at) VALUES (?,?,?,?,?,NOW(3))",
+        [
+          setId,
+          userId,
+          value.displayName,
+          value.displayName,
+          JSON.stringify(value.tags),
+        ]
       )
-      if (!media.length) throw new Error("This media is no longer available.")
-      const setId = value.setId ?? randomUUID()
-      if (value.setId) {
-        const [sets] = await connection.query<import("mysql2").RowDataPacket[]>(
-          "SELECT id FROM media_set WHERE id=? AND user_id=? FOR UPDATE",
-          [setId, userId]
+      await ensureTags(userId, value.tags, connection)
+      return { id: setId }
+    }
+    if (action === "set-membership") {
+      const value = z
+        .object({
+          id,
+          setId: id.optional(),
+          displayName: z.string().trim().min(1).max(255).optional(),
+          remove: z.boolean().default(false),
+        })
+        .refine(
+          (v) =>
+            Boolean(v.setId) !== Boolean(v.displayName) &&
+            (!v.remove || Boolean(v.setId))
         )
-        if (!sets.length) throw new Error("This set is no longer available.")
-      } else {
+        .parse(input)
+      await accessible(connection, userId, "media", value.id)
+      const setId = value.setId ?? randomUUID()
+      if (value.setId) await accessible(connection, userId, "set", setId)
+      else
         await connection.execute(
-          "INSERT INTO media_set (id,user_id,display_name,raw_name,tags,created_at) VALUES (?,?,?,?,?,NOW(3))",
+          "INSERT INTO media_set(id,user_id,display_name,raw_name,tags,created_at) VALUES (?,?,?,?,?,NOW(3))",
           [setId, userId, value.displayName!, value.displayName!, "[]"]
         )
-      }
       if (value.remove)
         await connection.execute(
-          "DELETE FROM set_member WHERE set_id=? AND media_id=?",
+          "DELETE FROM catalog_set_member WHERE set_id=? AND catalog_id=?",
           [setId, value.id]
         )
       else
         await connection.execute(
-          "INSERT IGNORE INTO set_member (set_id,media_id) VALUES (?,?)",
+          "INSERT IGNORE INTO catalog_set_member VALUES (?,?)",
           [setId, value.id]
         )
-      await connection.commit()
+      await markCataloged(connection, value.id)
       return { id: setId }
-    } catch (error) {
-      await connection.rollback()
-      throw error
-    } finally {
-      connection.release()
     }
-  }
-  if (action === "create-set") {
-    const value = newSet.parse(input),
-      setId = randomUUID()
-    await pool.execute(
-      "INSERT INTO media_set (id,user_id,display_name,raw_name,tags,created_at) VALUES (?,?,?,?,?,NOW(3))",
-      [
-        setId,
-        userId,
-        value.displayName,
-        value.displayName,
-        JSON.stringify(value.tags),
-      ]
-    )
-    await ensureTags(userId, value.tags)
-    return { id: setId }
-  }
-  if (action === "add-tags") {
-    const value = addMediaTags.parse(input)
-    const connection = await pool.getConnection()
-    try {
-      await connection.beginTransaction()
-      const [media] = await connection.query<import("mysql2").RowDataPacket[]>(
-        `SELECT id,tags FROM media WHERE user_id=? AND available=TRUE AND id IN (${value.ids.map(() => "?").join(",")}) ORDER BY id FOR UPDATE`,
-        [userId, ...value.ids]
-      )
-      if (media.length !== value.ids.length)
-        throw new Error(
-          "Some selected media is no longer available. Refresh and try again."
-        )
+    if (action === "add-tags") {
+      const value = addMediaTags.parse(input)
+      for (const target of value.ids)
+        await accessible(connection, userId, "media", target)
       await ensureTags(userId, value.tags, connection)
-      for (const item of media) {
-        const merged = tags.parse([...new Set([...item.tags, ...value.tags])])
-        await connection.execute(
-          "UPDATE media SET tags=? WHERE id=? AND user_id=?",
-          [JSON.stringify(merged), item.id, userId]
+      for (const target of value.ids) {
+        const [items] = await connection.query<RowDataPacket[]>(
+          "SELECT tags FROM catalog WHERE id=?",
+          [target]
         )
+        const merged = tags.parse([
+          ...new Set([...items[0].tags, ...value.tags]),
+        ])
+        await connection.execute("UPDATE catalog SET tags=? WHERE id=?", [
+          JSON.stringify(merged),
+          target,
+        ])
+        await markCataloged(connection, target)
       }
-      await connection.commit()
-    } catch (error) {
-      await connection.rollback()
-      throw error
-    } finally {
-      connection.release()
+      return { count: value.ids.length }
     }
-    return { count: value.ids.length }
-  }
-  if (action === "remove-tag") {
-    const value = removeMediaTag.parse(input)
-    const connection = await pool.getConnection()
-    try {
-      await connection.beginTransaction()
-      const [media] = await connection.query<import("mysql2").RowDataPacket[]>(
-        "SELECT tags FROM media WHERE user_id=? AND id=? AND available=TRUE FOR UPDATE",
-        [userId, value.id]
+    if (action === "remove-tag") {
+      const value = removeMediaTag.parse(input)
+      await accessible(connection, userId, "media", value.id)
+      const [items] = await connection.query<RowDataPacket[]>(
+        "SELECT tags FROM catalog WHERE id=?",
+        [value.id]
       )
-      if (!media.length) throw new Error("This media is no longer available.")
-      await connection.execute(
-        "UPDATE media SET tags=? WHERE id=? AND user_id=?",
-        [
-          JSON.stringify(
-            media[0].tags.filter((tag: string) => tag !== value.tag)
-          ),
-          value.id,
-          userId,
-        ]
-      )
-      await connection.commit()
-    } catch (error) {
-      await connection.rollback()
-      throw error
-    } finally {
-      connection.release()
+      await connection.execute("UPDATE catalog SET tags=? WHERE id=?", [
+        JSON.stringify(items[0].tags.filter((t: string) => t !== value.tag)),
+        value.id,
+      ])
+      await markCataloged(connection, value.id)
+      return { ok: true }
     }
-    return { ok: true }
-  }
-  if (action === "metadata") {
-    const value = metadata.parse(input)
-    await owned(userId, value.kind, value.id)
-    if (value.kind === "media" && value.setIds)
-      for (const setId of value.setIds) await owned(userId, "set", setId)
-    const connection = await pool.getConnection()
-    try {
-      await connection.beginTransaction()
+    if (action === "metadata") {
+      const value = metadata.parse(input)
+      await accessible(connection, userId, value.kind, value.id)
+      if (value.kind === "media" && value.setIds)
+        for (const setId of value.setIds)
+          await accessible(connection, userId, "set", setId)
       await connection.execute(
-        `UPDATE ${value.kind === "media" ? "media" : "media_set"} SET display_name=?,${value.tags ? "tags=?," : ""}created_at=? WHERE id=? AND user_id=?`,
+        `UPDATE ${value.kind === "media" ? "catalog" : "media_set"} SET display_name=?,${value.tags ? "tags=?," : ""}created_at=? WHERE id=?`,
         [
           value.displayName,
           ...(value.tags ? [JSON.stringify(value.tags)] : []),
           new Date(value.createdAt),
           value.id,
-          userId,
         ]
       )
       if (value.tags) await ensureTags(userId, value.tags, connection)
-      if (value.kind === "media" && value.setIds) {
-        await connection.execute("DELETE FROM set_member WHERE media_id=?", [
-          value.id,
-        ])
-        for (const setId of new Set(value.setIds))
+      if (value.kind === "media") {
+        if (value.setIds) {
           await connection.execute(
-            "INSERT INTO set_member (set_id,media_id) VALUES (?,?)",
-            [setId, value.id]
+            "DELETE FROM catalog_set_member WHERE catalog_id=?",
+            [value.id]
           )
+          for (const setId of new Set(value.setIds))
+            await connection.execute(
+              "INSERT INTO catalog_set_member VALUES (?,?)",
+              [setId, value.id]
+            )
+        }
+        await markCataloged(connection, value.id)
       }
-      await connection.commit()
-    } catch (error) {
-      await connection.rollback()
-      throw error
-    } finally {
-      connection.release()
+      return { ok: true }
     }
-    return { ok: true }
-  }
-  if (action === "create-post") {
-    const value = newPost.parse(input)
-    await owned(userId, value.kind, value.targetId)
-    await pool.execute(
-      "INSERT INTO post (id,user_id,media_id,set_id,platform,url,external_id,created_at) VALUES (?,?,?,?,?,?,?,?)",
-      [
-        randomUUID(),
+    if (action === "create-post") {
+      const value = newPost.parse(input)
+      await accessible(connection, userId, value.kind, value.targetId)
+      const [physical] =
+        value.kind === "media"
+          ? await connection.query<RowDataPacket[]>(
+              "SELECT id FROM media WHERE catalog_id=? AND user_id=? AND available=TRUE LIMIT 1",
+              [value.targetId, userId]
+            )
+          : [[]]
+      await connection.execute(
+        "INSERT INTO post(id,user_id,media_id,catalog_id,set_id,platform,url,external_id,created_at) VALUES (?,?,?,?,?,?,?,?,?)",
+        [
+          randomUUID(),
+          userId,
+          value.kind === "media" ? physical[0].id : null,
+          value.kind === "media" ? value.targetId : null,
+          value.kind === "set" ? value.targetId : null,
+          value.platform,
+          value.url,
+          value.externalId,
+          new Date(value.createdAt),
+        ]
+      )
+      if (value.kind === "media")
+        await markCataloged(connection, value.targetId)
+      return { ok: true }
+    }
+    if (action === "delete-post") {
+      const target = id.parse((input as { id: unknown }).id)
+      const [items] = await connection.query<RowDataPacket[]>(
+        "SELECT catalog_id,set_id FROM post WHERE id=?",
+        [target]
+      )
+      if (!items.length) throw new Response("Post not found.", { status: 404 })
+      await accessible(
+        connection,
         userId,
-        value.kind === "media" ? value.targetId : null,
-        value.kind === "set" ? value.targetId : null,
-        value.platform,
-        value.url,
-        value.externalId,
-        new Date(value.createdAt),
-      ]
-    )
-    return { ok: true }
-  }
-  if (action === "delete-post") {
-    const target = id.parse((input as { id: unknown }).id)
-    await pool.execute("DELETE FROM post WHERE id=? AND user_id=?", [
-      target,
-      userId,
-    ])
-    return { ok: true }
-  }
-  if (action === "delete-set") {
-    const target = id.parse((input as { id: unknown }).id)
-    await pool.execute("DELETE FROM media_set WHERE id=? AND user_id=?", [
-      target,
-      userId,
-    ])
-    return { ok: true }
-  }
-  throw new Response("Unknown action.", { status: 404 })
+        items[0].catalog_id ? "media" : "set",
+        items[0].catalog_id ?? items[0].set_id
+      )
+      await connection.execute("DELETE FROM post WHERE id=?", [target])
+      return { ok: true }
+    }
+    if (action === "delete-set") {
+      const target = id.parse((input as { id: unknown }).id)
+      await accessible(connection, userId, "set", target)
+      await connection.execute("DELETE FROM media_set WHERE id=?", [target])
+      return { ok: true }
+    }
+    throw new Response("Unknown action.", { status: 404 })
+  })
 }
 
 // Source edits share the sync lock, so an in-flight scan cannot restore an unlinked folder.
@@ -383,28 +398,13 @@ async function editSources(
   userId: string,
   edit: (connection: import("mysql2/promise").PoolConnection) => Promise<void>
 ) {
-  const connection = await pool.getConnection()
-  try {
-    const [lock] = await connection.query<any[]>(
-      "SELECT GET_LOCK(?, 0) AS acquired",
-      [`drive:${userId}`]
-    )
-    if (lock[0].acquired !== 1)
-      throw new Error("Drive is syncing. Try again when it finishes.")
-    await connection.beginTransaction()
-    try {
+  return withDriveLock(userId, (connection) =>
+    catalogTransaction(async (connection) => {
       await edit(connection)
       await connection.execute(
         "INSERT INTO drive_sync_state(user_id) VALUES (?) ON DUPLICATE KEY UPDATE watch_next_check=NOW(3)",
         [userId]
       )
-      await connection.commit()
-    } catch (error) {
-      await connection.rollback()
-      throw error
-    }
-  } finally {
-    await connection.query("SELECT RELEASE_LOCK(?)", [`drive:${userId}`])
-    connection.release()
-  }
+    }, connection)
+  )
 }

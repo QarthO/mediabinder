@@ -11,7 +11,7 @@ Original images and videos stay in Drive. MediaBinder stores display names, raw 
 3. Run `docker compose up -d --build` for production, or `pnpm dev:docker` for development with hot reload.
 4. Open **http://localhost:3100**. The root is the login page; signed-in users go to `/media`. Link one or more folders in Settings. The app syncs on fresh page loads and supports manual sync.
 
-The first verified Google account becomes the superuser. Further sign-ups are rejected unless `ALLOW_SIGNUPS=true` is explicitly configured. Existing accounts can still sign in. Libraries and Drive connections are scoped to each user; there is no public registration or landing page. Claim the first account before exposing a fresh instance to the internet.
+The first verified Google account becomes the superuser. Further sign-ups are rejected unless `ALLOW_SIGNUPS=true` is explicitly configured. Existing accounts can still sign in. Drive connections are scoped to each user; identical media shares catalog metadata across the instance. There is no public registration or landing page. Claim the first account before exposing a fresh instance to the internet.
 
 MySQL data persists in the `mysql-data` volume. `pnpm dev:docker:down` stops development without deleting the database. For a deployment behind a reverse proxy, set `MEDIABINDER_URL` to the public HTTPS origin and add its exact callback URL in Google Cloud. Keep the app and database on the private Docker network; the default host binding is loopback only.
 
@@ -102,7 +102,7 @@ Node 24 and pnpm 11 are used in Docker. On the host, `pnpm install --frozen-lock
 
 Use T3 Code's browser preview at http://localhost:3100 to check the real Google login and Drive flows. No development authentication bypass is included. `/api/health` checks the database connection. Back up MySQL before upgrading; versioned application migrations are in `migrations/`, and Better Auth manages its own tables during startup. The multiple-folder migration preserves your existing source and catalog.
 
-The focused database regression check runs with `docker compose exec web pnpm exec tsx scripts/test-drive-folders.ts` against a migrated database. It creates and cleans up isolated fixtures to verify additive tagging, removal, persistent colors, rejected partial or unauthorized edits, unlinking, overlapping folder membership, metadata retention, and user isolation. `docker compose exec web pnpm exec tsx scripts/test-drive-webhook.ts` runs the focused webhook integration check with isolated MySQL fixtures and mocked Google HTTP responses.
+The focused database regression check runs with `docker compose exec web pnpm exec tsx scripts/test-drive-folders.ts` against a disposable migrated test database. It creates fixtures to verify additive tagging, removal, persistent colors, rejected partial or unauthorized edits, unlinking, overlapping folder membership, metadata retention, and user isolation. `docker compose exec web pnpm exec tsx scripts/test-drive-webhook.ts` runs the focused webhook integration check with isolated MySQL fixtures and mocked Google HTTP responses.
 
 ## Preview fixtures
 
@@ -123,3 +123,17 @@ Set Google Auth Platform's homepage to your `MEDIABINDER_URL` and privacy-policy
 Library JSON requests and Google Drive JSON/watch requests use Effect HttpClient with a 30-second timeout, cancellation and tagged errors. Mutations are not automatically retried. Video proxy requests use Effect's Promise integration and retain the incoming request signal for the entire streamed response. Network spans share the optional `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` exporter with thumbnails. Database transaction and worker orchestration remain separate from this networking migration.
 
 The login button uses Google's unmodified pre-approved asset; see `public/google-signin-NOTICE.txt` for its source.
+
+### Shared catalog and inbox
+
+Migration 004 separates Drive copies from catalog metadata. Sync requests Google's `sha256Checksum`: byte-identical images/videos share one catalog entry across the entire instance, regardless of filename, folder, or user. No original file download is needed to compute a hash. When a checksum is unavailable, only the same Drive file ID is matched; similar-looking or re-encoded media is not deduplicated.
+
+Each user sees one row per accessible catalog entry, with a copy count when multiple Drive files match. Folder filtering includes all of that user's linked sources for the entry. Previews use a Drive copy accessible through that user's own connection. Tags, tag colors, display names, dates, set memberships and post links are shared; another user's inaccessible media and private folder IDs are not returned. Sets become visible to collaborators through shared members, and their counts/covers include only accessible members. Empty sets remain visible to their creator. Any collaborator with access to a shared set can edit or delete it.
+
+Existing metadata is backfilled before syncing. On consolidation, the earliest cataloged entry wins conflicting names/dates (ID breaks ties); tags, memberships and posts are combined. Superseded catalog records retain their previous metadata for recovery in the database. Checksum consolidation occurs on the next sync, not during the SQL migration. A Drive file whose checksum changes gets a separate catalog entry, leaving the old content's curation intact.
+
+Use **All content / Uncataloged / Cataloged** beside the media-type filter. Renaming, editing media metadata, tagging, adding/removing set membership or linking a post marks a media entry cataloged. That status persists even if a tag or membership is later removed, and is shared with duplicates and collaborators. Existing tags, non-default names, memberships and media posts are recognized during migration; historical date-only edits cannot be inferred reliably.
+
+Catalog writes and merge transactions share one database lock to prevent edits being lost during consolidation. Google scans happen outside that lock, and failed scans preserve the existing catalog.
+
+Run `scripts/test-shared-catalog.ts` only against a disposable test database. It uses mocked Google responses and retains catalog fixtures to exercise history preservation.

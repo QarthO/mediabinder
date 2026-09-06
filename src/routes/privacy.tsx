@@ -26,6 +26,16 @@ function Privacy() {
         folder relationships, and the tags, sets, and post links you enter in
         the application database.
       </p>
+      <h2>Shared catalog</h2>
+      <p>
+        Identical file contents share a catalog entry across this instance,
+        including across different users and folders. People who connect an
+        identical file or the same Drive file can see and edit its display name,
+        tags, sets, and post links. Only media available through your linked
+        folders is shown; another user’s private folder identifiers and
+        inaccessible set members are not included. Treat catalog metadata as
+        shared with other users who have the same content.
+      </p>
       <h2>Previews and automatic sync</h2>
       <p>
         Images and videos are transmitted through the application server for

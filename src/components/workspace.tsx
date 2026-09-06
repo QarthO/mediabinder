@@ -80,6 +80,7 @@ export function Workspace() {
     [selectedTags, setSelectedTags] = useState<string[]>([]),
     [tagsOpen, setTagsOpen] = useState(false),
     [mediaType, setMediaType] = useState("all"),
+    [catalogStatus, setCatalogStatus] = useState("all"),
     [setFilter, setSetFilter] = useState(""),
     [sorting, setSorting] = useState<SortingState>([
       { id: "uploaded_at", desc: true },
@@ -201,6 +202,8 @@ export function Workspace() {
     () =>
       catalogMedia.filter(
         (m) =>
+          (catalogStatus === "all" ||
+            (catalogStatus === "cataloged" ? m.cataloged : !m.cataloged)) &&
           (mediaType !== "images" || m.mime_type.startsWith("image/")) &&
           (mediaType !== "videos" || m.mime_type.startsWith("video/")) &&
           (!setId || m.set_ids.includes(setId)) &&
@@ -210,7 +213,15 @@ export function Workspace() {
           (!selectedFolders.length ||
             m.source_ids.some((id) => selectedFolders.includes(id)))
       ),
-    [catalogMedia, mediaType, setId, selectedTags, setFilter, selectedFolders]
+    [
+      catalogMedia,
+      mediaType,
+      catalogStatus,
+      setId,
+      selectedTags,
+      setFilter,
+      selectedFolders,
+    ]
   )
   const table = useMediaTable(
     scopedMedia,
@@ -503,6 +514,16 @@ export function Workspace() {
                     { value: "videos", label: "Videos" },
                   ]}
                 />
+                <Select
+                  label="Filter by catalog status"
+                  value={catalogStatus}
+                  onChange={setCatalogStatus}
+                  options={[
+                    { value: "all", label: "All content" },
+                    { value: "uncataloged", label: "Uncataloged" },
+                    { value: "cataloged", label: "Cataloged" },
+                  ]}
+                />
                 <SearchSelect
                   label="Filter by set"
                   value={setFilter || "all"}
@@ -589,7 +610,8 @@ export function Workspace() {
                     search ||
                     selectedTags.length ||
                     setFilter ||
-                    mediaType !== "all"
+                    mediaType !== "all" ||
+                    catalogStatus !== "all"
                       ? "No media found"
                       : setId
                         ? "This set is a blank canvas"
@@ -601,7 +623,8 @@ export function Workspace() {
                     search ||
                     selectedTags.length ||
                     setFilter ||
-                    mediaType !== "all"
+                    mediaType !== "all" ||
+                    catalogStatus !== "all"
                       ? "Try a different name, tag, or set."
                       : setId
                         ? "Open media from your library and add it to this set."
@@ -614,7 +637,8 @@ export function Workspace() {
                     !selectedTags.length &&
                     !setFilter &&
                     !setId &&
-                    mediaType === "all" ? (
+                    mediaType === "all" &&
+                    catalogStatus === "all" ? (
                       <Button
                         disabled={sync.isPending}
                         onClick={() =>
@@ -679,6 +703,8 @@ export function Workspace() {
                           )}
                           <span>
                             {media.raw_name.split(".").pop()?.toUpperCase()}
+                            {media.copy_count > 1 &&
+                              ` · ${media.copy_count} copies`}
                           </span>
                           <span className="dot-separator">·</span>
                           {bytes(media.size)}
@@ -705,7 +731,7 @@ export function Workspace() {
                 <DataTable
                   table={table}
                   allTags={allTags}
-                  resetKey={`${page}:${setId}:${selectedTags.join(",")}:${setFilter}:${mediaType}:${search}`}
+                  resetKey={`${page}:${setId}:${selectedTags.join(",")}:${setFilter}:${mediaType}:${catalogStatus}:${search}`}
                 />
               )}
             </>

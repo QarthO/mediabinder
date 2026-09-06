@@ -100,7 +100,11 @@ export function useMediaTable(
             <div>
               <strong>{row.original.display_name}</strong>
               <small>
-                <span className="raw-filename">{row.original.raw_name}</span>
+                <span className="raw-filename">
+                  {row.original.raw_name}
+                  {row.original.copy_count > 1 &&
+                    ` · ${row.original.copy_count} copies`}
+                </span>
               </small>
             </div>
           </button>
