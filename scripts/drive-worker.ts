@@ -4,12 +4,15 @@ import {
   processSyncJobs,
   processWatchRenewals,
 } from "../src/lib/drive-webhook.server"
+const shutdown = new AbortController()
 let stopping = false
 process.on("SIGTERM", () => {
   stopping = true
+  shutdown.abort()
 })
 process.on("SIGINT", () => {
   stopping = true
+  shutdown.abort()
 })
 console.log(
   "Drive worker started; webhook registration",
@@ -34,6 +37,11 @@ while (!stopping) {
     await connection.query("SELECT RELEASE_LOCK('mediabinder-drive-worker')")
     connection.release()
   }
-  if (!stopping) await setTimeout(10000)
+  if (!stopping)
+    await setTimeout(10000, undefined, { signal: shutdown.signal }).catch(
+      (error) => {
+        if (!stopping) throw error
+      }
+    )
 }
 await pool.end()

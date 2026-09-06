@@ -1,6 +1,7 @@
 import mysql, { type RowDataPacket } from "mysql2/promise"
+import { databaseOptions } from "./config"
 export const pool = mysql.createPool({
-  uri: process.env.DATABASE_URL,
+  ...databaseOptions(),
   connectionLimit: 8,
   timezone: "Z",
   dateStrings: true,

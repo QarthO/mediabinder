@@ -1,9 +1,10 @@
 import { betterAuth } from "better-auth"
 import { APIError } from "better-auth/api"
 import { pool, rows } from "./database.server"
+import { appUrl } from "./config"
 export const auth = betterAuth({
   appName: "MediaBinder",
-  baseURL: process.env.BETTER_AUTH_URL,
+  baseURL: appUrl(),
   secret: process.env.BETTER_AUTH_SECRET,
   database: pool,
   socialProviders: {
