@@ -1,3 +1,4 @@
+import { flushSync } from "react-dom"
 import { useMobile } from "@/hooks/use-mobile"
 import { SidebarTags } from "./sidebar-tags"
 import { FolderSelector } from "./folder-selector"
@@ -13,7 +14,12 @@ import {
 import { useEffect, useMemo, useState, useRef } from "react"
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query"
 import { type SortingState } from "@tanstack/react-table"
-import { DataTable, MediaSelectionActions, useMediaTable } from "./data-table"
+import {
+  DataTable,
+  MediaTags,
+  MediaSelectionActions,
+  useMediaTable,
+} from "./data-table"
 import {
   ArrowUpDown,
   Inbox,
@@ -68,7 +74,7 @@ const navItems = [
 ] as const
 export function Workspace() {
   const mobile = useMobile()
-  const [selectionMode, setSelectionMode] = useState(false)
+  const [selectionEnabled, setSelectionMode] = useState(false)
   const [mobileSidebar, setMobileSidebar] = useState(false)
   const [mobileSearch, setMobileSearch] = useState(false)
   const searchInput = useRef<HTMLInputElement>(null)
@@ -87,7 +93,6 @@ export function Workspace() {
   const [view, setView] = useState<"grid" | "list">("grid"),
     [search, setSearch] = useState(""),
     [selectedTags, setSelectedTags] = useState<string[]>([]),
-    [tagsOpen, setTagsOpen] = useState(false),
     [mediaType, setMediaType] = useState("all"),
     [catalogStatus, setCatalogStatus] = useState("all"),
     [setFilter, setSetFilter] = useState(""),
@@ -102,6 +107,7 @@ export function Workspace() {
       kind: "media" | "set"
     } | null>(null),
     [collapsed, setCollapsed] = useState(false)
+  const selectionMode = (mobile || view === "grid") && selectionEnabled
   const sidebarCollapsed = !mobile && collapsed
   const toggleSidebar = () => {
     if (mobile) setMobileSidebar((value) => !value)
@@ -352,11 +358,8 @@ export function Workspace() {
             catalogMedia.filter((media) => media.tags.includes(tag)).length,
           ])
         )}
-        expanded={tagsOpen && !sidebarCollapsed}
-        onExpanded={(open) => {
-          setCollapsed(false)
-          setTagsOpen(open)
-        }}
+        compact={sidebarCollapsed}
+        onExpand={() => setCollapsed(false)}
         onChange={(tags) => {
           setSelectedTags(tags)
           if (page !== "all") {
@@ -406,7 +409,7 @@ export function Workspace() {
   )
   return (
     <div
-      className={`app ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${tagsOpen && !sidebarCollapsed ? "sidebar-filter-open" : ""}`}
+      className={`app ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${!sidebarCollapsed ? "sidebar-filter-open" : ""}`}
     >
       {mobile ? (
         <Dialog open={mobileSidebar} onOpenChange={setMobileSidebar}>
@@ -447,7 +450,7 @@ export function Workspace() {
           <span className="muted">Library</span>
           <ChevronRight size={13} />
           <span className="breadcrumb">{title}</span>
-          {page === "all" && (
+          {page === "all" && (mobile || view === "grid") && (
             <Button
               className="header-select"
               variant="outline"
@@ -557,8 +560,8 @@ export function Workspace() {
                   className="mobile-search-toggle icon-button"
                   aria-label="Open media search"
                   onClick={() => {
-                    setMobileSearch(true)
-                    requestAnimationFrame(() => searchInput.current?.focus())
+                    flushSync(() => setMobileSearch(true))
+                    searchInput.current?.focus()
                   }}
                 >
                   <Search size={18} />
@@ -762,81 +765,90 @@ export function Workspace() {
                 ) : view === "grid" ? (
                   <div className="media-grid">
                     {items.map((media) => (
-                      <button
+                      <div
                         key={media.id}
                         className="media-card"
-                        aria-pressed={
-                          selectionMode
-                            ? table.getRow(media.id).getIsSelected()
-                            : undefined
-                        }
                         data-selected={
                           table.getRow(media.id).getIsSelected() || undefined
                         }
-                        onClick={() =>
-                          selectionMode
-                            ? table.getRow(media.id).toggleSelected()
-                            : openMedia(media)
-                        }
                       >
-                        <div className="media-image">
-                          <Thumbnail
-                            id={media.id}
-                            name={media.display_name}
-                            video={media.mime_type.startsWith("video/")}
+                        {!mobile && (
+                          <input
+                            className="media-card-checkbox"
+                            type="checkbox"
+                            aria-label={`Select ${media.display_name}`}
+                            checked={table.getRow(media.id).getIsSelected()}
+                            onChange={() =>
+                              table.getRow(media.id).toggleSelected()
+                            }
                           />
-                          {media.mime_type.startsWith("video/") && (
-                            <span className="media-type">
-                              <Film size={12} />
-                              {media.duration_ms
-                                ? `${Math.floor(media.duration_ms / 60000)}:${String(Math.floor(media.duration_ms / 1000) % 60).padStart(2, "0")}`
-                                : "VIDEO"}
-                            </span>
-                          )}
-                          {!media.available && (
-                            <span className="unavailable">
-                              Unavailable in Drive
-                            </span>
-                          )}
-                          {media.post_count > 0 && (
-                            <span className="posted-indicator">
-                              <Link2 size={11} />
-                              {media.post_count}
-                            </span>
-                          )}
-                        </div>
-                        <div className="media-info">
-                          <strong>{media.display_name}</strong>
-                          <span>
-                            {media.mime_type.startsWith("video/") ? (
-                              <Film size={12} />
-                            ) : (
-                              <ImageIcon size={12} />
-                            )}
-                            <span>
-                              {media.raw_name.split(".").pop()?.toUpperCase()}
-                              {media.copy_count > 1 &&
-                                ` · ${media.copy_count} copies`}
-                            </span>
-                            <span className="dot-separator">·</span>
-                            {bytes(media.size)}
-                          </span>
-                        </div>
-                        {media.tags.length > 0 && (
-                          <div className="tags">
-                            {media.tags.slice(0, 3).map((t) => (
-                              <span key={t} className="tag">
-                                {t}
+                        )}
+                        <button
+                          className="media-card-open"
+                          aria-pressed={
+                            selectionMode
+                              ? table.getRow(media.id).getIsSelected()
+                              : undefined
+                          }
+                          onClick={() =>
+                            selectionMode
+                              ? table.getRow(media.id).toggleSelected()
+                              : openMedia(media)
+                          }
+                        >
+                          <div className="media-image">
+                            <Thumbnail
+                              id={media.id}
+                              name={media.display_name}
+                              video={media.mime_type.startsWith("video/")}
+                            />
+                            {media.mime_type.startsWith("video/") && (
+                              <span className="media-type">
+                                <Film size={12} />
+                                {media.duration_ms
+                                  ? `${Math.floor(media.duration_ms / 60000)}:${String(Math.floor(media.duration_ms / 1000) % 60).padStart(2, "0")}`
+                                  : "VIDEO"}
                               </span>
-                            ))}
-                            {media.tags.length > 3 && (
-                              <span className="tag">
-                                +{media.tags.length - 3}
+                            )}
+                            {!media.available && (
+                              <span className="unavailable">
+                                Unavailable in Drive
+                              </span>
+                            )}
+                            {media.post_count > 0 && (
+                              <span className="posted-indicator">
+                                <Link2 size={11} />
+                                {media.post_count}
                               </span>
                             )}
                           </div>
-                        )}
-                      </button>
+                          <div className="media-info">
+                            <strong>{media.display_name}</strong>
+                            <span>
+                              {media.mime_type.startsWith("video/") ? (
+                                <Film size={12} />
+                              ) : (
+                                <ImageIcon size={12} />
+                              )}
+                              <span>
+                                {media.raw_name.split(".").pop()?.toUpperCase()}
+                                {media.copy_count > 1 &&
+                                  ` · ${media.copy_count} copies`}
+                              </span>
+                              <span className="dot-separator">·</span>
+                              {bytes(media.size)}
+                            </span>
+                          </div>
+                        </button>
+                        <div className="media-card-tags">
+                          <MediaTags
+                            media={media}
+                            allTags={allTags}
+                            colors={data.tag_colors}
+                            compact
+                          />
+                        </div>
+                      </div>
                     ))}
                   </div>
                 ) : (
