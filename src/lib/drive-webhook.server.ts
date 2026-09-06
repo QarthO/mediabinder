@@ -1,3 +1,6 @@
+import { runServer } from "@/effect/runtime.server"
+import { Effect } from "effect"
+import { jsonRequest } from "@/effect/http"
 import { driveWebhookUrl as webhookUrl } from "./config"
 export { driveWebhookUrl as webhookUrl } from "./config"
 import {
@@ -95,37 +98,32 @@ async function drivePost<T>(
   body: unknown,
   params: Record<string, string> = {}
 ): Promise<T> {
-  const result = await fetch(
-    `https://www.googleapis.com/drive/v3/${path}?${new URLSearchParams(params)}`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(30000),
-    }
-  )
-  if (!result.ok)
-    throw new Error(
-      `Drive watch request failed (${result.status}). Check OAuth access, Drive permissions, and the public webhook URL.`
+  return runServer(
+    jsonRequest<T>(
+      `https://www.googleapis.com/drive/v3/${path}?${new URLSearchParams(params)}`,
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body,
+        errorMessage: (status) =>
+          `Drive watch request failed (${status}). Check OAuth access, Drive permissions, and the public webhook URL.`,
+      }
     )
-  return result.status === 204 ? (undefined as T) : result.json()
+  )
 }
 async function stopWatch(
   token: string,
   channel: { id: string; resource_id: string | null }
 ) {
   if (channel.resource_id) {
-    try {
-      await drivePost(token, "channels/stop", {
-        id: channel.id,
-        resourceId: channel.resource_id,
-      })
-    } catch {
-      /* Expired channels may already be gone; local validation rejects retired IDs. */
-    }
+    await runServer(
+      Effect.tryPromise(() =>
+        drivePost(token, "channels/stop", {
+          id: channel.id,
+          resourceId: channel.resource_id,
+        })
+      ).pipe(Effect.catch(() => Effect.void))
+    )
   }
   await pool.execute("DELETE FROM drive_watch WHERE id=?", [channel.id])
 }

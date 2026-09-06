@@ -1,3 +1,6 @@
+import { runServer } from "@/effect/runtime.server"
+import { Effect } from "effect"
+import { jsonRequest } from "@/effect/http"
 import { randomUUID } from "node:crypto"
 import { auth } from "./auth.server"
 import { pool, rows } from "./database.server"
@@ -17,37 +20,46 @@ export interface DriveFile {
   thumbnailLink?: string
 }
 export async function driveToken(headers?: Headers, userId?: string) {
-  const result = await auth.api.getAccessToken({
-    ...(headers ? { headers } : {}),
-    body: { providerId: "google", ...(userId ? { userId } : {}) },
-  })
-  if (!result.accessToken)
-    throw new Error("Reconnect Google Drive in settings.")
-  return result.accessToken
+  return runServer(
+    Effect.gen(function* () {
+      const result = yield* Effect.tryPromise({
+        try: () =>
+          auth.api.getAccessToken({
+            ...(headers ? { headers } : {}),
+            body: { providerId: "google", ...(userId ? { userId } : {}) },
+          }),
+        catch: () => new Error("Reconnect Google Drive in settings."),
+      })
+      if (!result.accessToken)
+        return yield* Effect.fail(
+          new Error("Reconnect Google Drive in settings.")
+        )
+      return result.accessToken
+    }).pipe(Effect.withSpan("drive.token"))
+  )
 }
+
 export async function driveJson<T>(
   token: string,
   path: string,
   params: Record<string, string> = {}
 ): Promise<T> {
-  const response = await fetch(
-    `https://www.googleapis.com/drive/v3/${path}?${new URLSearchParams(params)}`,
-    {
-      headers: { Authorization: `Bearer ${token}` },
-      signal: AbortSignal.timeout(30_000),
-    }
-  )
-  if (!response.ok)
-    throw new Error(
-      response.status === 401
-        ? "Google access expired. Reconnect Google Drive in settings."
-        : response.status === 403
-          ? "Google Drive denied access. Check the Drive API and folder permissions."
-          : response.status === 404
-            ? "This file or folder is no longer available in Google Drive."
-            : `Google Drive is unavailable (${response.status}). Try again.`
+  return runServer(
+    jsonRequest<T>(
+      `https://www.googleapis.com/drive/v3/${path}?${new URLSearchParams(params)}`,
+      {
+        headers: { Authorization: `Bearer ${token}` },
+        errorMessage: (status) =>
+          status === 401
+            ? "Google access expired. Reconnect Google Drive in settings."
+            : status === 403
+              ? "Google Drive denied access. Check the Drive API and folder permissions."
+              : status === 404
+                ? "This file or folder is no longer available in Google Drive."
+                : `Google Drive is unavailable (${status}). Try again.`,
+      }
     )
-  return response.json()
+  )
 }
 export async function listFolders(headers: Headers) {
   const token = await driveToken(headers)

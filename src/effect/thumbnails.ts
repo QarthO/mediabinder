@@ -136,22 +136,32 @@ export const readThumbnail = Effect.fn("thumbnails.download")(function* (
         })
       const chunks: Uint8Array[] = []
       let size = 0
-      try {
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) break
-          size += value.byteLength
-          if (size > MAX_THUMBNAIL_BYTES)
-            throw new ThumbnailError({
-              status: 502,
-              message: "Thumbnail exceeds the size limit.",
-            })
-          chunks.push(value)
-        }
-      } finally {
-        await reader.cancel()
-        reader.releaseLock()
-      }
+      await Effect.runPromise(
+        Effect.tryPromise({
+          try: async () => {
+            while (true) {
+              const { done, value } = await reader.read()
+              if (done) break
+              size += value.byteLength
+              if (size > MAX_THUMBNAIL_BYTES)
+                throw new ThumbnailError({
+                  status: 502,
+                  message: "Thumbnail exceeds the size limit.",
+                })
+              chunks.push(value)
+            }
+          },
+          catch: (cause) => cause,
+        }).pipe(
+          Effect.ensuring(
+            Effect.tryPromise(() => reader.cancel()).pipe(
+              Effect.ignore,
+              Effect.andThen(Effect.sync(() => reader.releaseLock()))
+            )
+          )
+        ),
+        { signal }
+      )
       const bytes = new Uint8Array(size)
       let offset = 0
       for (const chunk of chunks) {
