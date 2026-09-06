@@ -1,6 +1,5 @@
 import { Effect, Layer, Logger, ManagedRuntime, Schema } from "effect"
-import { FetchHttpClient } from "effect/unstable/http"
-import { OtlpSerialization, OtlpTracer } from "effect/unstable/observability"
+import { tracing } from "./runtime.server"
 import { driveToken } from "@/lib/drive.server"
 import {
   readThumbnail,
@@ -72,15 +71,6 @@ const SourceLive = Layer.succeed(ThumbnailSource, {
     )
   }),
 })
-const tracing = process.env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
-  ? OtlpTracer.layer({
-      url: process.env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT,
-      resource: { serviceName: "mediabinder" },
-    }).pipe(
-      Layer.provide(OtlpSerialization.layerJson),
-      Layer.provide(FetchHttpClient.layer)
-    )
-  : Layer.empty
 const runtime = ManagedRuntime.make(
   Thumbnails.layer.pipe(
     Layer.provide(SourceLive),

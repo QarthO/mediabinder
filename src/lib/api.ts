@@ -1,34 +1,53 @@
 import { queryOptions } from "@tanstack/react-query"
+import { Effect } from "effect"
+import { jsonRequest } from "@/effect/http"
 import type { Library } from "./types"
+
+const signedIn = <A>(
+  effect: Effect.Effect<A, import("@/effect/http").NetworkError>
+) =>
+  effect.pipe(
+    Effect.tapError((error) =>
+      Effect.sync(() => {
+        if (error.status === 401) window.location.assign("/")
+      })
+    )
+  )
+
 export const libraryQuery = queryOptions({
   queryKey: ["library"],
-  queryFn: async (): Promise<Library> => {
-    const response = await fetch("/api/library")
-    if (response.status === 401) {
-      window.location.assign("/")
-      throw new Error("Sign in to continue.")
-    }
-    if (!response.ok)
-      throw new Error("Could not load your library. Please retry.")
-    return response.json()
-  },
+  queryFn: ({ signal }): Promise<Library> =>
+    Effect.runPromise(
+      signedIn(
+        jsonRequest<Library>(
+          new URL("/api/library", window.location.origin).href,
+          {
+            errorMessage: (status) =>
+              status === 401
+                ? "Sign in to continue."
+                : "Could not load your library. Please retry.",
+          }
+        )
+      ),
+      { signal }
+    ),
   staleTime: 30_000,
 })
-export async function action<T = { ok: boolean }>(
+export function action<T = { ok: boolean }>(
   action: string,
   data: unknown = {}
 ): Promise<T> {
-  const response = await fetch("/api/library", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ action, data }),
-  })
-  if (response.status === 401) {
-    window.location.assign("/")
-    throw new Error("Sign in to continue.")
-  }
-  const result = await response.json()
-  if (!response.ok)
-    throw new Error(result.error ?? "Something went wrong. Please retry.")
-  return result
+  return Effect.runPromise(
+    signedIn(
+      jsonRequest<T>(new URL("/api/library", window.location.origin).href, {
+        method: "POST",
+        body: { action, data },
+        serverMessage: true,
+        errorMessage: (status) =>
+          status === 401
+            ? "Sign in to continue."
+            : "Could not save this change. Please retry.",
+      })
+    )
+  )
 }

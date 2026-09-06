@@ -1,0 +1,5 @@
+Google sign-in button: Google's pre-approved Android + Web dark rectangular
+PNG @4x, used without modification and displayed with its original aspect ratio.
+Source: https://developers.google.com/static/identity/images/signin-assets.zip
+Guidelines: https://developers.google.com/identity/branding-guidelines
+Downloaded September 6, 2026.

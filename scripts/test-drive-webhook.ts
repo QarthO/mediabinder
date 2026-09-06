@@ -45,7 +45,11 @@ test("Drive webhooks handle early handshakes, validation, duplicates, renewal an
       if (url.pathname.endsWith("/changes/startPageToken"))
         return Response.json({ startPageToken: "start" })
       if (url.pathname.endsWith("/changes/watch")) {
-        const channel = JSON.parse(String(init?.body))
+        const channel = JSON.parse(
+          init?.body instanceof Uint8Array
+            ? new TextDecoder().decode(init.body)
+            : String(init?.body)
+        )
         assert.equal(channel.address, "https://example.com/api/drive/webhook")
         assert.equal(url.searchParams.get("pageToken"), "start")
         assert.equal(

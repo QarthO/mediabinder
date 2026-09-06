@@ -3,8 +3,8 @@ import { createServerFn } from "@tanstack/react-start"
 import { useState } from "react"
 import { authClient } from "@/lib/auth-client"
 import { Brand } from "@/components/brand"
-import { Button } from "@/components/ui/button"
-import { LockKeyhole, ArrowUpRight } from "lucide-react"
+import { Effect } from "effect"
+import { LockKeyhole } from "lucide-react"
 const loginStatus = createServerFn({ method: "GET" }).handler(async () => {
   const { getRequestHeaders } = await import("@tanstack/react-start/server")
   const { auth } = await import("@/lib/auth.server")
@@ -40,36 +40,46 @@ function Login() {
           <br />
           Sign in to open your binder.
         </p>
-        <Button
+        <button
+          type="button"
+          aria-label="Sign in with Google"
+          aria-busy={busy}
           className="google-button"
           disabled={busy || !configured}
           onClick={async () => {
             setBusy(true)
             setError("")
-            try {
-              const result = await authClient.signIn.social({
-                provider: "google",
-                callbackURL: "/media",
-                errorCallbackURL: "/?error=signin",
-              })
-              if (result.error) throw new Error(result.error.message)
-            } catch (e) {
-              setError(
-                e instanceof Error ? e.message : "Could not sign in. Try again."
+            await Effect.runPromise(
+              Effect.tryPromise(() =>
+                authClient.signIn.social({
+                  provider: "google",
+                  callbackURL: "/media",
+                  errorCallbackURL: "/?error=signin",
+                })
+              ).pipe(
+                Effect.flatMap((result) =>
+                  result.error
+                    ? Effect.fail(new Error(result.error.message))
+                    : Effect.void
+                ),
+                Effect.catch(() =>
+                  Effect.sync(() => {
+                    setError("Could not sign in. Try again.")
+                    setBusy(false)
+                  })
+                ),
+                Effect.withSpan("auth.google.signIn")
               )
-              setBusy(false)
-            }
+            )
           }}
         >
-          <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
-            <path
-              fill="currentColor"
-              d="M21.6 12.2c0-.7-.1-1.5-.2-2.2H12v4.3h5.4a4.7 4.7 0 0 1-2 3v2.6h3.3c1.9-1.8 2.9-4.4 2.9-7.7ZM12 22c2.7 0 5-1 6.7-2.5l-3.3-2.6c-.9.6-2 1-3.4 1a6 6 0 0 1-5.6-4.1H3v2.7A10 10 0 0 0 12 22ZM6.4 13.8a6 6 0 0 1 0-3.6V7.5H3a10 10 0 0 0 0 9l3.4-2.7ZM12 6.1c1.5 0 2.8.5 3.8 1.5L18.7 4A10 10 0 0 0 3 7.5l3.4 2.7A6 6 0 0 1 12 6.1Z"
-            />
-          </svg>
-          {busy ? "Opening Google…" : "Continue with Google"}
-          <ArrowUpRight size={16} />
-        </Button>
+          <img src="/google-signin-dark.png" alt="" width="180" height="40" />
+        </button>
+        {busy && (
+          <span className="sr-only" role="status">
+            Opening Google…
+          </span>
+        )}
         {!configured && (
           <p className="form-error">
             Configure Google OAuth in the server environment to sign in.
@@ -89,7 +99,7 @@ function Login() {
       </section>
       <footer className="login-footer">
         <span>STORED IN DRIVE. ORGANIZED HERE.</span>
-        <span>MediaBinder</span>
+        <a href="/privacy">Privacy</a>
       </footer>
     </main>
   )

@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AppRouteImport } from './routes/_app'
 import { Route as LoginRouteImport } from './routes/login'
+import { Route as PrivacyRouteImport } from './routes/privacy'
 import { Route as AppMediaRouteImport } from './routes/_app.media'
 import { Route as AppSetsRouteImport } from './routes/_app.sets'
 import { Route as AppSettingsRouteImport } from './routes/_app.settings'
@@ -34,6 +35,11 @@ const AppRoute = AppRouteImport.update({
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PrivacyRoute = PrivacyRouteImport.update({
+  id: '/privacy',
+  path: '/privacy',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AppMediaRoute = AppMediaRouteImport.update({
@@ -85,6 +91,7 @@ const ApiMediaIdRoute = ApiMediaIdRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
+  '/privacy': typeof PrivacyRoute
   '/media': typeof AppMediaRoute
   '/sets': typeof AppSetsRouteWithChildren
   '/settings': typeof AppSettingsRoute
@@ -98,6 +105,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
+  '/privacy': typeof PrivacyRoute
   '/media': typeof AppMediaRoute
   '/sets': typeof AppSetsRouteWithChildren
   '/settings': typeof AppSettingsRoute
@@ -113,6 +121,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/_app': typeof AppRouteWithChildren
   '/login': typeof LoginRoute
+  '/privacy': typeof PrivacyRoute
   '/_app/media': typeof AppMediaRoute
   '/_app/sets': typeof AppSetsRouteWithChildren
   '/_app/settings': typeof AppSettingsRoute
@@ -128,6 +137,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/login'
+    | '/privacy'
     | '/media'
     | '/sets'
     | '/settings'
@@ -141,6 +151,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/login'
+    | '/privacy'
     | '/media'
     | '/sets'
     | '/settings'
@@ -155,6 +166,7 @@ export interface FileRouteTypes {
     | '/'
     | '/_app'
     | '/login'
+    | '/privacy'
     | '/_app/media'
     | '/_app/sets'
     | '/_app/settings'
@@ -170,6 +182,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AppRoute: typeof AppRouteWithChildren
   LoginRoute: typeof LoginRoute
+  PrivacyRoute: typeof PrivacyRoute
   ApiHealthRoute: typeof ApiHealthRoute
   ApiLibraryRoute: typeof ApiLibraryRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
@@ -198,6 +211,13 @@ declare module '@tanstack/react-router' {
       path: '/login'
       fullPath: '/login'
       preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/privacy': {
+      id: '/privacy'
+      path: '/privacy'
+      fullPath: '/privacy'
+      preLoaderRoute: typeof PrivacyRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_app/media': {
@@ -295,6 +315,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AppRoute: AppRouteWithChildren,
   LoginRoute: LoginRoute,
+  PrivacyRoute: PrivacyRoute,
   ApiHealthRoute: ApiHealthRoute,
   ApiLibraryRoute: ApiLibraryRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,

@@ -115,3 +115,11 @@ Thumbnails use a focused Effect service; the rest of the app still uses TanStack
 Thumbnail responses use a private five-minute browser cache (`Vary: Cookie`) with ETags for revalidation. The web process caches at most 64 thumbnails for fifteen minutes, each capped at 1 MiB, with six concurrent Google loads. Concurrent requests for the same user/file share a lookup; failed loads are not cached. Nothing is written to disk. A cold server restart empties this cache. Drive image replacements can take up to twenty minutes to appear across the two cache layers. Every network request still checks the session, ownership, and current availability before accessing the server cache. Original images and video streams retain `no-store` and byte-range streaming.
 
 Each thumbnail response includes `Server-Timing` for duration and cache reuse. Effect emits JSON timing/error logs in the web container, without tokens, signed URLs, file names, or user IDs. Inspect them with `docker compose logs web`. Set `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` to an OTLP HTTP/JSON collector (including `/v1/traces`) to export the thumbnail/token/lookup/download spans. No collector is required or deployed by default.
+
+### Production OAuth and request handling
+
+Set Google Auth Platform's homepage to your `MEDIABINDER_URL` and privacy-policy URL to `/privacy` on that origin. Deploy the privacy page before switching Audience to **In production**, then reconnect Google to replace Testing-mode authorization. Production status does not remove Google's unverified-app warning.
+
+Library JSON requests and Google Drive JSON/watch requests use Effect HttpClient with a 30-second timeout, cancellation and tagged errors. Mutations are not automatically retried. Video proxy requests use Effect's Promise integration and retain the incoming request signal for the entire streamed response. Network spans share the optional `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` exporter with thumbnails. Database transaction and worker orchestration remain separate from this networking migration.
+
+The login button uses Google's unmodified pre-approved asset; see `public/google-signin-NOTICE.txt` for its source.
