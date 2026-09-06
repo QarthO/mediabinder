@@ -33,7 +33,7 @@ Google may expire refresh tokens after seven days for External apps in Testing t
 
 - Sync runs on fresh authenticated page loads, on demand, and in response to configured webhooks. It paginates Drive results and walks all linked folders and their subfolders, then reconciles in a transaction. Concurrent syncs for the same account are prevented with a MySQL lock.
 - Re-sync updates technical file metadata without overwriting your display names, tags, creation dates, sets, or post links. Media outside the linked folders is hidden from the library, search, tags, and set counts; its metadata remains intact. Unlinking a folder hides its media immediately, except items also present in another linked folder. Re-link and sync to restore it. Overlapping folders never create duplicate media. A failed Drive scan does not mark files unavailable.
-- The list supports selection, additive bulk tagging, persistent click/Enter tag popovers, removal, and sorting. Tags receive a saved random color, editable on `/tags`. Selection resets when the search or media scope changes, but survives tag edits. Upload timestamps use Radix/shadcn tooltips; file actions open Drive or copy the original name and parent folder ID.
+- The list supports selection, additive bulk tagging, persistent click/Enter tag popovers, removal, and sorting. Tags receive a saved random color, editable beside each sidebar tag filter. Selection resets when the search or media scope changes, but survives tag edits. Upload timestamps use Radix/shadcn tooltips; file actions open Drive or copy the original name and parent folder ID.
 - Uploaded dates in the list are relative for the first 30 days, then use the browser’s local calendar date. Hover for the full local timestamp, including seconds and timezone.
 - “Uploaded to Drive” uses Drive's `createdTime`. “Date created” initially uses image capture metadata when available, otherwise the Drive creation time. You can edit it. Editor date fields display in UTC. Locally created sets have no Drive upload date or underlying Drive file; their raw name records the name they were created with.
 - Thumbnail and original endpoints require a session and check file ownership. Tokens are refreshed on the server and encrypted at rest.
@@ -41,7 +41,7 @@ Google may expire refresh tokens after seven days for External apps in Testing t
 
 ## Routes and folder selection
 
-`/` is login; `/login` redirects there for compatibility. Authenticated routes are `/media`, `/images`, `/videos`, `/tags`, `/sets`, `/sets/$setId`, and `/settings`. Signed-out requests redirect to login. The sidebar folder picker supports multiple linked roots, with an explicit **All Folders** option and a clear button. Selection is stored in the URL, preserved during navigation, and restored on reload. Empty selection means all linked folders.
+`/` is login; `/login` redirects there for compatibility. Authenticated routes are `/media`, `/sets`, `/sets/$setId`, and `/settings`. Images/videos are a media-type filter on `/media`; tags live in a searchable, collapsible sidebar section. Multiple tag selections match any selected tag. Signed-out requests redirect to login. The sidebar folder picker supports multiple linked roots, with an explicit **All Folders** option and a clear button. Folder selection is stored in the URL and restored on reload. Empty selection means all linked folders. Sets can contain media from any linked folder; opening a set clears folder selection so every available member is shown.
 
 ## Google Drive webhooks
 

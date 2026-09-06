@@ -1,3 +1,4 @@
+import { SidebarTags } from "./sidebar-tags"
 import { FolderSelector } from "./folder-selector"
 import { SearchSelect } from "./ui/search-select"
 import { Select } from "./ui/select"
@@ -13,7 +14,6 @@ import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query"
 import { type SortingState } from "@tanstack/react-table"
 import { DataTable, useMediaTable } from "./data-table"
 import {
-  Tags,
   Images,
   ImageIcon,
   Film,
@@ -60,11 +60,8 @@ import { authClient } from "@/lib/auth-client"
 import { bytes } from "@/lib/utils"
 import type { Media, MediaSet } from "@/lib/types"
 const navItems = [
-  { id: "all", label: "All media", icon: Images },
-  { id: "images", label: "Images", icon: ImageIcon },
-  { id: "videos", label: "Videos", icon: Film },
-  { id: "tags", label: "Tags", icon: Tags },
   { id: "sets", label: "Sets", icon: FolderOpen },
+  { id: "all", label: "All media", icon: Images },
 ] as const
 export function Workspace() {
   const query = useQuery(libraryQuery),
@@ -80,7 +77,9 @@ export function Workspace() {
   const page = setId || pathname === "/media" ? "all" : pathname.slice(1)
   const [view, setView] = useState<"grid" | "list">("grid"),
     [search, setSearch] = useState(""),
-    [tag, setTag] = useState(""),
+    [selectedTags, setSelectedTags] = useState<string[]>([]),
+    [tagsOpen, setTagsOpen] = useState(false),
+    [mediaType, setMediaType] = useState("all"),
     [setFilter, setSetFilter] = useState(""),
     [sorting, setSorting] = useState<SortingState>([
       { id: "uploaded_at", desc: true },
@@ -96,11 +95,11 @@ export function Workspace() {
   const changePage = (value: string) => {
     window.scrollTo({ top: 0 })
     void navigate({
-      to: value === "all" ? "/media" : (`/${value}` as "/images"),
+      to: value === "all" ? "/media" : (`/${value}` as "/media"),
       search: { folders: selectedFolders },
     })
     setSearch("")
-    setTag("")
+    setSelectedTags([])
     setCommand(false)
   }
   useEffect(() => {
@@ -147,7 +146,6 @@ export function Workspace() {
   }, [query.data, client])
   useEffect(() => {
     setSearch("")
-    setTag("")
     setSetFilter("")
     setSelected(null)
   }, [pathname])
@@ -203,15 +201,16 @@ export function Workspace() {
     () =>
       catalogMedia.filter(
         (m) =>
-          (page !== "images" || m.mime_type.startsWith("image/")) &&
-          (page !== "videos" || m.mime_type.startsWith("video/")) &&
+          (mediaType !== "images" || m.mime_type.startsWith("image/")) &&
+          (mediaType !== "videos" || m.mime_type.startsWith("video/")) &&
           (!setId || m.set_ids.includes(setId)) &&
-          (!tag || m.tags.includes(tag)) &&
+          (!selectedTags.length ||
+            selectedTags.some((tag) => m.tags.includes(tag))) &&
           (!setFilter || m.set_ids.includes(setFilter)) &&
           (!selectedFolders.length ||
             m.source_ids.some((id) => selectedFolders.includes(id)))
       ),
-    [catalogMedia, page, setId, tag, setFilter, selectedFolders]
+    [catalogMedia, mediaType, setId, selectedTags, setFilter, selectedFolders]
   )
   const table = useMediaTable(
     scopedMedia,
@@ -242,10 +241,11 @@ export function Workspace() {
     void navigate({
       to: "/sets/$setId",
       params: { setId: set.id },
-      search: { folders: selectedFolders },
+      search: { folders: [] },
     })
     setSearch("")
-    setTag("")
+    setSelectedTags([])
+    setMediaType("all")
     setCommand(false)
   }
   const openMedia = (media: Media) =>
@@ -266,25 +266,16 @@ export function Workspace() {
     )
   const counts: Record<string, number> = {
     all: catalogMedia.length,
-    images: catalogMedia.filter((m) => m.mime_type.startsWith("image/")).length,
-    videos: catalogMedia.filter((m) => m.mime_type.startsWith("video/")).length,
-    tags: allTags.length,
     sets: data.sets.length,
   }
   return (
-    <div className={`app ${collapsed ? "sidebar-collapsed" : ""}`}>
+    <div
+      className={`app ${collapsed ? "sidebar-collapsed" : ""} ${tagsOpen && !collapsed ? "sidebar-filter-open" : ""}`}
+    >
       <aside className="sidebar">
         <div className="sidebar-brand">
           <Brand compact={collapsed} />
         </div>
-        <FolderSelector
-          sources={data.workspace.sources}
-          selected={selectedFolders}
-          onChange={(folders) =>
-            void navigate({ to: pathname as "/media", search: { folders } })
-          }
-          compact={collapsed}
-        />
         <button
           className="search-trigger"
           onClick={() => setCommand(true)}
@@ -298,6 +289,14 @@ export function Workspace() {
             </>
           )}
         </button>
+        <FolderSelector
+          sources={data.workspace.sources}
+          selected={selectedFolders}
+          onChange={(folders) =>
+            void navigate({ to: pathname as "/media", search: { folders } })
+          }
+          compact={collapsed}
+        />
         <div className="nav-label">LIBRARY</div>
         <nav aria-label="Library">
           {navItems.map(({ id, label, icon: Icon }) => (
@@ -313,6 +312,38 @@ export function Workspace() {
             </button>
           ))}
         </nav>
+        <SidebarTags
+          tags={allTags}
+          selected={selectedTags}
+          colors={data.tag_colors}
+          counts={Object.fromEntries(
+            allTags.map((tag) => [
+              tag,
+              catalogMedia.filter((media) => media.tags.includes(tag)).length,
+            ])
+          )}
+          expanded={tagsOpen && !collapsed}
+          onExpanded={(open) => {
+            setCollapsed(false)
+            setTagsOpen(open)
+          }}
+          onChange={(tags) => {
+            setSelectedTags(tags)
+            if (page !== "all") {
+              setSearch("")
+              setMediaType("all")
+              void navigate({
+                to: "/media",
+                search: { folders: selectedFolders },
+              })
+            }
+          }}
+          onColor={(name, color) => {
+            void action("tag-color", { name, color })
+              .then(() => client.invalidateQueries({ queryKey: ["library"] }))
+              .catch((error) => toast.error(error.message))
+          }}
+        />
         <div className="sidebar-bottom">
           <div className="account">
             <div className="avatar">
@@ -358,94 +389,10 @@ export function Workspace() {
           <span className="breadcrumb">{title}</span>
         </header>
         <div
-          className={`workspace-content ${["all", "images", "videos"].includes(page) ? "media-workspace" : ""}`}
+          className={`workspace-content ${page === "all" ? "media-workspace" : ""}`}
         >
           {page === "settings" ? (
             <DriveSettings workspace={data.workspace} />
-          ) : page === "tags" ? (
-            <div className="tags-page">
-              <div className="filter-search">
-                <Search size={17} />
-                <input
-                  aria-label="Search tags"
-                  placeholder="Find a tag…"
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                />
-              </div>
-              <div className="tag-grid">
-                {allTags
-                  .filter((value) => value.includes(search.toLowerCase()))
-                  .map((value) => {
-                    const matchingSets = data.sets.filter((set) =>
-                      set.tags.includes(value)
-                    )
-                    const count = catalogMedia.filter((media) =>
-                      media.tags.includes(value)
-                    ).length
-                    return (
-                      <article className="tag-card" key={value}>
-                        <button
-                          onClick={() => {
-                            changePage("all")
-                            setTag(value)
-                          }}
-                        >
-                          <Tags size={19} />
-                          <strong style={{ color: data.tag_colors[value] }}>
-                            {value}
-                          </strong>
-                          <span>
-                            {count} media
-                            <ChevronRight size={15} />
-                          </span>
-                        </button>
-                        <label className="tag-color-control">
-                          Color
-                          <input
-                            type="color"
-                            aria-label={`Color for ${value}`}
-                            value={data.tag_colors[value] ?? "#7dd3fc"}
-                            onChange={(event) => {
-                              void action("tag-color", {
-                                name: value,
-                                color: event.target.value,
-                              })
-                                .then(() =>
-                                  client.invalidateQueries({
-                                    queryKey: ["library"],
-                                  })
-                                )
-                                .catch((error) => toast.error(error.message))
-                            }}
-                          />
-                        </label>
-                        {matchingSets.length > 0 && (
-                          <div className="tag-sets">
-                            {matchingSets.map((set) => (
-                              <button key={set.id} onClick={() => openSet(set)}>
-                                <FolderOpen size={14} />
-                                {set.display_name}
-                              </button>
-                            ))}
-                          </div>
-                        )}
-                      </article>
-                    )
-                  })}
-              </div>
-              {!allTags.length && (
-                <Empty
-                  icon={Tags}
-                  title="A little easier to find"
-                  description="Add tags when editing media or sets. They’ll appear here."
-                />
-              )}
-              {allTags.length > 0 &&
-                !allTags.some((value) =>
-                  value.includes(search.toLowerCase())
-                ) && <p className="muted">No tags match your search.</p>}
-            </div>
           ) : page === "sets" ? (
             <>
               {data.sets.length ? (
@@ -546,18 +493,14 @@ export function Workspace() {
                   <RefreshCw className={sync.isPending ? "spin" : ""} />
                   {sync.isPending ? "Syncing…" : "Sync Drive"}
                 </Button>
-                <SearchSelect
-                  label="Filter by tag"
-                  value={tag ? `tag:${tag}` : "all"}
-                  onChange={(value) =>
-                    setTag(value === "all" ? "" : value.slice(4))
-                  }
+                <Select
+                  label="Filter by media type"
+                  value={mediaType}
+                  onChange={setMediaType}
                   options={[
-                    { value: "all", label: "All tags" },
-                    ...allTags.map((value) => ({
-                      value: `tag:${value}`,
-                      label: value,
-                    })),
+                    { value: "all", label: "All types" },
+                    { value: "images", label: "Images" },
+                    { value: "videos", label: "Videos" },
                   ]}
                 />
                 <SearchSelect
@@ -616,24 +559,37 @@ export function Workspace() {
                   ))}
                 </div>
               </div>
-              {tag && (
+              {selectedTags.length > 0 && (
                 <div className="active-filter">
-                  <span className="tag" style={tagStyle(data.tag_colors[tag])}>
-                    {tag}
-                    <button
-                      aria-label="Clear tag filter"
-                      onClick={() => setTag("")}
+                  {selectedTags.map((tag) => (
+                    <span
+                      key={tag}
+                      className="tag"
+                      style={tagStyle(data.tag_colors[tag])}
                     >
-                      <X size={11} />
-                    </button>
-                  </span>
+                      {tag}
+                      <button
+                        aria-label={`Clear ${tag} filter`}
+                        onClick={() =>
+                          setSelectedTags(
+                            selectedTags.filter((value) => value !== tag)
+                          )
+                        }
+                      >
+                        <X size={11} />
+                      </button>
+                    </span>
+                  ))}
                 </div>
               )}
               {!items.length ? (
                 <Empty
                   icon={setId ? FolderOpen : Images}
                   title={
-                    search || tag || setFilter
+                    search ||
+                    selectedTags.length ||
+                    setFilter ||
+                    mediaType !== "all"
                       ? "No media found"
                       : setId
                         ? "This set is a blank canvas"
@@ -642,7 +598,10 @@ export function Workspace() {
                           : "Connect your Google Drive"
                   }
                   description={
-                    search || tag || setFilter
+                    search ||
+                    selectedTags.length ||
+                    setFilter ||
+                    mediaType !== "all"
                       ? "Try a different name, tag, or set."
                       : setId
                         ? "Open media from your library and add it to this set."
@@ -651,7 +610,11 @@ export function Workspace() {
                           : "Choose a folder in settings, then sync to bring your images and videos together."
                   }
                   action={
-                    !search && !tag && !setFilter && !setId ? (
+                    !search &&
+                    !selectedTags.length &&
+                    !setFilter &&
+                    !setId &&
+                    mediaType === "all" ? (
                       <Button
                         disabled={sync.isPending}
                         onClick={() =>
@@ -742,7 +705,7 @@ export function Workspace() {
                 <DataTable
                   table={table}
                   allTags={allTags}
-                  resetKey={`${page}:${setId}:${tag}:${setFilter}:${search}`}
+                  resetKey={`${page}:${setId}:${selectedTags.join(",")}:${setFilter}:${mediaType}:${search}`}
                 />
               )}
             </>

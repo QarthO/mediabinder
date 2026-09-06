@@ -237,3 +237,57 @@ test("equal upload dates keep their order across tag and set edits", async () =>
     await pool.execute("DELETE FROM tag_definition WHERE user_id=?", [userId])
   }
 })
+
+test("one set can contain media from separate Drive folders", async () => {
+  const userId = randomUUID(),
+    first = randomUUID(),
+    second = randomUUID()
+  const user = {
+    id: userId,
+    name: "Cross-folder set",
+    email: "cross-folder@example.com",
+    role: "user",
+  }
+  try {
+    for (const [id, folderId] of [
+      [first, "folder-a"],
+      [second, "folder-b"],
+    ]) {
+      await pool.execute(
+        "INSERT INTO drive_folder (user_id,folder_id,folder_name) VALUES (?,?,?)",
+        [userId, folderId, folderId]
+      )
+      await pool.execute(
+        "INSERT INTO media (id,user_id,drive_id,display_name,raw_name,mime_type,tags,created_at,uploaded_at,size,available,synced_at) VALUES (?,?,?,'Fixture','fixture.jpg','image/jpeg','[]',NOW(3),NOW(3),42,TRUE,NOW(3))",
+        [id, userId, id]
+      )
+      await pool.execute(
+        "INSERT INTO media_source (user_id,folder_id,media_id) VALUES (?,?,?)",
+        [userId, folderId, id]
+      )
+    }
+    const set = (await mutate(
+      "set-membership",
+      { id: first, displayName: "Across folders" },
+      userId,
+      new Headers()
+    )) as { id: string }
+    await mutate(
+      "set-membership",
+      { id: second, setId: set.id },
+      userId,
+      new Headers()
+    )
+    const result = await library(user)
+    assert.equal(result.sets[0].media_count, 2)
+    assert.ok(result.media.every((media) => media.set_ids.includes(set.id)))
+    assert.equal(
+      new Set(result.media.flatMap((media) => media.source_ids)).size,
+      2
+    )
+  } finally {
+    await pool.execute("DELETE FROM drive_folder WHERE user_id=?", [userId])
+    await pool.execute("DELETE FROM media WHERE user_id=?", [userId])
+    await pool.execute("DELETE FROM media_set WHERE user_id=?", [userId])
+  }
+})

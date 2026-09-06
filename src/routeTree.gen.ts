@@ -12,12 +12,9 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AppRouteImport } from './routes/_app'
 import { Route as LoginRouteImport } from './routes/login'
-import { Route as AppImagesRouteImport } from './routes/_app.images'
 import { Route as AppMediaRouteImport } from './routes/_app.media'
 import { Route as AppSetsRouteImport } from './routes/_app.sets'
 import { Route as AppSettingsRouteImport } from './routes/_app.settings'
-import { Route as AppTagsRouteImport } from './routes/_app.tags'
-import { Route as AppVideosRouteImport } from './routes/_app.videos'
 import { Route as ApiHealthRouteImport } from './routes/api.health'
 import { Route as ApiLibraryRouteImport } from './routes/api.library'
 import { Route as AppSetsSetIdRouteImport } from './routes/_app.sets.$setId'
@@ -39,11 +36,6 @@ const LoginRoute = LoginRouteImport.update({
   path: '/login',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AppImagesRoute = AppImagesRouteImport.update({
-  id: '/images',
-  path: '/images',
-  getParentRoute: () => AppRoute,
-} as any)
 const AppMediaRoute = AppMediaRouteImport.update({
   id: '/media',
   path: '/media',
@@ -57,16 +49,6 @@ const AppSetsRoute = AppSetsRouteImport.update({
 const AppSettingsRoute = AppSettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppTagsRoute = AppTagsRouteImport.update({
-  id: '/tags',
-  path: '/tags',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppVideosRoute = AppVideosRouteImport.update({
-  id: '/videos',
-  path: '/videos',
   getParentRoute: () => AppRoute,
 } as any)
 const ApiHealthRoute = ApiHealthRouteImport.update({
@@ -103,12 +85,9 @@ const ApiMediaIdRoute = ApiMediaIdRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
-  '/images': typeof AppImagesRoute
   '/media': typeof AppMediaRoute
   '/sets': typeof AppSetsRouteWithChildren
   '/settings': typeof AppSettingsRoute
-  '/tags': typeof AppTagsRoute
-  '/videos': typeof AppVideosRoute
   '/api/health': typeof ApiHealthRoute
   '/api/library': typeof ApiLibraryRoute
   '/sets/$setId': typeof AppSetsSetIdRoute
@@ -119,12 +98,9 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
-  '/images': typeof AppImagesRoute
   '/media': typeof AppMediaRoute
   '/sets': typeof AppSetsRouteWithChildren
   '/settings': typeof AppSettingsRoute
-  '/tags': typeof AppTagsRoute
-  '/videos': typeof AppVideosRoute
   '/api/health': typeof ApiHealthRoute
   '/api/library': typeof ApiLibraryRoute
   '/sets/$setId': typeof AppSetsSetIdRoute
@@ -137,12 +113,9 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/_app': typeof AppRouteWithChildren
   '/login': typeof LoginRoute
-  '/_app/images': typeof AppImagesRoute
   '/_app/media': typeof AppMediaRoute
   '/_app/sets': typeof AppSetsRouteWithChildren
   '/_app/settings': typeof AppSettingsRoute
-  '/_app/tags': typeof AppTagsRoute
-  '/_app/videos': typeof AppVideosRoute
   '/api/health': typeof ApiHealthRoute
   '/api/library': typeof ApiLibraryRoute
   '/_app/sets/$setId': typeof AppSetsSetIdRoute
@@ -155,12 +128,9 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/login'
-    | '/images'
     | '/media'
     | '/sets'
     | '/settings'
-    | '/tags'
-    | '/videos'
     | '/api/health'
     | '/api/library'
     | '/sets/$setId'
@@ -171,12 +141,9 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/login'
-    | '/images'
     | '/media'
     | '/sets'
     | '/settings'
-    | '/tags'
-    | '/videos'
     | '/api/health'
     | '/api/library'
     | '/sets/$setId'
@@ -188,12 +155,9 @@ export interface FileRouteTypes {
     | '/'
     | '/_app'
     | '/login'
-    | '/_app/images'
     | '/_app/media'
     | '/_app/sets'
     | '/_app/settings'
-    | '/_app/tags'
-    | '/_app/videos'
     | '/api/health'
     | '/api/library'
     | '/_app/sets/$setId'
@@ -236,13 +200,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LoginRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/_app/images': {
-      id: '/_app/images'
-      path: '/images'
-      fullPath: '/images'
-      preLoaderRoute: typeof AppImagesRouteImport
-      parentRoute: typeof AppRoute
-    }
     '/_app/media': {
       id: '/_app/media'
       path: '/media'
@@ -262,20 +219,6 @@ declare module '@tanstack/react-router' {
       path: '/settings'
       fullPath: '/settings'
       preLoaderRoute: typeof AppSettingsRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/tags': {
-      id: '/_app/tags'
-      path: '/tags'
-      fullPath: '/tags'
-      preLoaderRoute: typeof AppTagsRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/videos': {
-      id: '/_app/videos'
-      path: '/videos'
-      fullPath: '/videos'
-      preLoaderRoute: typeof AppVideosRouteImport
       parentRoute: typeof AppRoute
     }
     '/api/health': {
@@ -335,21 +278,15 @@ const AppSetsRouteWithChildren =
   AppSetsRoute._addFileChildren(AppSetsRouteChildren)
 
 interface AppRouteChildren {
-  AppImagesRoute: typeof AppImagesRoute
   AppMediaRoute: typeof AppMediaRoute
   AppSetsRoute: typeof AppSetsRouteWithChildren
   AppSettingsRoute: typeof AppSettingsRoute
-  AppTagsRoute: typeof AppTagsRoute
-  AppVideosRoute: typeof AppVideosRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
-  AppImagesRoute: AppImagesRoute,
   AppMediaRoute: AppMediaRoute,
   AppSetsRoute: AppSetsRouteWithChildren,
   AppSettingsRoute: AppSettingsRoute,
-  AppTagsRoute: AppTagsRoute,
-  AppVideosRoute: AppVideosRoute,
 }
 
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
