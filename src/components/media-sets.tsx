@@ -11,15 +11,24 @@ import { Command, CommandInput, CommandItem, CommandList } from "./ui/command"
 
 export function MediaSets({
   media,
+  mediaItems,
+  bulk = false,
   sets,
   compact = false,
   iconOnly = false,
 }: {
-  media: Media
+  media?: Media
+  mediaItems?: Media[]
+  bulk?: boolean
   sets: MediaSet[]
   compact?: boolean
   iconOnly?: boolean
 }) {
+  const items = mediaItems ?? (media ? [media] : [])
+  const state = (setId: string): boolean | "mixed" => {
+    const count = items.filter((item) => item.set_ids.includes(setId)).length
+    return count === items.length ? true : count ? "mixed" : false
+  }
   const mobile = useMobile()
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState("")
@@ -31,7 +40,8 @@ export function MediaSets({
       setId?: string
       displayName?: string
       remove?: boolean
-    }) => action("set-membership", { id: media.id, ...value }),
+    }) =>
+      action("set-membership", { ids: items.map((item) => item.id), ...value }),
     onSuccess: async () => {
       await client.invalidateQueries({ queryKey: ["library"] })
       if (!mobile) input.current?.focus()
@@ -58,13 +68,13 @@ export function MediaSets({
     term &&
     !sets.some((s) => s.display_name.toLowerCase() === term.toLowerCase())
   const chips = sets
-    .filter((s) => media.set_ids.includes(s.id))
+    .filter((s) => media?.set_ids.includes(s.id))
     .map((set) => (
       <span className="tag" key={set.id}>
         <span title={set.display_name}>{set.display_name}</span>
         <button
           type="button"
-          aria-label={`Remove ${media.display_name} from ${set.display_name}`}
+          aria-label={`Remove ${media?.display_name} from ${set.display_name}`}
           disabled={update.isPending}
           onClick={() => mutate({ setId: set.id, remove: true })}
         >
@@ -80,15 +90,26 @@ export function MediaSets({
         if (value) setSearch("")
       }}
       title="Sets"
-      media={[media]}
+      media={items}
+      bulk={bulk}
       trigger={
         <button
           type="button"
-          className={iconOnly ? "icon-button" : "tag-add"}
-          aria-label={`${iconOnly ? "Manage" : "Add"} sets ${iconOnly ? "for" : "to"} ${media.display_name}`}
-          data-populated={(iconOnly && media.set_ids.length > 0) || undefined}
+          className={
+            bulk ? "bulk-tag-trigger" : iconOnly ? "icon-button" : "tag-add"
+          }
+          aria-label={
+            bulk
+              ? "Add sets to selected media"
+              : `${iconOnly ? "Manage" : "Add"} sets ${iconOnly ? "for" : "to"} ${media?.display_name}`
+          }
+          disabled={!items.length}
+          data-populated={
+            (iconOnly && (media?.set_ids.length ?? 0) > 0) || undefined
+          }
         >
           {iconOnly ? <FolderOpen size={18} /> : <Plus size={15} />}
+          {bulk && "Add sets"}
         </button>
       }
     >
@@ -112,12 +133,12 @@ export function MediaSets({
               onSelect={() =>
                 mutate({
                   setId: set.id,
-                  remove: media.set_ids.includes(set.id),
+                  remove: state(set.id) === true,
                 })
               }
             >
               <MembershipCheckbox
-                checked={media.set_ids.includes(set.id)}
+                checked={state(set.id)}
                 label={set.display_name}
               />
               <span>{set.display_name}</span>
@@ -140,12 +161,12 @@ export function MediaSets({
       </Command>
     </MetadataPicker>
   )
-  if (iconOnly) return selector
+  if (iconOnly || bulk) return selector
   return (
     <div className="table-tags">
       {selector}
       <div className="tag-chips">
-        {media.set_ids.length ? (
+        {media?.set_ids.length ? (
           compact ? (
             <ChipOverflow label="sets">{chips}</ChipOverflow>
           ) : (

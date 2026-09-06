@@ -78,12 +78,12 @@ export function MetadataPicker({
             aria-label={title}
           >
             <h3>{title}</h3>
+            {bulk && <SelectionAlbum media={media} />}
             {children}
           </Popover.Content>
         </Popover.Portal>
       </Popover.Root>
     )
-  const preview = media.slice(0, 5)
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogTrigger asChild>{trigger}</DialogTrigger>
@@ -109,33 +109,7 @@ export function MetadataPicker({
             only some selected media have this item.
           </DialogDescription>
           {bulk ? (
-            <>
-              <div className="drawer-album" aria-hidden="true">
-                {preview.map((item, index) => (
-                  <div
-                    className="drawer-media-thumbnail"
-                    key={item.id}
-                    style={
-                      {
-                        "--fan-offset": `${(index - (preview.length - 1) / 2) * 24}px`,
-                        "--fan-angle": `${(index - (preview.length - 1) / 2) * 9}deg`,
-                        zIndex: index,
-                      } as CSSProperties
-                    }
-                  >
-                    <Thumbnail
-                      id={item.id}
-                      name=""
-                      video={item.mime_type.startsWith("video/")}
-                      eager
-                    />
-                  </div>
-                ))}
-              </div>
-              <span className="drawer-selection-count">
-                {media.length} selected
-              </span>
-            </>
+            <SelectionAlbum media={media} />
           ) : (
             media[0] && (
               <div className="drawer-media">
@@ -180,5 +154,49 @@ export function MembershipCheckbox({
       readOnly
       tabIndex={-1}
     />
+  )
+}
+
+function SelectionAlbum({ media }: { media: Media[] }) {
+  const preview = media.slice(0, 5)
+  return (
+    <div className="picker-selection-summary">
+      {" "}
+      <>
+        <div className="drawer-album-row">
+          <div className="drawer-album" aria-hidden="true">
+            {preview.map((item, index) => (
+              <div
+                className="drawer-media-thumbnail"
+                key={item.id}
+                style={
+                  {
+                    "--fan-offset": `${(index - (preview.length - 1) / 2) * 24}px`,
+                    "--fan-angle": `${(index - (preview.length - 1) / 2) * 9}deg`,
+                    zIndex: index,
+                  } as CSSProperties
+                }
+              >
+                <Thumbnail
+                  id={item.id}
+                  name=""
+                  video={item.mime_type.startsWith("video/")}
+                  eager
+                />
+              </div>
+            ))}
+          </div>
+          {media.length > 5 && (
+            <span
+              className="drawer-album-more"
+              aria-label={`${media.length - 5} more selected media`}
+            >
+              +{media.length - 5}
+            </span>
+          )}
+        </div>
+        <span className="drawer-selection-count">{media.length} selected</span>
+      </>
+    </div>
   )
 }

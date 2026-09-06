@@ -3809,3 +3809,49 @@ html {
     margin-bottom: 8px;
   }
 }
+.picker-selection-summary {
+  text-align: center;
+}
+.drawer-album-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.drawer-album-row .drawer-album {
+  width: 176px;
+  flex: 0 0 176px;
+  margin: 4px 0 12px;
+}
+.drawer-album-more {
+  color: var(--muted-foreground);
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.tag-popover > .picker-selection-summary {
+  padding-bottom: 16px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+@media (max-width: 760px) {
+  .media-selection-overlay {
+    flex-wrap: wrap;
+    justify-content: center;
+    padding: 8px;
+    gap: 6px;
+    max-width: calc(100% - 16px);
+  }
+  .media-selection-overlay > span {
+    font-size: 12px;
+  }
+  .media-selection-overlay .bulk-tag-trigger {
+    padding: 6px;
+    font-size: 12px;
+    gap: 3px;
+  }
+  .media-selection-overlay > .icon-button {
+    width: 24px;
+    height: 32px;
+  }
+}

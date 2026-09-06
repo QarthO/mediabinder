@@ -611,6 +611,13 @@ export function MediaSelectionActions({
         label="Add tags to selected media"
         bulk
       />
+      <MediaSets
+        mediaItems={table
+          .getFilteredSelectedRowModel()
+          .rows.map((row) => row.original)}
+        sets={(table.options.meta as MediaTableMeta).sets}
+        bulk
+      />
       <button
         className="icon-button"
         aria-label="Clear selection"
