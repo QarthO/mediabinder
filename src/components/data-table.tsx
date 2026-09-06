@@ -1,3 +1,5 @@
+import { useMobile } from "@/hooks/use-mobile"
+import { Popover } from "radix-ui"
 import { ChipOverflow } from "./chip-overflow"
 import { MediaSets } from "./media-sets"
 import { tagStyle } from "@/lib/tag-colors"
@@ -22,6 +24,8 @@ import {
 } from "@tanstack/react-table"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import {
+  Tags,
+  FolderOpen,
   ArrowDown,
   ArrowUp,
   ArrowUpDown,
@@ -190,6 +194,7 @@ export function DataTable({
   resetKey: string
   allTags: string[]
 }) {
+  const mobile = useMobile()
   const body = useRef<HTMLTableSectionElement>(null)
   const [scrollbar, setScrollbar] = useState(0)
   const rows = table.getRowModel().rows
@@ -200,14 +205,13 @@ export function DataTable({
   const virtual = useVirtualizer({
     count: rows.length,
     getScrollElement: () => body.current,
-    estimateSize: () =>
-      typeof window !== "undefined" &&
-      window.matchMedia("(max-width: 600px)").matches
-        ? 240
-        : 96,
+    estimateSize: () => (mobile ? 76 : 96),
     getItemKey: (index) => rows[index].id,
     overscan: 8,
   })
+  useEffect(() => {
+    virtual.measure()
+  }, [mobile])
   useEffect(() => {
     if (body.current) body.current.scrollTop = 0
   }, [resetKey, sorting])
@@ -224,7 +228,7 @@ export function DataTable({
     <TooltipProvider>
       <div className="data-table-frame">
         <table
-          className="data-table"
+          className={`data-table ${mobile ? "mobile-media-table" : ""}`}
           aria-label="Media"
           aria-rowcount={rows.length + 1}
         >
@@ -293,14 +297,67 @@ export function DataTable({
                   aria-rowindex={item.index + 2}
                   style={{ transform: `translateY(${item.start}px)` }}
                 >
-                  {row.getVisibleCells().map((cell) => (
-                    <td key={cell.id}>
-                      {flexRender(
-                        cell.column.columnDef.cell,
-                        cell.getContext()
-                      )}
-                    </td>
-                  ))}
+                  {mobile ? (
+                    <>
+                      <td className="mobile-media-main">
+                        <button
+                          className="mobile-media-open"
+                          onClick={() =>
+                            (table.options.meta as MediaTableMeta).onOpen(
+                              row.original
+                            )
+                          }
+                        >
+                          <div className="table-thumbnail">
+                            <Thumbnail
+                              id={row.original.id}
+                              name=""
+                              eager
+                              video={row.original.mime_type.startsWith(
+                                "video/"
+                              )}
+                            />
+                          </div>
+                          <span className="mobile-media-copy">
+                            <strong>{row.original.display_name}</strong>
+                            <span>
+                              <UploadedDate value={row.original.uploaded_at} />{" "}
+                              · {bytes(row.original.size)}
+                            </span>
+                          </span>
+                        </button>
+                      </td>
+                      <td className="mobile-media-actions">
+                        <MobileMetadata
+                          media={row.original}
+                          meta={table.options.meta as MediaTableMeta}
+                          kind="tags"
+                        />
+                        <MobileMetadata
+                          media={row.original}
+                          meta={table.options.meta as MediaTableMeta}
+                          kind="sets"
+                        />
+                        <MediaActions
+                          media={row.original}
+                          mobile
+                          selected={row.getIsSelected()}
+                          onSelect={() => row.toggleSelected()}
+                        />
+                      </td>
+                    </>
+                  ) : (
+                    row
+                      .getVisibleCells()
+                      .map((cell) => (
+                        <td key={cell.id}>
+                          {flexRender(
+                            cell.column.columnDef.cell,
+                            cell.getContext()
+                          )}
+                        </td>
+                      ))
+                  )}
                 </tr>
               )
             })}
@@ -433,7 +490,17 @@ export function MediaTags({
   )
 }
 
-function MediaActions({ media }: { media: Media }) {
+function MediaActions({
+  media,
+  mobile = false,
+  selected,
+  onSelect,
+}: {
+  media: Media
+  mobile?: boolean
+  selected?: boolean
+  onSelect?: () => void
+}) {
   const copy = async (value: string) => {
     try {
       await navigator.clipboard.writeText(value)
@@ -444,15 +511,17 @@ function MediaActions({ media }: { media: Media }) {
   }
   return (
     <div className="media-row-actions">
-      <a
-        href={`https://drive.google.com/file/d/${media.drive_id}/view`}
-        target="_blank"
-        rel="noopener noreferrer"
-        aria-label={`Open ${media.display_name} in Drive`}
-        title="Open in Drive"
-      >
-        <ArrowUpRight size={16} />
-      </a>
+      {!mobile && (
+        <a
+          href={`https://drive.google.com/file/d/${media.drive_id}/view`}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label={`Open ${media.display_name} in Drive`}
+          title="Open in Drive"
+        >
+          <ArrowUpRight size={16} />
+        </a>
+      )}
       <DropdownMenu>
         <DropdownMenuTrigger
           className="icon-button"
@@ -461,6 +530,22 @@ function MediaActions({ media }: { media: Media }) {
           <MoreHorizontal size={17} />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
+          {mobile && (
+            <>
+              <DropdownMenuItem asChild>
+                <a
+                  href={`https://drive.google.com/file/d/${media.drive_id}/view`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  Open in Drive
+                </a>
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={onSelect}>
+                {selected ? "Deselect" : "Select"} media
+              </DropdownMenuItem>
+            </>
+          )}
           <DropdownMenuItem onSelect={() => void copy(media.raw_name)}>
             Copy file name
           </DropdownMenuItem>
@@ -475,5 +560,50 @@ function MediaActions({ media }: { media: Media }) {
         </DropdownMenuContent>
       </DropdownMenu>
     </div>
+  )
+}
+
+function MobileMetadata({
+  media,
+  meta,
+  kind,
+}: {
+  media: Media
+  meta: MediaTableMeta
+  kind: "tags" | "sets"
+}) {
+  const Icon = kind === "tags" ? Tags : FolderOpen
+  const count = kind === "tags" ? media.tags.length : media.set_ids.length
+  return (
+    <Popover.Root>
+      <Popover.Trigger asChild>
+        <button
+          className="icon-button"
+          data-populated={count > 0 || undefined}
+          aria-label={`Manage ${kind} for ${media.display_name}`}
+        >
+          <Icon size={18} />
+        </button>
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Content
+          className="tag-popover mobile-metadata-popover"
+          sideOffset={8}
+          align="end"
+          collisionPadding={12}
+        >
+          <h3>{kind === "tags" ? "Tags" : "Sets"}</h3>
+          {kind === "tags" ? (
+            <MediaTags
+              media={media}
+              allTags={meta.allTags}
+              colors={meta.tagColors}
+            />
+          ) : (
+            <MediaSets media={media} sets={meta.sets} />
+          )}
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
   )
 }

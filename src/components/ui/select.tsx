@@ -5,7 +5,9 @@ export function Select({
   value,
   onChange,
   options,
+  mobileIcon: MobileIcon,
 }: {
+  mobileIcon?: import("lucide-react").LucideIcon
   label: string
   value: string
   onChange: (value: string) => void
@@ -13,7 +15,13 @@ export function Select({
 }) {
   return (
     <Primitive.Root value={value} onValueChange={onChange}>
-      <Primitive.Trigger className="select-trigger" aria-label={label}>
+      <Primitive.Trigger
+        className={`select-trigger ${MobileIcon ? "mobile-icon-select" : ""}`}
+        aria-label={label}
+        title={options.find((option) => option.value === value)?.label}
+        data-active={value !== options[0]?.value || undefined}
+      >
+        {MobileIcon && <MobileIcon className="mobile-filter-icon" size={18} />}
         <Primitive.Value />
         <Primitive.Icon>
           <ChevronDown size={14} />
