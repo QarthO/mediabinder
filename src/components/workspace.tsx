@@ -10,10 +10,11 @@ import {
   useNavigate,
   useRouterState,
   useSearch,
+  useRouteContext,
 } from "@tanstack/react-router"
 import { useEffect, useMemo, useState, useRef } from "react"
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query"
-import { type SortingState } from "@tanstack/react-table"
+import { type SortingState, type OnChangeFn } from "@tanstack/react-table"
 import {
   DataTable,
   MediaTags,
@@ -63,11 +64,15 @@ import {
   CommandItem,
 } from "./ui/command"
 import { Brand } from "./brand"
-import { Thumbnail, ThumbnailBlurContext } from "./thumbnail"
+import { Thumbnail, MediaCensorContext } from "./thumbnail"
 import { Detail } from "./detail"
 import { DriveSettings } from "./drive-settings"
 import { libraryQuery, action } from "@/lib/api"
 import { authClient } from "@/lib/auth-client"
+import {
+  workspacePreferencesCookie,
+  type WorkspacePreferences,
+} from "@/lib/workspace-preferences"
 import { bytes } from "@/lib/utils"
 import type { Media, MediaSet } from "@/lib/types"
 const navItems = [
@@ -75,25 +80,47 @@ const navItems = [
   { id: "all", label: "All media", icon: Images },
 ] as const
 export function Workspace() {
-  const [thumbnailsBlurred, setThumbnailsBlurred] = useState(false)
+  const { preferences: initialPreferences } = useRouteContext({ from: "/_app" })
+  const [preferences, setPreferences] =
+    useState<WorkspacePreferences>(initialPreferences)
+  useEffect(() => {
+    document.cookie = workspacePreferencesCookie(
+      preferences,
+      window.location.protocol === "https:"
+    )
+  }, [preferences])
+  const setSorting: OnChangeFn<SortingState> = (update) =>
+    setPreferences((current) => ({
+      ...current,
+      sorting: typeof update === "function" ? update(current.sorting) : update,
+    }))
   return (
-    <ThumbnailBlurContext value={thumbnailsBlurred}>
+    <MediaCensorContext value={preferences.censored}>
       <WorkspaceContent
-        thumbnailsBlurred={thumbnailsBlurred}
-        onToggleThumbnailBlur={() =>
-          setThumbnailsBlurred((blurred) => !blurred)
+        mediaCensored={preferences.censored}
+        onToggleCensor={() =>
+          setPreferences((current) => ({
+            ...current,
+            censored: !current.censored,
+          }))
         }
+        sorting={preferences.sorting}
+        setSorting={setSorting}
       />
-    </ThumbnailBlurContext>
+    </MediaCensorContext>
   )
 }
 
 function WorkspaceContent({
-  thumbnailsBlurred,
-  onToggleThumbnailBlur,
+  mediaCensored,
+  onToggleCensor,
+  sorting,
+  setSorting,
 }: {
-  thumbnailsBlurred: boolean
-  onToggleThumbnailBlur: () => void
+  mediaCensored: boolean
+  onToggleCensor: () => void
+  sorting: SortingState
+  setSorting: OnChangeFn<SortingState>
 }) {
   const mobile = useMobile()
   const [selectionEnabled, setSelectionMode] = useState(false)
@@ -118,9 +145,6 @@ function WorkspaceContent({
     [mediaType, setMediaType] = useState("all"),
     [catalogStatus, setCatalogStatus] = useState("all"),
     [setFilter, setSetFilter] = useState(""),
-    [sorting, setSorting] = useState<SortingState>([
-      { id: "uploaded_at", desc: true },
-    ]),
     [command, setCommand] = useState(false),
     [newSet, setNewSet] = useState(false),
     [setName, setSetName] = useState(""),
@@ -680,14 +704,12 @@ function WorkspaceContent({
                   className="thumbnail-blur-toggle"
                   variant="outline"
                   size="icon"
-                  aria-label="Blur thumbnails"
-                  aria-pressed={thumbnailsBlurred}
-                  title={
-                    thumbnailsBlurred ? "Unblur thumbnails" : "Blur thumbnails"
-                  }
-                  onClick={onToggleThumbnailBlur}
+                  aria-label="Censor media"
+                  aria-pressed={mediaCensored}
+                  title={mediaCensored ? "Uncensor media" : "Censor media"}
+                  onClick={onToggleCensor}
                 >
-                  {thumbnailsBlurred ? <EyeOff /> : <Eye />}
+                  {mediaCensored ? <EyeOff /> : <Eye />}
                 </Button>
                 <div className="view-switch">
                   {(["grid", "list"] as const).map((v) => (

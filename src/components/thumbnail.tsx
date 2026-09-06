@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState } from "react"
 import { Film, ImageIcon } from "lucide-react"
-export const ThumbnailBlurContext = createContext(false)
+export const MediaCensorContext = createContext(false)
 
 export function Thumbnail({
   id,
@@ -13,7 +13,7 @@ export function Thumbnail({
   video?: boolean
   eager?: boolean
 }) {
-  const blurred = useContext(ThumbnailBlurContext)
+  const blurred = useContext(MediaCensorContext)
   const [failed, setFailed] = useState(false)
   const [loaded, setLoaded] = useState(false)
   const [attempt, setAttempt] = useState(0)

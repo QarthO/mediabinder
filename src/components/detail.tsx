@@ -1,9 +1,10 @@
 import { MediaTags } from "./data-table"
 import { MediaSets } from "./media-sets"
-import { useRef, useState } from "react"
+import { useContext, useRef, useState } from "react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import {
   ArrowUpRight,
+  EyeOff,
   ChevronLeft,
   ChevronRight,
   Link2,
@@ -24,7 +25,7 @@ import {
 } from "./ui/dialog"
 import { Button } from "./ui/button"
 import { Input } from "./ui/input"
-import { Thumbnail } from "./thumbnail"
+import { Thumbnail, MediaCensorContext } from "./thumbnail"
 import { action } from "@/lib/api"
 import { bytes, dateValue, isoDate } from "@/lib/utils"
 import type { Library } from "@/lib/types"
@@ -43,6 +44,10 @@ export function Detail({
     onStep: (direction: number) => void
   }
 }) {
+  const censorEnabled = useContext(MediaCensorContext)
+  // Detail is keyed by item, so closing or navigating always clears this reveal.
+  const [revealed, setRevealed] = useState(false)
+  const censored = censorEnabled && !revealed
   const item =
     selected.kind === "media"
       ? data.media.find((m) => m.id === selected.id)
@@ -276,7 +281,9 @@ export function Detail({
                 </div>
               ) : media.mime_type.startsWith("video/") ? (
                 <video
-                  controls
+                  data-blurred={censored || undefined}
+                  controls={!censored}
+                  tabIndex={censored ? -1 : undefined}
                   autoPlay={false}
                   playsInline
                   preload="metadata"
@@ -285,24 +292,43 @@ export function Detail({
                 />
               ) : (
                 <img
+                  data-blurred={censored || undefined}
                   src={`/api/media/${media.id}`}
                   alt={media.display_name}
                   onError={() => setFailed(true)}
                 />
               )
             ) : (
-              <div className="set-preview-grid">
-                {members.length ? (
-                  members
-                    .slice(0, 9)
-                    .map((m) => (
-                      <Thumbnail key={m.id} id={m.id} name={m.display_name} />
-                    ))
-                ) : (
-                  <FolderOpen size={48} />
-                )}
-              </div>
+              <MediaCensorContext value={censored}>
+                <div className="set-preview-grid">
+                  {members.length ? (
+                    members
+                      .slice(0, 9)
+                      .map((m) => (
+                        <Thumbnail key={m.id} id={m.id} name={m.display_name} />
+                      ))
+                  ) : (
+                    <FolderOpen size={48} />
+                  )}
+                </div>
+              </MediaCensorContext>
             )}
+            {censored &&
+              (media ? !failed && media.available : members.length > 0) && (
+                <button
+                  className="media-reveal"
+                  aria-label="Reveal media"
+                  onClick={() => {
+                    setRevealed(true)
+                    dialogRef.current?.focus()
+                  }}
+                >
+                  <span>
+                    <EyeOff size={20} />
+                    Click to reveal
+                  </span>
+                </button>
+              )}
             <div className="preview-caption">
               <span>
                 {media
