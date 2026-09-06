@@ -164,6 +164,82 @@ test("shared catalog deduplicates bytes, shares curation, isolates access and pr
       new Headers()
     )
   )
+  await mutate(
+    "add-tags",
+    { ids: [target, privateId], tags: ["bulk-toggle"] },
+    a,
+    new Headers()
+  )
+  await assert.rejects(() =>
+    mutate(
+      "remove-tags",
+      { ids: [target, privateId], tags: ["bulk-toggle"] },
+      b,
+      new Headers()
+    )
+  )
+  assert.ok(
+    (await library(user(a))).media.every((m) => m.tags.includes("bulk-toggle"))
+  )
+  await mutate(
+    "remove-tags",
+    { ids: [target, privateId], tags: ["bulk-toggle"] },
+    a,
+    new Headers()
+  )
+  assert.ok(
+    (await library(user(a))).media.every((m) => !m.tags.includes("bulk-toggle"))
+  )
+  assert.ok(
+    (await library(user(a))).media
+      .find((m) => m.id === target)!
+      .tags.includes("a")
+  )
+  const bulkSet = (await mutate(
+    "set-membership",
+    { ids: [target, privateId], displayName: "Bulk set" },
+    a,
+    new Headers()
+  )) as { id: string }
+  assert.ok(
+    (await library(user(a))).media.every((m) => m.set_ids.includes(bulkSet.id))
+  )
+  await assert.rejects(() =>
+    mutate(
+      "set-membership",
+      { ids: [target, privateId], setId: bulkSet.id, remove: true },
+      b,
+      new Headers()
+    )
+  )
+  assert.ok(
+    (await library(user(a))).media.every((m) => m.set_ids.includes(bulkSet.id))
+  )
+  await mutate(
+    "set-membership",
+    { ids: [target, privateId], setId: bulkSet.id, remove: true },
+    a,
+    new Headers()
+  )
+  assert.ok(
+    (await library(user(a))).media.every(
+      (m) => !m.set_ids.includes(bulkSet.id) && m.set_ids.includes(set.id)
+    )
+  )
+  await assert.rejects(() =>
+    mutate(
+      "set-membership",
+      { ids: [target, privateId], displayName: "Forbidden bulk set" },
+      b,
+      new Headers()
+    )
+  )
+  assert.equal(
+    (await library(user(a))).sets.some(
+      (s) => s.display_name === "Forbidden bulk set"
+    ),
+    false
+  )
   // Replacing bytes under an existing Drive ID must return to the inbox.
   bFiles = [file(third, "new-content.jpg", hashB)]
   await syncDrive(b)

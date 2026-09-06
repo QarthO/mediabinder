@@ -1,10 +1,12 @@
+import { useMobile } from "@/hooks/use-mobile"
+import type { Media } from "@/lib/types"
 import { useRef, useState } from "react"
-import { Popover } from "radix-ui"
-import { Plus } from "lucide-react"
+import { Plus, Tags } from "lucide-react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 import { action } from "@/lib/api"
 import { Command, CommandInput, CommandItem, CommandList } from "./ui/command"
+import { MetadataPicker, MembershipCheckbox } from "./metadata-picker"
 
 export function TagPopover({
   ids,
@@ -12,128 +14,131 @@ export function TagPopover({
   existing = [],
   label,
   bulk = false,
+  media,
+  mediaItems,
+  iconOnly = false,
 }: {
+  media?: Media
+  mediaItems?: Media[]
   ids: string[]
   allTags: string[]
   existing?: string[]
   label: string
   bulk?: boolean
+  iconOnly?: boolean
 }) {
+  const mobile = useMobile()
+  const items = mediaItems ?? (media ? [media] : [])
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState("")
-  const [added, setAdded] = useState<string[]>([])
+  const [knownTags, setKnownTags] = useState<string[]>([])
   const input = useRef<HTMLInputElement>(null)
   const busy = useRef(false)
   const client = useQueryClient()
   const save = useMutation({
-    mutationFn: (tag: string) => action("add-tags", { ids, tags: [tag] }),
-    onSuccess: async (_result, tag) => {
-      setAdded((tags) => [...tags, tag])
-      await client.invalidateQueries({ queryKey: ["library"] })
-      input.current?.focus()
-    },
+    mutationFn: ({ tag, remove }: { tag: string; remove: boolean }) =>
+      action(remove ? "remove-tags" : "add-tags", { ids, tags: [tag] }),
+    onSuccess: (_result, { tag }) =>
+      setKnownTags((tags) => [...new Set([...tags, tag])]),
     onError: (error) => toast.error(error.message),
-    onSettled: () => {
+    onSettled: async () => {
+      await client.invalidateQueries({ queryKey: ["library"] })
       busy.current = false
+      if (!mobile) input.current?.focus()
     },
   })
   const term = search.trim().toLowerCase()
-  const options = allTags
-    .filter(
-      (tag) =>
-        !existing.includes(tag) && !added.includes(tag) && tag.includes(term)
-    )
-    .sort(
-      (a, b) => Number(b === term) - Number(a === term) || a.localeCompare(b)
-    )
-  const create = Boolean(
-    term &&
-    !allTags.includes(term) &&
-    !existing.includes(term) &&
-    !added.includes(term)
-  )
-  const add = (tag: string) => {
-    if (!busy.current) {
-      busy.current = true
-      setSearch("")
-      save.mutate(tag)
-    }
+  const options = [
+    ...new Set([
+      ...allTags,
+      ...knownTags,
+      ...existing,
+      ...items.flatMap((item) => item.tags),
+    ]),
+  ]
+    .filter((tag) => tag.toLowerCase().includes(term))
+    .sort((a, b) => a.localeCompare(b))
+  const state = (tag: string): boolean | "mixed" => {
+    const count = items.length
+      ? items.filter((item) => item.tags.includes(tag)).length
+      : existing.includes(tag)
+        ? ids.length
+        : 0
+    return count === ids.length ? true : count ? "mixed" : false
+  }
+  const create = !!term && !options.includes(term)
+  const toggle = (tag: string) => {
+    if (busy.current) return
+    busy.current = true
+    save.mutate({ tag, remove: state(tag) === true })
   }
   return (
-    <Popover.Root
+    <MetadataPicker
       open={open}
       onOpenChange={(value) => {
         setOpen(value)
         if (value) {
           setSearch("")
-          setAdded([])
+          setKnownTags([...allTags])
         }
       }}
-    >
-      <Popover.Trigger asChild>
+      title="Tags"
+      media={items}
+      bulk={bulk}
+      trigger={
         <button
           type="button"
-          className={bulk ? "bulk-tag-trigger" : "tag-add"}
+          className={
+            iconOnly ? "icon-button" : bulk ? "bulk-tag-trigger" : "tag-add"
+          }
           aria-label={label}
           disabled={!ids.length}
+          data-populated={(iconOnly && existing.length > 0) || undefined}
         >
-          <Plus size={15} />
+          {iconOnly ? <Tags size={18} /> : <Plus size={15} />}
           {bulk && "Add tags"}
         </button>
-      </Popover.Trigger>
-      <Popover.Portal>
-        <Popover.Content
-          className="tag-popover"
-          sideOffset={8}
-          align="start"
-          collisionPadding={12}
-          aria-label={bulk ? "Add tags to selected media" : "Add media tags"}
-        >
-          <h3>{bulk ? `Add tags to ${ids.length} items` : "Add tags"}</h3>
-          <Command shouldFilter={false} loop>
-            <CommandInput
-              ref={input}
-              aria-label="Find or create a tag"
-              placeholder="Find or create a tag…"
-              maxLength={50}
-              value={search}
-              onValueChange={setSearch}
-            />
-            <CommandList className="tag-options" aria-busy={save.isPending}>
-              {options.map((tag) => (
-                <CommandItem
-                  key={tag}
-                  value={tag}
-                  disabled={save.isPending}
-                  onSelect={() => add(tag)}
-                >
-                  {tag}
-                </CommandItem>
-              ))}
-              {create && (
-                <CommandItem
-                  value={term}
-                  disabled={save.isPending}
-                  onSelect={() => add(term)}
-                >
-                  <Plus size={15} />
-                  Create “{term}”
-                </CommandItem>
-              )}
-              {!options.length && !create && (
-                <p>
-                  {term
-                    ? "This tag is already added."
-                    : "Type a name to create a tag."}
-                </p>
-              )}
-            </CommandList>
-          </Command>
-          <div className="tag-popover-hint" role="status">
-            {save.isPending ? "Adding tag…" : "↑ ↓ to choose · Enter to add"}
-          </div>
-        </Popover.Content>
-      </Popover.Portal>
-    </Popover.Root>
+      }
+    >
+      <Command shouldFilter={false} loop>
+        <div className="picker-search">
+          <CommandInput
+            ref={input}
+            aria-label="Find or create a tag"
+            placeholder="Find or create a tag…"
+            maxLength={50}
+            value={search}
+            onValueChange={setSearch}
+          />
+        </div>
+        <CommandList className="tag-options" aria-busy={save.isPending}>
+          {options.map((tag) => (
+            <CommandItem
+              key={tag}
+              value={tag}
+              disabled={save.isPending}
+              onSelect={() => toggle(tag)}
+            >
+              <MembershipCheckbox checked={state(tag)} label={tag} />
+              <span>{tag}</span>
+            </CommandItem>
+          ))}
+          {create && (
+            <CommandItem
+              value={`create:${term}`}
+              disabled={save.isPending}
+              onSelect={() => toggle(term)}
+            >
+              <Plus size={15} />
+              Create “{term}”
+            </CommandItem>
+          )}
+          {!options.length && !create && <p>Type a name to create a tag.</p>}
+        </CommandList>
+      </Command>
+      <span className="sr-only" role="status">
+        {save.isPending ? "Saving tags…" : ""}
+      </span>
+    </MetadataPicker>
   )
 }

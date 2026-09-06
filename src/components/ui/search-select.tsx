@@ -13,7 +13,9 @@ export function SearchSelect({
   value,
   onChange,
   options,
+  mobileIcon: MobileIcon,
 }: {
+  mobileIcon?: import("lucide-react").LucideIcon
   label: string
   value: string
   onChange: (value: string) => void
@@ -24,11 +26,16 @@ export function SearchSelect({
     <Popover.Root open={open} onOpenChange={setOpen}>
       <Popover.Trigger asChild>
         <button
-          className="select-trigger"
+          className={`select-trigger ${MobileIcon ? "mobile-icon-select" : ""}`}
           role="combobox"
           aria-expanded={open}
           aria-label={label}
+          title={options.find((option) => option.value === value)?.label}
+          data-active={value !== options[0]?.value || undefined}
         >
+          {MobileIcon && (
+            <MobileIcon className="mobile-filter-icon" size={18} />
+          )}
           <span>
             {options.find((option) => option.value === value)?.label ??
               options[0]?.label}

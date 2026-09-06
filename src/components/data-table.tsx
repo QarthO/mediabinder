@@ -1,3 +1,4 @@
+import { useMobile } from "@/hooks/use-mobile"
 import { ChipOverflow } from "./chip-overflow"
 import { MediaSets } from "./media-sets"
 import { tagStyle } from "@/lib/tag-colors"
@@ -52,7 +53,8 @@ export function useMediaTable(
   onOpen: (media: Media) => void,
   allTags: string[],
   tagColors: Record<string, string>,
-  sets: MediaSet[]
+  sets: MediaSet[],
+  selectionMode: boolean
 ) {
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({})
   const itemIds = items.map((item) => item.id).join(",")
@@ -85,8 +87,15 @@ export function useMediaTable(
         cell: ({ row, table }) => (
           <button
             className="table-name"
+            aria-pressed={
+              (table.options.meta as MediaTableMeta).selectionMode
+                ? row.getIsSelected()
+                : undefined
+            }
             onClick={() =>
-              (table.options.meta as MediaTableMeta).onOpen(row.original)
+              (table.options.meta as MediaTableMeta).selectionMode
+                ? row.toggleSelected()
+                : (table.options.meta as MediaTableMeta).onOpen(row.original)
             }
           >
             <div className="table-thumbnail">
@@ -160,7 +169,13 @@ export function useMediaTable(
   )
   return useReactTable({
     data: items,
-    meta: { onOpen, allTags, tagColors, sets } satisfies MediaTableMeta,
+    meta: {
+      onOpen,
+      allTags,
+      tagColors,
+      sets,
+      selectionMode,
+    } satisfies MediaTableMeta,
     columns,
     state: { globalFilter: search, sorting, rowSelection },
     onRowSelectionChange: setRowSelection,
@@ -184,12 +199,12 @@ export function useMediaTable(
 export function DataTable({
   table,
   resetKey,
-  allTags,
 }: {
   table: Table<Media>
   resetKey: string
-  allTags: string[]
 }) {
+  const mobile = useMobile()
+  const selectionMode = (table.options.meta as MediaTableMeta).selectionMode
   const body = useRef<HTMLTableSectionElement>(null)
   const [scrollbar, setScrollbar] = useState(0)
   const rows = table.getRowModel().rows
@@ -200,14 +215,13 @@ export function DataTable({
   const virtual = useVirtualizer({
     count: rows.length,
     getScrollElement: () => body.current,
-    estimateSize: () =>
-      typeof window !== "undefined" &&
-      window.matchMedia("(max-width: 600px)").matches
-        ? 240
-        : 96,
+    estimateSize: () => (mobile ? 76 : 96),
     getItemKey: (index) => rows[index].id,
     overscan: 8,
   })
+  useEffect(() => {
+    virtual.measure()
+  }, [mobile])
   useEffect(() => {
     if (body.current) body.current.scrollTop = 0
   }, [resetKey, sorting])
@@ -224,7 +238,7 @@ export function DataTable({
     <TooltipProvider>
       <div className="data-table-frame">
         <table
-          className="data-table"
+          className={`data-table ${mobile ? "mobile-media-table" : ""}`}
           aria-label="Media"
           aria-rowcount={rows.length + 1}
         >
@@ -277,7 +291,9 @@ export function DataTable({
             <tr
               aria-hidden="true"
               className="table-spacer"
-              style={{ height: virtual.getTotalSize() }}
+              style={{
+                height: virtual.getTotalSize() + (selected.length ? 88 : 0),
+              }}
             >
               <td colSpan={table.getVisibleLeafColumns().length} />
             </tr>
@@ -287,43 +303,87 @@ export function DataTable({
                 <tr
                   key={row.id}
                   data-index={item.index}
+                  onClick={(event) => {
+                    if (
+                      selectionMode &&
+                      !(event.target as HTMLElement).closest(
+                        "button, a, input, [role=dialog]"
+                      )
+                    )
+                      row.toggleSelected()
+                  }}
                   aria-selected={row.getIsSelected()}
                   data-selected={row.getIsSelected() || undefined}
                   ref={virtual.measureElement}
                   aria-rowindex={item.index + 2}
                   style={{ transform: `translateY(${item.start}px)` }}
                 >
-                  {row.getVisibleCells().map((cell) => (
-                    <td key={cell.id}>
-                      {flexRender(
-                        cell.column.columnDef.cell,
-                        cell.getContext()
-                      )}
-                    </td>
-                  ))}
+                  {mobile ? (
+                    <>
+                      <td className="mobile-media-main">
+                        <button
+                          className="mobile-media-open"
+                          aria-pressed={
+                            selectionMode ? row.getIsSelected() : undefined
+                          }
+                          onClick={() =>
+                            selectionMode
+                              ? row.toggleSelected()
+                              : (table.options.meta as MediaTableMeta).onOpen(
+                                  row.original
+                                )
+                          }
+                        >
+                          <div className="table-thumbnail">
+                            <Thumbnail
+                              id={row.original.id}
+                              name=""
+                              eager
+                              video={row.original.mime_type.startsWith(
+                                "video/"
+                              )}
+                            />
+                          </div>
+                          <span className="mobile-media-copy">
+                            <strong>{row.original.display_name}</strong>
+                            <span>
+                              <UploadedDate value={row.original.uploaded_at} />{" "}
+                              · {bytes(row.original.size)}
+                            </span>
+                          </span>
+                        </button>
+                      </td>
+                      <td className="mobile-media-actions">
+                        <MobileMetadata
+                          media={row.original}
+                          meta={table.options.meta as MediaTableMeta}
+                          kind="tags"
+                        />
+                        <MobileMetadata
+                          media={row.original}
+                          meta={table.options.meta as MediaTableMeta}
+                          kind="sets"
+                        />
+                        <MediaActions media={row.original} mobile />
+                      </td>
+                    </>
+                  ) : (
+                    row
+                      .getVisibleCells()
+                      .map((cell) => (
+                        <td key={cell.id}>
+                          {flexRender(
+                            cell.column.columnDef.cell,
+                            cell.getContext()
+                          )}
+                        </td>
+                      ))
+                  )}
                 </tr>
               )
             })}
           </tbody>
         </table>
-        <div className="table-footer" aria-label="Table selection">
-          <span aria-live="polite">
-            {selected.length} of {rows.length} selected
-          </span>
-          {selected.length > 0 && (
-            <div className="selection-actions">
-              <button onClick={() => table.resetRowSelection()}>
-                Clear selection
-              </button>
-              <TagPopover
-                ids={selected}
-                allTags={allTags}
-                label="Add tags to selected media"
-                bulk
-              />
-            </div>
-          )}
-        </div>
       </div>
     </TooltipProvider>
   )
@@ -379,6 +439,7 @@ type MediaTableMeta = {
   allTags: string[]
   tagColors: Record<string, string>
   sets: MediaSet[]
+  selectionMode: boolean
 }
 export function MediaTags({
   media,
@@ -413,6 +474,7 @@ export function MediaTags({
   return (
     <div className="table-tags">
       <TagPopover
+        media={media}
         ids={[media.id]}
         existing={media.tags}
         allTags={allTags}
@@ -433,7 +495,13 @@ export function MediaTags({
   )
 }
 
-function MediaActions({ media }: { media: Media }) {
+function MediaActions({
+  media,
+  mobile = false,
+}: {
+  media: Media
+  mobile?: boolean
+}) {
   const copy = async (value: string) => {
     try {
       await navigator.clipboard.writeText(value)
@@ -444,15 +512,17 @@ function MediaActions({ media }: { media: Media }) {
   }
   return (
     <div className="media-row-actions">
-      <a
-        href={`https://drive.google.com/file/d/${media.drive_id}/view`}
-        target="_blank"
-        rel="noopener noreferrer"
-        aria-label={`Open ${media.display_name} in Drive`}
-        title="Open in Drive"
-      >
-        <ArrowUpRight size={16} />
-      </a>
+      {!mobile && (
+        <a
+          href={`https://drive.google.com/file/d/${media.drive_id}/view`}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label={`Open ${media.display_name} in Drive`}
+          title="Open in Drive"
+        >
+          <ArrowUpRight size={16} />
+        </a>
+      )}
       <DropdownMenu>
         <DropdownMenuTrigger
           className="icon-button"
@@ -461,6 +531,19 @@ function MediaActions({ media }: { media: Media }) {
           <MoreHorizontal size={17} />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
+          {mobile && (
+            <>
+              <DropdownMenuItem asChild>
+                <a
+                  href={`https://drive.google.com/file/d/${media.drive_id}/view`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  Open in Drive
+                </a>
+              </DropdownMenuItem>
+            </>
+          )}
           <DropdownMenuItem onSelect={() => void copy(media.raw_name)}>
             Copy file name
           </DropdownMenuItem>
@@ -474,6 +557,74 @@ function MediaActions({ media }: { media: Media }) {
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+    </div>
+  )
+}
+
+function MobileMetadata({
+  media,
+  meta,
+  kind,
+}: {
+  media: Media
+  meta: MediaTableMeta
+  kind: "tags" | "sets"
+}) {
+  return kind === "tags" ? (
+    <TagPopover
+      media={media}
+      ids={[media.id]}
+      existing={media.tags}
+      allTags={meta.allTags}
+      label={`Manage tags for ${media.display_name}`}
+      iconOnly
+    />
+  ) : (
+    <MediaSets media={media} sets={meta.sets} iconOnly />
+  )
+}
+
+export function MediaSelectionActions({
+  table,
+  allTags,
+}: {
+  table: Table<Media>
+  allTags: string[]
+}) {
+  const selected = table
+    .getFilteredSelectedRowModel()
+    .rows.map((row) => row.original.id)
+  if (!selected.length) return null
+  return (
+    <div
+      className="media-selection-overlay"
+      role="toolbar"
+      aria-label="Selected media actions"
+    >
+      <span aria-live="polite">{selected.length} selected</span>
+      <TagPopover
+        ids={selected}
+        mediaItems={table
+          .getFilteredSelectedRowModel()
+          .rows.map((row) => row.original)}
+        allTags={allTags}
+        label="Add tags to selected media"
+        bulk
+      />
+      <MediaSets
+        mediaItems={table
+          .getFilteredSelectedRowModel()
+          .rows.map((row) => row.original)}
+        sets={(table.options.meta as MediaTableMeta).sets}
+        bulk
+      />
+      <button
+        className="icon-button"
+        aria-label="Clear selection"
+        onClick={() => table.resetRowSelection()}
+      >
+        <X size={16} />
+      </button>
     </div>
   )
 }

@@ -1,7 +1,8 @@
 import { ChipOverflow } from "./chip-overflow"
 import { useRef, useState } from "react"
-import { Popover } from "radix-ui"
-import { Plus, X } from "lucide-react"
+import { useMobile } from "@/hooks/use-mobile"
+import { MetadataPicker, MembershipCheckbox } from "./metadata-picker"
+import { Plus, X, FolderOpen } from "lucide-react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 import { action } from "@/lib/api"
@@ -10,13 +11,26 @@ import { Command, CommandInput, CommandItem, CommandList } from "./ui/command"
 
 export function MediaSets({
   media,
+  mediaItems,
+  bulk = false,
   sets,
   compact = false,
+  iconOnly = false,
 }: {
-  media: Media
+  media?: Media
+  mediaItems?: Media[]
+  bulk?: boolean
   sets: MediaSet[]
   compact?: boolean
+  iconOnly?: boolean
 }) {
+  const items = mediaItems ?? (media ? [media] : [])
+  const state = (setId: string): boolean | "mixed" => {
+    const count = items.filter((item) => item.set_ids.includes(setId)).length
+    return count === items.length ? true : count ? "mixed" : false
+  }
+  const mobile = useMobile()
+  const [open, setOpen] = useState(false)
   const [search, setSearch] = useState("")
   const input = useRef<HTMLInputElement>(null)
   const busy = useRef(false)
@@ -26,11 +40,11 @@ export function MediaSets({
       setId?: string
       displayName?: string
       remove?: boolean
-    }) => action("set-membership", { id: media.id, ...value }),
+    }) =>
+      action("set-membership", { ids: items.map((item) => item.id), ...value }),
     onSuccess: async () => {
-      setSearch("")
       await client.invalidateQueries({ queryKey: ["library"] })
-      input.current?.focus()
+      if (!mobile) input.current?.focus()
     },
     onError: (error) => toast.error(error.message),
     onSettled: () => {
@@ -47,22 +61,20 @@ export function MediaSets({
     update.mutate(value)
   }
   const term = search.trim()
-  const options = sets.filter(
-    (s) =>
-      !media.set_ids.includes(s.id) &&
-      s.display_name.toLowerCase().includes(term.toLowerCase())
+  const options = sets.filter((s) =>
+    s.display_name.toLowerCase().includes(term.toLowerCase())
   )
   const create =
     term &&
     !sets.some((s) => s.display_name.toLowerCase() === term.toLowerCase())
   const chips = sets
-    .filter((s) => media.set_ids.includes(s.id))
+    .filter((s) => media?.set_ids.includes(s.id))
     .map((set) => (
       <span className="tag" key={set.id}>
         <span title={set.display_name}>{set.display_name}</span>
         <button
           type="button"
-          aria-label={`Remove ${media.display_name} from ${set.display_name}`}
+          aria-label={`Remove ${media?.display_name} from ${set.display_name}`}
           disabled={update.isPending}
           onClick={() => mutate({ setId: set.id, remove: true })}
         >
@@ -70,75 +82,91 @@ export function MediaSets({
         </button>
       </span>
     ))
+  const selector = (
+    <MetadataPicker
+      open={open}
+      onOpenChange={(value) => {
+        setOpen(value)
+        if (value) setSearch("")
+      }}
+      title="Sets"
+      media={items}
+      bulk={bulk}
+      trigger={
+        <button
+          type="button"
+          className={
+            bulk ? "bulk-tag-trigger" : iconOnly ? "icon-button" : "tag-add"
+          }
+          aria-label={
+            bulk
+              ? "Add sets to selected media"
+              : `${iconOnly ? "Manage" : "Add"} sets ${iconOnly ? "for" : "to"} ${media?.display_name}`
+          }
+          disabled={!items.length}
+          data-populated={
+            (iconOnly && (media?.set_ids.length ?? 0) > 0) || undefined
+          }
+        >
+          {iconOnly ? <FolderOpen size={18} /> : <Plus size={15} />}
+          {bulk && "Add sets"}
+        </button>
+      }
+    >
+      <Command shouldFilter={false} loop>
+        <div className="picker-search">
+          <CommandInput
+            ref={input}
+            placeholder="Find or create a set…"
+            aria-label="Find or create a set"
+            maxLength={255}
+            value={search}
+            onValueChange={setSearch}
+          />
+        </div>
+        <CommandList className="tag-options">
+          {options.map((set) => (
+            <CommandItem
+              key={set.id}
+              value={set.id}
+              disabled={update.isPending}
+              onSelect={() =>
+                mutate({
+                  setId: set.id,
+                  remove: state(set.id) === true,
+                })
+              }
+            >
+              <MembershipCheckbox
+                checked={state(set.id)}
+                label={set.display_name}
+              />
+              <span>{set.display_name}</span>
+            </CommandItem>
+          ))}
+          {create && (
+            <CommandItem
+              value="create"
+              disabled={update.isPending}
+              onSelect={() => mutate({ displayName: term })}
+            >
+              <Plus size={15} />
+              Create “{term}”
+            </CommandItem>
+          )}
+          {!options.length && !create && (
+            <p>{term ? "No matching sets." : "Type a name to create a set."}</p>
+          )}
+        </CommandList>
+      </Command>
+    </MetadataPicker>
+  )
+  if (iconOnly || bulk) return selector
   return (
     <div className="table-tags">
-      <Popover.Root
-        onOpenChange={(open) => {
-          if (open) setSearch("")
-        }}
-      >
-        <Popover.Trigger asChild>
-          <button
-            type="button"
-            className="tag-add"
-            aria-label={`Add sets to ${media.display_name}`}
-          >
-            <Plus size={15} />
-          </button>
-        </Popover.Trigger>
-        <Popover.Portal>
-          <Popover.Content
-            className="tag-popover"
-            sideOffset={8}
-            align="start"
-            collisionPadding={12}
-          >
-            <h3>Add to sets</h3>
-            <Command shouldFilter={false} loop>
-              <CommandInput
-                ref={input}
-                placeholder="Find or create a set…"
-                aria-label="Find or create a set"
-                maxLength={255}
-                value={search}
-                onValueChange={setSearch}
-              />
-              <CommandList className="tag-options">
-                {options.map((set) => (
-                  <CommandItem
-                    key={set.id}
-                    value={set.id}
-                    disabled={update.isPending}
-                    onSelect={() => mutate({ setId: set.id })}
-                  >
-                    {set.display_name}
-                  </CommandItem>
-                ))}
-                {create && (
-                  <CommandItem
-                    value="create"
-                    disabled={update.isPending}
-                    onSelect={() => mutate({ displayName: term })}
-                  >
-                    <Plus size={15} />
-                    Create “{term}”
-                  </CommandItem>
-                )}
-                {!options.length && !create && (
-                  <p>
-                    {term
-                      ? "This set is already added."
-                      : "Type a name to create a set."}
-                  </p>
-                )}
-              </CommandList>
-            </Command>
-            <div className="tag-popover-hint">↑ ↓ to choose · Enter to add</div>
-          </Popover.Content>
-        </Popover.Portal>
-      </Popover.Root>
+      {selector}
       <div className="tag-chips">
-        {media.set_ids.length ? (
+        {media?.set_ids.length ? (
           compact ? (
             <ChipOverflow label="sets">{chips}</ChipOverflow>
           ) : (

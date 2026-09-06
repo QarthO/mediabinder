@@ -240,18 +240,25 @@ export async function mutate(
     if (action === "set-membership") {
       const value = z
         .object({
-          id,
+          id: id.optional(),
+          ids: addMediaTags.shape.ids.optional(),
           setId: id.optional(),
           displayName: z.string().trim().min(1).max(255).optional(),
           remove: z.boolean().default(false),
         })
+        .refine(
+          (v) => Boolean(v.id) !== Boolean(v.ids),
+          "Provide a media ID or media IDs"
+        )
         .refine(
           (v) =>
             Boolean(v.setId) !== Boolean(v.displayName) &&
             (!v.remove || Boolean(v.setId))
         )
         .parse(input)
-      await accessible(connection, userId, "media", value.id)
+      const targets = value.ids ?? [value.id!]
+      for (const target of targets)
+        await accessible(connection, userId, "media", target)
       const setId = value.setId ?? randomUUID()
       if (value.setId) await accessible(connection, userId, "set", setId)
       else
@@ -259,32 +266,37 @@ export async function mutate(
           "INSERT INTO media_set(id,user_id,display_name,raw_name,tags,created_at) VALUES (?,?,?,?,?,NOW(3))",
           [setId, userId, value.displayName!, value.displayName!, "[]"]
         )
-      if (value.remove)
-        await connection.execute(
-          "DELETE FROM catalog_set_member WHERE set_id=? AND catalog_id=?",
-          [setId, value.id]
-        )
-      else
-        await connection.execute(
-          "INSERT IGNORE INTO catalog_set_member VALUES (?,?)",
-          [setId, value.id]
-        )
-      await markCataloged(connection, value.id)
+      for (const target of targets) {
+        if (value.remove)
+          await connection.execute(
+            "DELETE FROM catalog_set_member WHERE set_id=? AND catalog_id=?",
+            [setId, target]
+          )
+        else
+          await connection.execute(
+            "INSERT IGNORE INTO catalog_set_member VALUES (?,?)",
+            [setId, target]
+          )
+        await markCataloged(connection, target)
+      }
       return { id: setId }
     }
-    if (action === "add-tags") {
+    if (action === "add-tags" || action === "remove-tags") {
       const value = addMediaTags.parse(input)
       for (const target of value.ids)
         await accessible(connection, userId, "media", target)
-      await ensureTags(userId, value.tags, connection)
+      if (action === "add-tags")
+        await ensureTags(userId, value.tags, connection)
       for (const target of value.ids) {
         const [items] = await connection.query<RowDataPacket[]>(
           "SELECT tags FROM catalog WHERE id=?",
           [target]
         )
-        const merged = tags.parse([
-          ...new Set([...items[0].tags, ...value.tags]),
-        ])
+        const merged = tags.parse(
+          action === "remove-tags"
+            ? items[0].tags.filter((tag: string) => !value.tags.includes(tag))
+            : [...new Set([...items[0].tags, ...value.tags])]
+        )
         await connection.execute("UPDATE catalog SET tags=? WHERE id=?", [
           JSON.stringify(merged),
           target,

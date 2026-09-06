@@ -1,3 +1,4 @@
+import { useMobile } from "@/hooks/use-mobile"
 import { SidebarTags } from "./sidebar-tags"
 import { FolderSelector } from "./folder-selector"
 import { SearchSelect } from "./ui/search-select"
@@ -12,8 +13,10 @@ import {
 import { useEffect, useMemo, useState, useRef } from "react"
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query"
 import { type SortingState } from "@tanstack/react-table"
-import { DataTable, useMediaTable } from "./data-table"
+import { DataTable, MediaSelectionActions, useMediaTable } from "./data-table"
 import {
+  ArrowUpDown,
+  Inbox,
   Images,
   ImageIcon,
   Film,
@@ -64,6 +67,12 @@ const navItems = [
   { id: "all", label: "All media", icon: Images },
 ] as const
 export function Workspace() {
+  const mobile = useMobile()
+  const [selectionMode, setSelectionMode] = useState(false)
+  const [mobileSidebar, setMobileSidebar] = useState(false)
+  const [mobileSearch, setMobileSearch] = useState(false)
+  const searchInput = useRef<HTMLInputElement>(null)
+  const sidebarButton = useRef<HTMLButtonElement>(null)
   const query = useQuery(libraryQuery),
     client = useQueryClient()
   const navigate = useNavigate()
@@ -93,7 +102,13 @@ export function Workspace() {
       kind: "media" | "set"
     } | null>(null),
     [collapsed, setCollapsed] = useState(false)
+  const sidebarCollapsed = !mobile && collapsed
+  const toggleSidebar = () => {
+    if (mobile) setMobileSidebar((value) => !value)
+    else setCollapsed((value) => !value)
+  }
   const changePage = (value: string) => {
+    setMobileSidebar(false)
     window.scrollTo({ top: 0 })
     void navigate({
       to: value === "all" ? "/media" : (`/${value}` as "/media"),
@@ -111,7 +126,9 @@ export function Workspace() {
         !e.repeat
       ) {
         e.preventDefault()
-        setCollapsed((value) => !value)
+        if (window.matchMedia("(max-width: 760px)").matches)
+          setMobileSidebar((value) => !value)
+        else setCollapsed((value) => !value)
       }
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault()
@@ -231,7 +248,8 @@ export function Workspace() {
     (media) => setSelected({ id: media.id, kind: "media" }),
     allTags,
     data?.tag_colors ?? {},
-    data?.sets ?? []
+    data?.sets ?? [],
+    selectionMode
   )
   const items = table.getRowModel().rows.map((row) => row.original)
   const sort =
@@ -248,6 +266,7 @@ export function Workspace() {
     navItems.find((n) => n.id === page)?.label ??
     "Settings"
   const openSet = (set: MediaSet) => {
+    setMobileSidebar(false)
     window.scrollTo({ top: 0 })
     void navigate({
       to: "/sets/$setId",
@@ -279,125 +298,189 @@ export function Workspace() {
     all: catalogMedia.length,
     sets: data.sets.length,
   }
+  const sidebar = (
+    <aside className="sidebar">
+      <div className="sidebar-brand">
+        <Brand compact={sidebarCollapsed} />
+      </div>
+      <button
+        className="search-trigger"
+        onClick={() => {
+          setMobileSidebar(false)
+          setCommand(true)
+        }}
+        aria-label="Search and commands"
+      >
+        <Search size={15} />
+        {!sidebarCollapsed && (
+          <>
+            <span>Search anything</span>
+            <kbd>⌘ K</kbd>
+          </>
+        )}
+      </button>
+      <FolderSelector
+        sources={data.workspace.sources}
+        selected={selectedFolders}
+        onChange={(folders) =>
+          void navigate({ to: pathname as "/media", search: { folders } })
+        }
+        compact={sidebarCollapsed}
+      />
+      <div className="nav-label">LIBRARY</div>
+      <nav aria-label="Library">
+        {navItems.map(({ id, label, icon: Icon }) => (
+          <button
+            key={id}
+            title={label}
+            className={`nav-item ${page === id && !setId ? "active" : ""}`}
+            onClick={() => changePage(id)}
+          >
+            <Icon size={17} />
+            <span>{label}</span>
+            <small>{counts[id]}</small>
+          </button>
+        ))}
+      </nav>
+      <SidebarTags
+        tags={allTags}
+        selected={selectedTags}
+        colors={data.tag_colors}
+        counts={Object.fromEntries(
+          allTags.map((tag) => [
+            tag,
+            catalogMedia.filter((media) => media.tags.includes(tag)).length,
+          ])
+        )}
+        expanded={tagsOpen && !sidebarCollapsed}
+        onExpanded={(open) => {
+          setCollapsed(false)
+          setTagsOpen(open)
+        }}
+        onChange={(tags) => {
+          setSelectedTags(tags)
+          if (page !== "all") {
+            setSearch("")
+            setMediaType("all")
+            void navigate({
+              to: "/media",
+              search: { folders: selectedFolders },
+            })
+          }
+        }}
+        onColor={(name, color) => {
+          void action("tag-color", { name, color })
+            .then(() => client.invalidateQueries({ queryKey: ["library"] }))
+            .catch((error) => toast.error(error.message))
+        }}
+      />
+      <div className="sidebar-bottom">
+        <div className="account">
+          <div className="avatar">
+            {data.user.name.slice(0, 2).toUpperCase()}
+          </div>
+          <div>
+            <strong>{data.user.name}</strong>
+          </div>
+          <button
+            className={page === "settings" ? "active" : ""}
+            title="Settings"
+            aria-label="Settings"
+            onClick={() => changePage("settings")}
+          >
+            <Settings size={17} />
+          </button>
+          <button
+            title="Sign out of MediaBinder"
+            aria-label="Sign out of MediaBinder"
+            onClick={async () => {
+              await authClient.signOut()
+              window.location.assign("/")
+            }}
+          >
+            <LogOut size={15} />
+          </button>
+        </div>
+      </div>
+    </aside>
+  )
   return (
     <div
-      className={`app ${collapsed ? "sidebar-collapsed" : ""} ${tagsOpen && !collapsed ? "sidebar-filter-open" : ""}`}
+      className={`app ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${tagsOpen && !sidebarCollapsed ? "sidebar-filter-open" : ""}`}
     >
-      <aside className="sidebar">
-        <div className="sidebar-brand">
-          <Brand compact={collapsed} />
-        </div>
-        <button
-          className="search-trigger"
-          onClick={() => setCommand(true)}
-          aria-label="Search and commands"
-        >
-          <Search size={15} />
-          {!collapsed && (
-            <>
-              <span>Search anything</span>
-              <kbd>⌘ K</kbd>
-            </>
-          )}
-        </button>
-        <FolderSelector
-          sources={data.workspace.sources}
-          selected={selectedFolders}
-          onChange={(folders) =>
-            void navigate({ to: pathname as "/media", search: { folders } })
-          }
-          compact={collapsed}
-        />
-        <div className="nav-label">LIBRARY</div>
-        <nav aria-label="Library">
-          {navItems.map(({ id, label, icon: Icon }) => (
-            <button
-              key={id}
-              title={label}
-              className={`nav-item ${page === id && !setId ? "active" : ""}`}
-              onClick={() => changePage(id)}
-            >
-              <Icon size={17} />
-              <span>{label}</span>
-              <small>{counts[id]}</small>
-            </button>
-          ))}
-        </nav>
-        <SidebarTags
-          tags={allTags}
-          selected={selectedTags}
-          colors={data.tag_colors}
-          counts={Object.fromEntries(
-            allTags.map((tag) => [
-              tag,
-              catalogMedia.filter((media) => media.tags.includes(tag)).length,
-            ])
-          )}
-          expanded={tagsOpen && !collapsed}
-          onExpanded={(open) => {
-            setCollapsed(false)
-            setTagsOpen(open)
-          }}
-          onChange={(tags) => {
-            setSelectedTags(tags)
-            if (page !== "all") {
-              setSearch("")
-              setMediaType("all")
-              void navigate({
-                to: "/media",
-                search: { folders: selectedFolders },
-              })
-            }
-          }}
-          onColor={(name, color) => {
-            void action("tag-color", { name, color })
-              .then(() => client.invalidateQueries({ queryKey: ["library"] }))
-              .catch((error) => toast.error(error.message))
-          }}
-        />
-        <div className="sidebar-bottom">
-          <div className="account">
-            <div className="avatar">
-              {data.user.name.slice(0, 2).toUpperCase()}
-            </div>
-            <div>
-              <strong>{data.user.name}</strong>
-            </div>
-            <button
-              className={page === "settings" ? "active" : ""}
-              title="Settings"
-              aria-label="Settings"
-              onClick={() => changePage("settings")}
-            >
-              <Settings size={17} />
-            </button>
-            <button
-              title="Sign out of MediaBinder"
-              aria-label="Sign out of MediaBinder"
-              onClick={async () => {
-                await authClient.signOut()
-                window.location.assign("/")
-              }}
-            >
-              <LogOut size={15} />
-            </button>
-          </div>
-        </div>
-      </aside>
+      {mobile ? (
+        <Dialog open={mobileSidebar} onOpenChange={setMobileSidebar}>
+          <DialogContent
+            className="mobile-sidebar-drawer"
+            onCloseAutoFocus={(event) => {
+              event.preventDefault()
+              sidebarButton.current?.focus()
+            }}
+          >
+            <DialogTitle className="sr-only">Library sidebar</DialogTitle>
+            <DialogDescription className="sr-only">
+              Choose folders, media, sets, or tag filters.
+            </DialogDescription>
+            {sidebar}
+          </DialogContent>
+        </Dialog>
+      ) : (
+        sidebar
+      )}
       <main className="main">
         <header className="header">
           <button
             className="icon-button"
-            title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-            onClick={() => setCollapsed((v) => !v)}
+            ref={sidebarButton}
+            title="Toggle sidebar"
+            aria-label="Toggle sidebar"
+            aria-expanded={mobile ? mobileSidebar : !collapsed}
+            onClick={toggleSidebar}
           >
-            {collapsed ? <PanelLeft size={17} /> : <PanelLeftClose size={17} />}
+            {mobile || collapsed ? (
+              <PanelLeft size={17} />
+            ) : (
+              <PanelLeftClose size={17} />
+            )}
           </button>
           <span className="header-divider" />
           <span className="muted">Library</span>
           <ChevronRight size={13} />
           <span className="breadcrumb">{title}</span>
+          {page === "all" && (
+            <Button
+              className="header-select"
+              variant="outline"
+              aria-pressed={selectionMode}
+              onClick={() => {
+                setSelectionMode(!selectionMode)
+                table.resetRowSelection()
+              }}
+            >
+              {selectionMode ? "Done" : "Select"}
+            </Button>
+          )}
+          {currentSet && (
+            <Button
+              variant="outline"
+              className="header-set-edit"
+              aria-label="Edit set"
+              onClick={() => setSelected({ id: currentSet.id, kind: "set" })}
+            >
+              <SlidersHorizontal />
+              <span>Edit set</span>
+            </Button>
+          )}
+          <Button
+            className="header-sync"
+            variant="outline"
+            aria-label={sync.isPending ? "Syncing Drive" : "Sync Drive"}
+            disabled={sync.isPending || !data.workspace.sources.length}
+            onClick={() => sync.mutate()}
+          >
+            <RefreshCw className={sync.isPending ? "spin" : ""} />
+            <span>{sync.isPending ? "Syncing…" : "Sync Drive"}</span>
+          </Button>
         </header>
         <div
           className={`workspace-content ${page === "all" ? "media-workspace" : ""}`}
@@ -467,45 +550,51 @@ export function Workspace() {
             </>
           ) : (
             <>
-              <div className="library-toolbar">
-                {currentSet && (
-                  <Button
-                    variant="outline"
-                    onClick={() =>
-                      setSelected({ id: currentSet.id, kind: "set" })
-                    }
-                  >
-                    <SlidersHorizontal />
-                    Edit set
-                  </Button>
-                )}
+              <div
+                className={`library-toolbar ${mobileSearch ? "mobile-search-open" : ""}`}
+              >
+                <button
+                  className="mobile-search-toggle icon-button"
+                  aria-label="Open media search"
+                  onClick={() => {
+                    setMobileSearch(true)
+                    requestAnimationFrame(() => searchInput.current?.focus())
+                  }}
+                >
+                  <Search size={18} />
+                </button>
                 <div className="filter-search">
                   <Search size={15} />
                   <input
+                    ref={searchInput}
+                    onKeyDown={(event) => {
+                      if (event.key === "Escape") {
+                        setMobileSearch(false)
+                        setSearch("")
+                      }
+                    }}
                     aria-label="Search media"
                     placeholder="Search media…"
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                   />
-                  {search && (
+                  {(search || (mobile && mobileSearch)) && (
                     <button
-                      aria-label="Clear search"
-                      onClick={() => setSearch("")}
+                      aria-label={
+                        mobile ? "Close media search" : "Clear search"
+                      }
+                      onClick={() => {
+                        setSearch("")
+                        setMobileSearch(false)
+                      }}
                     >
                       <X size={13} />
                     </button>
                   )}
                 </div>
-                <Button
-                  variant="outline"
-                  disabled={sync.isPending || !data.workspace.sources.length}
-                  onClick={() => sync.mutate()}
-                >
-                  <RefreshCw className={sync.isPending ? "spin" : ""} />
-                  {sync.isPending ? "Syncing…" : "Sync Drive"}
-                </Button>
                 <Select
                   label="Filter by media type"
+                  mobileIcon={Images}
                   value={mediaType}
                   onChange={setMediaType}
                   options={[
@@ -516,6 +605,7 @@ export function Workspace() {
                 />
                 <Select
                   label="Filter by catalog status"
+                  mobileIcon={Inbox}
                   value={catalogStatus}
                   onChange={setCatalogStatus}
                   options={[
@@ -526,6 +616,7 @@ export function Workspace() {
                 />
                 <SearchSelect
                   label="Filter by set"
+                  mobileIcon={FolderOpen}
                   value={setFilter || "all"}
                   onChange={(value) =>
                     setSetFilter(value === "all" ? "" : value)
@@ -541,6 +632,7 @@ export function Workspace() {
                 <div className="toolbar-spacer" />
                 <Select
                   label="Sort media"
+                  mobileIcon={ArrowUpDown}
                   value={sort}
                   onChange={(value) =>
                     setSorting([
@@ -603,137 +695,158 @@ export function Workspace() {
                   ))}
                 </div>
               )}
-              {!items.length ? (
-                <Empty
-                  icon={setId ? FolderOpen : Images}
-                  title={
-                    search ||
-                    selectedTags.length ||
-                    setFilter ||
-                    mediaType !== "all" ||
-                    catalogStatus !== "all"
-                      ? "No media found"
-                      : setId
-                        ? "This set is a blank canvas"
-                        : data.workspace.sources.length
-                          ? "Your library starts here"
-                          : "Connect your Google Drive"
-                  }
-                  description={
-                    search ||
-                    selectedTags.length ||
-                    setFilter ||
-                    mediaType !== "all" ||
-                    catalogStatus !== "all"
-                      ? "Try a different name, tag, or set."
-                      : setId
-                        ? "Open media from your library and add it to this set."
-                        : data.workspace.sources.length
-                          ? "Sync your folder to bring your images and videos into MediaBinder."
-                          : "Choose a folder in settings, then sync to bring your images and videos together."
-                  }
-                  action={
-                    !search &&
-                    !selectedTags.length &&
-                    !setFilter &&
-                    !setId &&
-                    mediaType === "all" &&
-                    catalogStatus === "all" ? (
-                      <Button
-                        disabled={sync.isPending}
+              <div
+                className="media-stage"
+                data-selecting={selectionMode || undefined}
+                data-has-selection={
+                  table.getFilteredSelectedRowModel().rows.length > 0 ||
+                  undefined
+                }
+              >
+                {!items.length ? (
+                  <Empty
+                    icon={setId ? FolderOpen : Images}
+                    title={
+                      search ||
+                      selectedTags.length ||
+                      setFilter ||
+                      mediaType !== "all" ||
+                      catalogStatus !== "all"
+                        ? "No media found"
+                        : setId
+                          ? "This set is a blank canvas"
+                          : data.workspace.sources.length
+                            ? "Your library starts here"
+                            : "Connect your Google Drive"
+                    }
+                    description={
+                      search ||
+                      selectedTags.length ||
+                      setFilter ||
+                      mediaType !== "all" ||
+                      catalogStatus !== "all"
+                        ? "Try a different name, tag, or set."
+                        : setId
+                          ? "Open media from your library and add it to this set."
+                          : data.workspace.sources.length
+                            ? "Sync your folder to bring your images and videos into MediaBinder."
+                            : "Choose a folder in settings, then sync to bring your images and videos together."
+                    }
+                    action={
+                      !search &&
+                      !selectedTags.length &&
+                      !setFilter &&
+                      !setId &&
+                      mediaType === "all" &&
+                      catalogStatus === "all" ? (
+                        <Button
+                          disabled={sync.isPending}
+                          onClick={() =>
+                            data.workspace.sources.length
+                              ? sync.mutate()
+                              : changePage("settings")
+                          }
+                        >
+                          {data.workspace.sources.length ? (
+                            <RefreshCw />
+                          ) : (
+                            <FolderOpen />
+                          )}
+                          {data.workspace.sources.length
+                            ? "Sync Drive"
+                            : "Choose a folder"}
+                        </Button>
+                      ) : undefined
+                    }
+                  />
+                ) : view === "grid" ? (
+                  <div className="media-grid">
+                    {items.map((media) => (
+                      <button
+                        key={media.id}
+                        className="media-card"
+                        aria-pressed={
+                          selectionMode
+                            ? table.getRow(media.id).getIsSelected()
+                            : undefined
+                        }
+                        data-selected={
+                          table.getRow(media.id).getIsSelected() || undefined
+                        }
                         onClick={() =>
-                          data.workspace.sources.length
-                            ? sync.mutate()
-                            : changePage("settings")
+                          selectionMode
+                            ? table.getRow(media.id).toggleSelected()
+                            : openMedia(media)
                         }
                       >
-                        {data.workspace.sources.length ? (
-                          <RefreshCw />
-                        ) : (
-                          <FolderOpen />
-                        )}
-                        {data.workspace.sources.length
-                          ? "Sync Drive"
-                          : "Choose a folder"}
-                      </Button>
-                    ) : undefined
-                  }
-                />
-              ) : view === "grid" ? (
-                <div className="media-grid">
-                  {items.map((media) => (
-                    <button
-                      key={media.id}
-                      className="media-card"
-                      onClick={() => openMedia(media)}
-                    >
-                      <div className="media-image">
-                        <Thumbnail
-                          id={media.id}
-                          name={media.display_name}
-                          video={media.mime_type.startsWith("video/")}
-                        />
-                        {media.mime_type.startsWith("video/") && (
-                          <span className="media-type">
-                            <Film size={12} />
-                            {media.duration_ms
-                              ? `${Math.floor(media.duration_ms / 60000)}:${String(Math.floor(media.duration_ms / 1000) % 60).padStart(2, "0")}`
-                              : "VIDEO"}
-                          </span>
-                        )}
-                        {!media.available && (
-                          <span className="unavailable">
-                            Unavailable in Drive
-                          </span>
-                        )}
-                        {media.post_count > 0 && (
-                          <span className="posted-indicator">
-                            <Link2 size={11} />
-                            {media.post_count}
-                          </span>
-                        )}
-                      </div>
-                      <div className="media-info">
-                        <strong>{media.display_name}</strong>
-                        <span>
-                          {media.mime_type.startsWith("video/") ? (
-                            <Film size={12} />
-                          ) : (
-                            <ImageIcon size={12} />
-                          )}
-                          <span>
-                            {media.raw_name.split(".").pop()?.toUpperCase()}
-                            {media.copy_count > 1 &&
-                              ` · ${media.copy_count} copies`}
-                          </span>
-                          <span className="dot-separator">·</span>
-                          {bytes(media.size)}
-                        </span>
-                      </div>
-                      {media.tags.length > 0 && (
-                        <div className="tags">
-                          {media.tags.slice(0, 3).map((t) => (
-                            <span key={t} className="tag">
-                              {t}
+                        <div className="media-image">
+                          <Thumbnail
+                            id={media.id}
+                            name={media.display_name}
+                            video={media.mime_type.startsWith("video/")}
+                          />
+                          {media.mime_type.startsWith("video/") && (
+                            <span className="media-type">
+                              <Film size={12} />
+                              {media.duration_ms
+                                ? `${Math.floor(media.duration_ms / 60000)}:${String(Math.floor(media.duration_ms / 1000) % 60).padStart(2, "0")}`
+                                : "VIDEO"}
                             </span>
-                          ))}
-                          {media.tags.length > 3 && (
-                            <span className="tag">
-                              +{media.tags.length - 3}
+                          )}
+                          {!media.available && (
+                            <span className="unavailable">
+                              Unavailable in Drive
+                            </span>
+                          )}
+                          {media.post_count > 0 && (
+                            <span className="posted-indicator">
+                              <Link2 size={11} />
+                              {media.post_count}
                             </span>
                           )}
                         </div>
-                      )}
-                    </button>
-                  ))}
-                </div>
-              ) : (
-                <DataTable
-                  table={table}
-                  allTags={allTags}
-                  resetKey={`${page}:${setId}:${selectedTags.join(",")}:${setFilter}:${mediaType}:${catalogStatus}:${search}`}
-                />
-              )}
+                        <div className="media-info">
+                          <strong>{media.display_name}</strong>
+                          <span>
+                            {media.mime_type.startsWith("video/") ? (
+                              <Film size={12} />
+                            ) : (
+                              <ImageIcon size={12} />
+                            )}
+                            <span>
+                              {media.raw_name.split(".").pop()?.toUpperCase()}
+                              {media.copy_count > 1 &&
+                                ` · ${media.copy_count} copies`}
+                            </span>
+                            <span className="dot-separator">·</span>
+                            {bytes(media.size)}
+                          </span>
+                        </div>
+                        {media.tags.length > 0 && (
+                          <div className="tags">
+                            {media.tags.slice(0, 3).map((t) => (
+                              <span key={t} className="tag">
+                                {t}
+                              </span>
+                            ))}
+                            {media.tags.length > 3 && (
+                              <span className="tag">
+                                +{media.tags.length - 3}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <DataTable
+                    table={table}
+                    resetKey={`${page}:${setId}:${selectedTags.join(",")}:${setFilter}:${mediaType}:${catalogStatus}:${search}`}
+                  />
+                )}
+                <MediaSelectionActions table={table} allTags={allTags} />
+              </div>
             </>
           )}
         </div>
