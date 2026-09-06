@@ -14,6 +14,8 @@ import {
   metadata,
   newPost,
   newSet,
+  setName,
+  addMediaSets,
   folder,
   id,
   addMediaTags,
@@ -237,13 +239,48 @@ export async function mutate(
       await ensureTags(userId, value.tags, connection)
       return { id: setId }
     }
+    if (action === "add-sets") {
+      const value = addMediaSets.parse(input)
+      for (const target of value.ids)
+        await accessible(connection, userId, "media", target)
+      const [visible] = await connection.query<RowDataPacket[]>(
+        `SELECT s.id,s.display_name FROM media_set s WHERE s.user_id=? OR EXISTS(
+          SELECT 1 FROM catalog_set_member sm JOIN media m ON m.catalog_id=sm.catalog_id
+          WHERE sm.set_id=s.id AND m.user_id=? AND m.available=TRUE)`,
+        [userId, userId]
+      )
+      for (const name of value.names) {
+        const matches = visible.filter(
+          (set) => set.display_name.toLowerCase() === name.toLowerCase()
+        )
+        if (matches.length > 1)
+          throw new Response(
+            `Multiple sets named “${name}”. Choose one individually.`,
+            { status: 400 }
+          )
+        const setId = matches[0]?.id ?? randomUUID()
+        if (!matches.length) {
+          await connection.execute(
+            "INSERT INTO media_set(id,user_id,display_name,raw_name,tags,created_at) VALUES (?,?,?,?,?,NOW(3))",
+            [setId, userId, name, name, "[]"]
+          )
+        }
+        for (const target of value.ids)
+          await connection.execute(
+            "INSERT IGNORE INTO catalog_set_member VALUES (?,?)",
+            [setId, target]
+          )
+      }
+      for (const target of value.ids) await markCataloged(connection, target)
+      return { count: value.ids.length }
+    }
     if (action === "set-membership") {
       const value = z
         .object({
           id: id.optional(),
           ids: addMediaTags.shape.ids.optional(),
           setId: id.optional(),
-          displayName: z.string().trim().min(1).max(255).optional(),
+          displayName: setName.optional(),
           remove: z.boolean().default(false),
         })
         .refine(

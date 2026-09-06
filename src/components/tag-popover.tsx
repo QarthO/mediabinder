@@ -1,3 +1,5 @@
+import { parseNameList } from "@/lib/name-list"
+import { tags as tagNames } from "@/lib/validation"
 import { useMobile } from "@/hooks/use-mobile"
 import type { Media } from "@/lib/types"
 import { useRef, useState } from "react"
@@ -31,15 +33,27 @@ export function TagPopover({
   const items = mediaItems ?? (media ? [media] : [])
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState("")
+  const [pasted, setPasted] = useState(false)
   const [knownTags, setKnownTags] = useState<string[]>([])
   const input = useRef<HTMLInputElement>(null)
   const busy = useRef(false)
   const client = useQueryClient()
   const save = useMutation({
-    mutationFn: ({ tag, remove }: { tag: string; remove: boolean }) =>
-      action(remove ? "remove-tags" : "add-tags", { ids, tags: [tag] }),
-    onSuccess: (_result, { tag }) =>
-      setKnownTags((tags) => [...new Set([...tags, tag])]),
+    mutationFn: ({
+      tags,
+      remove,
+    }: {
+      tags: string[]
+      remove?: boolean
+      list?: boolean
+    }) => action(remove ? "remove-tags" : "add-tags", { ids, tags }),
+    onSuccess: (_result, value) => {
+      setKnownTags((tags) => [...new Set([...tags, ...value.tags])])
+      if (value.list) {
+        setSearch("")
+        setPasted(false)
+      }
+    },
     onError: (error) => toast.error(error.message),
     onSettled: async () => {
       await client.invalidateQueries({ queryKey: ["library"] })
@@ -66,11 +80,23 @@ export function TagPopover({
         : 0
     return count === ids.length ? true : count ? "mixed" : false
   }
-  const create = !!term && !options.includes(term)
+  const listMode = pasted || search.includes(",")
+  const names = parseNameList(search)
+  const create = !listMode && !!term && !options.includes(term)
+  const addList = () => {
+    if (busy.current || !names.length) return
+    const parsed = tagNames.safeParse(names)
+    if (!parsed.success) {
+      toast.error(parsed.error.issues[0].message)
+      return
+    }
+    busy.current = true
+    save.mutate({ tags: parsed.data, list: true })
+  }
   const toggle = (tag: string) => {
     if (busy.current) return
     busy.current = true
-    save.mutate({ tag, remove: state(tag) === true })
+    save.mutate({ tags: [tag], remove: state(tag) === true })
   }
   return (
     <MetadataPicker
@@ -79,6 +105,7 @@ export function TagPopover({
         setOpen(value)
         if (value) {
           setSearch("")
+          setPasted(false)
           setKnownTags([...allTags])
         }
       }}
@@ -105,24 +132,46 @@ export function TagPopover({
           <CommandInput
             ref={input}
             aria-label="Find or create a tag"
-            placeholder="Find or create a tag…"
-            maxLength={50}
+            placeholder="Find, create, or paste tags…"
+            onPaste={() => setPasted(true)}
+            onKeyDown={(event) => {
+              if (
+                listMode &&
+                event.key === "Enter" &&
+                !event.nativeEvent.isComposing
+              ) {
+                event.preventDefault()
+                event.stopPropagation()
+                addList()
+              }
+            }}
             value={search}
             onValueChange={setSearch}
           />
         </div>
         <CommandList className="tag-options" aria-busy={save.isPending}>
-          {options.map((tag) => (
+          {listMode && names.length > 0 && (
             <CommandItem
-              key={tag}
-              value={tag}
+              value="add-list"
               disabled={save.isPending}
-              onSelect={() => toggle(tag)}
+              onSelect={addList}
             >
-              <MembershipCheckbox checked={state(tag)} label={tag} />
-              <span>{tag}</span>
+              <Plus size={15} />
+              Add {names.length} {names.length === 1 ? "tag" : "tags"}
             </CommandItem>
-          ))}
+          )}
+          {!listMode &&
+            options.map((tag) => (
+              <CommandItem
+                key={tag}
+                value={tag}
+                disabled={save.isPending}
+                onSelect={() => toggle(tag)}
+              >
+                <MembershipCheckbox checked={state(tag)} label={tag} />
+                <span>{tag}</span>
+              </CommandItem>
+            ))}
           {create && (
             <CommandItem
               value={`create:${term}`}
@@ -133,7 +182,10 @@ export function TagPopover({
               Create “{term}”
             </CommandItem>
           )}
-          {!options.length && !create && <p>Type a name to create a tag.</p>}
+          {((listMode && !names.length) ||
+            (!listMode && !options.length && !create)) && (
+            <p>Type a name or paste comma-separated tags.</p>
+          )}
         </CommandList>
       </Command>
       <span className="sr-only" role="status">

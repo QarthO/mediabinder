@@ -1,3 +1,5 @@
+import { parseNameList } from "@/lib/name-list"
+import { addMediaSets } from "@/lib/validation"
 import { ChipOverflow } from "./chip-overflow"
 import { useRef, useState } from "react"
 import { useMobile } from "@/hooks/use-mobile"
@@ -32,17 +34,26 @@ export function MediaSets({
   const mobile = useMobile()
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState("")
+  const [pasted, setPasted] = useState(false)
   const input = useRef<HTMLInputElement>(null)
   const busy = useRef(false)
   const client = useQueryClient()
   const update = useMutation({
     mutationFn: (value: {
+      names?: string[]
       setId?: string
       displayName?: string
       remove?: boolean
     }) =>
-      action("set-membership", { ids: items.map((item) => item.id), ...value }),
-    onSuccess: async () => {
+      action(value.names ? "add-sets" : "set-membership", {
+        ids: items.map((item) => item.id),
+        ...value,
+      }),
+    onSuccess: async (_result, value) => {
+      if (value.names) {
+        setSearch("")
+        setPasted(false)
+      }
       await client.invalidateQueries({ queryKey: ["library"] })
       if (!mobile) input.current?.focus()
     },
@@ -52,6 +63,7 @@ export function MediaSets({
     },
   })
   const mutate = (value: {
+    names?: string[]
     setId?: string
     displayName?: string
     remove?: boolean
@@ -60,11 +72,23 @@ export function MediaSets({
     busy.current = true
     update.mutate(value)
   }
+  const listMode = pasted || search.includes(",")
+  const names = parseNameList(search)
+  const addList = () => {
+    if (busy.current || !names.length) return
+    const parsed = addMediaSets.shape.names.safeParse(names)
+    if (!parsed.success) {
+      toast.error(parsed.error.issues[0].message)
+      return
+    }
+    mutate({ names: parsed.data })
+  }
   const term = search.trim()
   const options = sets.filter((s) =>
     s.display_name.toLowerCase().includes(term.toLowerCase())
   )
   const create =
+    !listMode &&
     term &&
     !sets.some((s) => s.display_name.toLowerCase() === term.toLowerCase())
   const chips = sets
@@ -87,7 +111,10 @@ export function MediaSets({
       open={open}
       onOpenChange={(value) => {
         setOpen(value)
-        if (value) setSearch("")
+        if (value) {
+          setSearch("")
+          setPasted(false)
+        }
       }}
       title="Sets"
       media={items}
@@ -117,33 +144,55 @@ export function MediaSets({
         <div className="picker-search">
           <CommandInput
             ref={input}
-            placeholder="Find or create a set…"
+            placeholder="Find, create, or paste sets…"
             aria-label="Find or create a set"
-            maxLength={255}
+            onPaste={() => setPasted(true)}
+            onKeyDown={(event) => {
+              if (
+                listMode &&
+                event.key === "Enter" &&
+                !event.nativeEvent.isComposing
+              ) {
+                event.preventDefault()
+                event.stopPropagation()
+                addList()
+              }
+            }}
             value={search}
             onValueChange={setSearch}
           />
         </div>
         <CommandList className="tag-options">
-          {options.map((set) => (
+          {listMode && names.length > 0 && (
             <CommandItem
-              key={set.id}
-              value={set.id}
+              value="add-list"
               disabled={update.isPending}
-              onSelect={() =>
-                mutate({
-                  setId: set.id,
-                  remove: state(set.id) === true,
-                })
-              }
+              onSelect={addList}
             >
-              <MembershipCheckbox
-                checked={state(set.id)}
-                label={set.display_name}
-              />
-              <span>{set.display_name}</span>
+              <Plus size={15} />
+              Add {names.length} {names.length === 1 ? "set" : "sets"}
             </CommandItem>
-          ))}
+          )}
+          {!listMode &&
+            options.map((set) => (
+              <CommandItem
+                key={set.id}
+                value={set.id}
+                disabled={update.isPending}
+                onSelect={() =>
+                  mutate({
+                    setId: set.id,
+                    remove: state(set.id) === true,
+                  })
+                }
+              >
+                <MembershipCheckbox
+                  checked={state(set.id)}
+                  label={set.display_name}
+                />
+                <span>{set.display_name}</span>
+              </CommandItem>
+            ))}
           {create && (
             <CommandItem
               value="create"
@@ -154,7 +203,8 @@ export function MediaSets({
               Create “{term}”
             </CommandItem>
           )}
-          {!options.length && !create && (
+          {((listMode && !names.length) ||
+            (!listMode && !options.length && !create)) && (
             <p>{term ? "No matching sets." : "Type a name to create a set."}</p>
           )}
         </CommandList>

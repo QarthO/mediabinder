@@ -1,3 +1,4 @@
+import { formatNameList } from "@/lib/name-list"
 import { useMobile } from "@/hooks/use-mobile"
 import { ChipOverflow } from "./chip-overflow"
 import { MediaSets } from "./media-sets"
@@ -162,7 +163,12 @@ export function useMediaTable(
         header: "",
         enableSorting: false,
         enableGlobalFilter: false,
-        cell: ({ row }) => <MediaActions media={row.original} />,
+        cell: ({ row, table }) => (
+          <MediaActions
+            media={row.original}
+            sets={(table.options.meta as MediaTableMeta).sets}
+          />
+        ),
       },
     ],
     []
@@ -364,7 +370,11 @@ export function DataTable({
                           meta={table.options.meta as MediaTableMeta}
                           kind="sets"
                         />
-                        <MediaActions media={row.original} mobile />
+                        <MediaActions
+                          media={row.original}
+                          sets={(table.options.meta as MediaTableMeta).sets}
+                          mobile
+                        />
                       </td>
                     </>
                   ) : (
@@ -497,9 +507,11 @@ export function MediaTags({
 
 function MediaActions({
   media,
+  sets,
   mobile = false,
 }: {
   media: Media
+  sets: MediaSet[]
   mobile?: boolean
 }) {
   const copy = async (value: string) => {
@@ -546,6 +558,26 @@ function MediaActions({
           )}
           <DropdownMenuItem onSelect={() => void copy(media.raw_name)}>
             Copy file name
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            disabled={!media.tags.length}
+            onSelect={() => void copy(formatNameList(media.tags))}
+          >
+            Copy tags
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            disabled={!media.set_ids.length}
+            onSelect={() =>
+              void copy(
+                formatNameList(
+                  sets
+                    .filter((set) => media.set_ids.includes(set.id))
+                    .map((set) => set.display_name)
+                )
+              )
+            }
+          >
+            Copy sets
           </DropdownMenuItem>
           <DropdownMenuItem
             disabled={!media.parent_ids[0] && !media.source_ids[0]}
