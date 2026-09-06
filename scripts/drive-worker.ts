@@ -1,3 +1,4 @@
+import { driveWebhookUrl } from "../src/lib/config"
 import { setTimeout } from "node:timers/promises"
 import { pool } from "../src/lib/database.server"
 import {
@@ -16,7 +17,7 @@ process.on("SIGINT", () => {
 })
 console.log(
   "Drive worker started; webhook registration",
-  process.env.DRIVE_WEBHOOK_URL ? "enabled" : "disabled"
+  driveWebhookUrl() ? "enabled" : "disabled"
 )
 while (!stopping) {
   const connection = await pool.getConnection()

@@ -1,6 +1,11 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { appUrl, databaseOptions, validateRuntimeConfig } from "./config"
+import {
+  appUrl,
+  databaseOptions,
+  driveWebhookUrl,
+  validateRuntimeConfig,
+} from "./config"
 const env = {
   MEDIABINDER_URL: "https://media.example.com/",
   DB_HOST: "mysql",
@@ -55,4 +60,41 @@ test("legacy configuration remains supported and invalid values fail without exp
     () => validateRuntimeConfig({ ...env, GOOGLE_CLIENT_ID: "" }),
     /GOOGLE_CLIENT_ID/
   )
+})
+
+test("Drive callbacks default to the application origin and stay disabled locally", () => {
+  assert.equal(
+    driveWebhookUrl(env),
+    "https://media.example.com/api/drive/webhook"
+  )
+  assert.equal(
+    driveWebhookUrl({ BETTER_AUTH_URL: "https://legacy.example.com" }),
+    "https://legacy.example.com/api/drive/webhook"
+  )
+  for (const origin of [
+    "http://localhost:3100",
+    "https://localhost",
+    "https://127.0.0.1",
+    "https://[::1]",
+    "http://media.example.com",
+  ])
+    assert.equal(driveWebhookUrl({ MEDIABINDER_URL: origin }), null)
+  assert.equal(
+    driveWebhookUrl({
+      ...env,
+      DRIVE_WEBHOOK_URL: "https://tunnel.example.com/api/drive/webhook",
+    }),
+    "https://tunnel.example.com/api/drive/webhook"
+  )
+  for (const callback of [
+    "invalid",
+    "http://example.com",
+    "https://localhost",
+    "https://user:secret@example.com",
+    "https://example.com?secret=value",
+  ])
+    assert.throws(
+      () => validateRuntimeConfig({ ...env, DRIVE_WEBHOOK_URL: callback }),
+      /DRIVE_WEBHOOK_URL/
+    )
 })

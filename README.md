@@ -42,13 +42,13 @@ The image validates runtime configuration, retries transient MySQL connection fa
 
 Optional runtime variables:
 
-| Variable                             | Default / purpose                                                                                                                                                                               |
-| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `DB_PORT`                            | `3306`; override for a different database port.                                                                                                                                                 |
-| `DRIVE_WEBHOOK_URL`                  | Unset. Set to `https://media.example.com/api/drive/webhook` for automatic Google notifications. The included worker registers and renews watches. Fresh-page and manual sync work without this. |
-| `ALLOW_SIGNUPS`                      | Disabled. First verified Google user becomes superuser; `true` permits additional accounts.                                                                                                     |
-| `DRIVE_WORKER_ENABLED`               | Enabled. Set `false` only when running a separate worker; the repository's Docker Compose setup does this for its web container.                                                                |
-| `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | Unset. Optional thumbnail span export, described below.                                                                                                                                         |
+| Variable                             | Default / purpose                                                                                                                                                               |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DB_PORT`                            | `3306`; override for a different database port.                                                                                                                                 |
+| `DRIVE_WEBHOOK_URL`                  | Defaults to `MEDIABINDER_URL` + `/api/drive/webhook` for HTTPS deployments. Optional override for a separate public callback URL. HTTP/local development disables registration. |
+| `ALLOW_SIGNUPS`                      | Disabled. First verified Google user becomes superuser; `true` permits additional accounts.                                                                                     |
+| `DRIVE_WORKER_ENABLED`               | Enabled. Set `false` only when running a separate worker; the repository's Docker Compose setup does this for its web container.                                                |
+| `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | Unset. Optional thumbnail span export, described below.                                                                                                                         |
 
 Configuration references: [Coolify Dockerfile build pack](https://coolify.io/docs/applications/build-packs/dockerfile), [Better Auth Google callback setup](https://better-auth.com/docs/authentication/google).
 
@@ -86,15 +86,15 @@ The optional `worker` Docker service runs automatically with Compose. It uses Be
 
 To enable notifications after deploying:
 
-1. Set `DRIVE_WEBHOOK_URL=https://your-domain.example/api/drive/webhook` in `.env`. Use a publicly reachable HTTPS endpoint with a trusted certificate, routed to the web service. This endpoint validates Google's channel credentials itself and must not be blocked by proxy-level login or a robots.txt disallow rule.
-2. Set `BETTER_AUTH_URL` and the Google OAuth callback to your deployment's origin as described above, then recreate both services with `docker compose up -d --build`.
+1. Set `MEDIABINDER_URL=https://your-domain.example`. The callback automatically uses `/api/drive/webhook` on that origin; no extra webhook variable is needed. Use a publicly reachable HTTPS endpoint with a trusted certificate, routed to the web service. This endpoint validates Google's channel credentials itself and must not be blocked by proxy-level login or a robots.txt disallow rule.
+2. Configure the Google OAuth callback for your deployment as described above, then redeploy the app (or recreate Compose services with `docker compose up -d --build`).
 3. Link your Drive folders and check **Settings → Automatic sync**. The worker registers watches for the user's changes feed and any shared-drive scopes containing linked folders. It checks renewal schedules and creates replacement channels before Google's maximum seven-day expiration. Old channels are stopped after replacement.
 
 Notifications are authenticated using a random per-channel token (only its hash is stored), channel/resource IDs, expiry, and message numbers. The endpoint commits a coalesced job to MySQL before acknowledging; duplicate notifications are ignored. A worker reconciles the linked folders with the same sync lock used by manual sync. Jobs survive restarts, retry with backoff, and preserve the catalog if a Drive scan fails. Notifications arriving during a sync remain queued for another pass. Registration and renewal queue a full reconciliation to cover the handshake window.
 
 The worker checks its MySQL queue every ten seconds; it **does not poll Google Drive for media changes**. Watch setup and renewal are separate scheduled API calls. Open browsers refresh their catalog on query refetch (such as returning focus to the tab), manual sync, or reload. Google notification delivery is not guaranteed, so fresh-load and manual reconciliation remain available. Token expiry or revoked access appears in Settings; use Reconnect Google if needed.
 
-Without `DRIVE_WEBHOOK_URL`, watch registration stays disabled and fresh-load/manual sync still work. Registration, early handshakes, forged/duplicate messages, renewal, queue processing, and failure retries are tested locally with simulated Google responses. Actual Google-to-server delivery requires your public domain and has not been tested locally. See [Google's push-notification guide](https://developers.google.com/workspace/drive/api/guides/push).
+For HTTP or localhost application URLs, watch registration stays disabled and fresh-load/manual sync still work. `DRIVE_WEBHOOK_URL` can override the derived callback, for example when using an HTTPS tunnel. Registration, early handshakes, forged/duplicate messages, renewal, queue processing, and failure retries are tested locally with simulated Google responses. Actual Google-to-server delivery requires your public domain and has not been tested locally. See [Google's push-notification guide](https://developers.google.com/workspace/drive/api/guides/push).
 
 ## Development and checks
 

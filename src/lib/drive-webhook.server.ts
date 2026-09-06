@@ -1,3 +1,5 @@
+import { driveWebhookUrl as webhookUrl } from "./config"
+export { driveWebhookUrl as webhookUrl } from "./config"
 import {
   createHash,
   randomBytes,
@@ -7,22 +9,6 @@ import {
 import { pool, rows } from "./database.server"
 import { driveJson, driveToken, syncDrive } from "./drive.server"
 
-export function webhookUrl() {
-  if (!process.env.DRIVE_WEBHOOK_URL) return null
-  const url = new URL(process.env.DRIVE_WEBHOOK_URL)
-  if (
-    url.protocol !== "https:" ||
-    url.username ||
-    url.password ||
-    url.search ||
-    url.hash ||
-    /^(localhost|127\.|\[::1\])/.test(url.hostname)
-  )
-    throw new Error(
-      "DRIVE_WEBHOOK_URL must be a public HTTPS URL without credentials or query parameters."
-    )
-  return url.href
-}
 export async function queueDriveSync(userId: string) {
   await pool.execute(
     `INSERT INTO drive_sync_state(user_id,requested) VALUES (?,1) ON DUPLICATE KEY UPDATE requested=requested+1,next_attempt=LEAST(next_attempt,NOW(3))`,
@@ -279,7 +265,7 @@ export async function processSyncJobs(userId?: string) {
   }
 }
 export async function processWatchRenewals() {
-  if (!process.env.DRIVE_WEBHOOK_URL) return
+  if (!webhookUrl()) return
   await pool.execute(
     "INSERT IGNORE INTO drive_sync_state(user_id) SELECT DISTINCT user_id FROM drive_folder"
   )

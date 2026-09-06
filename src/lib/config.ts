@@ -24,6 +24,33 @@ export function appUrl(env: Environment = process.env) {
   return url.origin
 }
 
+// Google requires an externally reachable HTTPS callback. Local development
+// keeps manual/fresh-load syncing without attempting watch registration.
+export function driveWebhookUrl(env: Environment = process.env) {
+  const override = env.DRIVE_WEBHOOK_URL
+  let url: URL
+  try {
+    url = new URL(override || `${appUrl(env)}/api/drive/webhook`)
+  } catch (error) {
+    if (!override) throw error
+    throw new Error("DRIVE_WEBHOOK_URL must be a public HTTPS URL.")
+  }
+  const local = /^(localhost$|.*\.localhost$|127\.|\[::1\]$)/.test(url.hostname)
+  if (!override && (url.protocol !== "https:" || local)) return null
+  if (
+    url.protocol !== "https:" ||
+    local ||
+    url.username ||
+    url.password ||
+    url.search ||
+    url.hash
+  )
+    throw new Error(
+      "DRIVE_WEBHOOK_URL must be a public HTTPS URL without credentials or query parameters."
+    )
+  return url.href
+}
+
 export function databaseOptions(env: Environment = process.env) {
   if (
     [env.DB_HOST, env.DB_NAME, env.DB_USER, env.DB_PASS, env.DB_PORT].some(
@@ -53,6 +80,7 @@ export function databaseOptions(env: Environment = process.env) {
 
 export function validateRuntimeConfig(env: Environment = process.env) {
   appUrl(env)
+  driveWebhookUrl(env)
   databaseOptions(env)
   if (!env.BETTER_AUTH_SECRET || env.BETTER_AUTH_SECRET.length < 32)
     throw new Error(

@@ -1,3 +1,4 @@
+import { driveWebhookUrl } from "./config"
 import { z } from "zod"
 import { ensureTags } from "./tags.server"
 import { randomUUID } from "node:crypto"
@@ -97,7 +98,7 @@ export async function library(
     workspace: {
       sources,
       webhook: {
-        configured: Boolean(process.env.DRIVE_WEBHOOK_URL),
+        configured: Boolean(driveWebhookUrl()),
         active: watches[0]?.count ?? 0,
         error: syncStatus[0]?.watch_error ?? syncStatus[0]?.last_error ?? null,
       },
