@@ -49,3 +49,8 @@ export const addMediaTags = z.object({
     .transform((ids) => [...new Set(ids)]),
   tags: tags.refine((tags) => tags.length > 0, "Choose at least one tag"),
 })
+
+export const removeMediaTag = z.object({
+  id,
+  tag: z.string().trim().min(1).max(50),
+})

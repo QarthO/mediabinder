@@ -48,6 +48,26 @@ test("tag additions and unlinking preserve metadata and user isolation", async (
       userId,
       new Headers()
     )
+    assert.match((await library(user)).tag_colors.bulk, /^#[0-9a-f]{6}$/)
+    await mutate(
+      "tag-color",
+      { name: "bulk", color: "#38bdf8" },
+      userId,
+      new Headers()
+    )
+    await mutate(
+      "tag-color",
+      { name: "bulk", color: "#ff0000" },
+      otherUser,
+      new Headers()
+    )
+    await mutate(
+      "add-tags",
+      { ids: [mediaId], tags: ["bulk"] },
+      userId,
+      new Headers()
+    )
+    assert.equal((await library(user)).tag_colors.bulk, "#38bdf8")
     await assert.rejects(() =>
       mutate(
         "add-tags",
@@ -65,6 +85,21 @@ test("tag additions and unlinking preserve metadata and user isolation", async (
       )
     )
     assert.deepEqual((await library(user)).media[0].tags, ["kept", "bulk"])
+    await assert.rejects(() =>
+      mutate(
+        "remove-tag",
+        { id: mediaId, tag: "kept" },
+        otherUser,
+        new Headers()
+      )
+    )
+    await mutate(
+      "remove-tag",
+      { id: mediaId, tag: "bulk" },
+      userId,
+      new Headers()
+    )
+    assert.deepEqual((await library(user)).media[0].tags, ["kept"])
     await mutate("remove-source", { folderId: "a" }, userId, new Headers())
     let result = await library(user)
     assert.equal(result.media.length, 1)
@@ -91,7 +126,7 @@ test("tag additions and unlinking preserve metadata and user isolation", async (
       available: number
     }>("SELECT display_name,tags,available FROM media WHERE id=?", [mediaId])
     assert.equal(retained.display_name, "Edited name")
-    assert.deepEqual(retained.tags, ["kept", "bulk"])
+    assert.deepEqual(retained.tags, ["kept"])
     assert.equal(retained.available, 0)
     assert.equal(
       (await rows("SELECT id FROM post WHERE id=?", [postId])).length,
@@ -110,6 +145,8 @@ test("tag additions and unlinking preserve metadata and user isolation", async (
       userId,
       otherUser,
     ])
+    await pool.execute("DELETE FROM tag_definition WHERE user_id=?", [userId])
+    await pool.execute("DELETE FROM drive_sync_state WHERE user_id=?", [userId])
     await pool.execute("DELETE FROM media WHERE user_id=?", [userId])
     await pool.execute("DELETE FROM media_set WHERE user_id=?", [userId])
   }

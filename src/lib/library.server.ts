@@ -1,3 +1,5 @@
+import { z } from "zod"
+import { ensureTags } from "./tags.server"
 import { randomUUID } from "node:crypto"
 import { pool, rows } from "./database.server"
 import type { Library, Media, MediaSet, Post, DriveSource } from "./types"
@@ -8,13 +10,25 @@ import {
   folder,
   id,
   addMediaTags,
+  removeMediaTag,
   tags,
 } from "./validation"
 import { driveJson, driveToken, listFolders, syncDrive } from "./drive.server"
 export async function library(
   user: Library["user"] & { id: string }
 ): Promise<Library> {
-  const [media, sets, posts, sources, membership] = await Promise.all([
+  const [
+    media,
+    sets,
+    posts,
+    sources,
+    membership,
+    locations,
+    sourceMembership,
+    definitions,
+    watches,
+    syncStatus,
+  ] = await Promise.all([
     rows<Media>(
       "SELECT m.*, (SELECT COUNT(*) FROM post p WHERE p.media_id=m.id) AS post_count FROM media m WHERE user_id=? AND available=TRUE ORDER BY uploaded_at DESC",
       [user.id]
@@ -35,6 +49,26 @@ export async function library(
       "SELECT sm.* FROM set_member sm JOIN media m ON m.id=sm.media_id WHERE m.user_id=?",
       [user.id]
     ),
+    rows<{ media_id: string; parent_ids: string[] }>(
+      "SELECT l.* FROM media_location l JOIN media m ON m.id=l.media_id WHERE m.user_id=?",
+      [user.id]
+    ),
+    rows<{ media_id: string; folder_id: string }>(
+      "SELECT media_id,folder_id FROM media_source WHERE user_id=?",
+      [user.id]
+    ),
+    rows<{ name: string; color: string }>(
+      "SELECT name,color FROM tag_definition WHERE user_id=?",
+      [user.id]
+    ),
+    rows<{ count: number }>(
+      "SELECT COUNT(*) AS count FROM drive_watch WHERE user_id=? AND resource_id IS NOT NULL AND expires_at>NOW(3)",
+      [user.id]
+    ),
+    rows<{ watch_error: string | null; last_error: string | null }>(
+      "SELECT watch_error,last_error FROM drive_sync_state WHERE user_id=?",
+      [user.id]
+    ),
   ])
   const memberships = new Map<string, string[]>()
   for (const row of membership)
@@ -49,11 +83,23 @@ export async function library(
       size: Number(m.size),
       available: Boolean(m.available),
       set_ids: memberships.get(m.id) ?? [],
+      source_ids: sourceMembership
+        .filter((s) => s.media_id === m.id)
+        .map((s) => s.folder_id),
+      parent_ids: locations.find((l) => l.media_id === m.id)?.parent_ids ?? [],
     })),
+    tag_colors: Object.fromEntries(
+      definitions.map((tag) => [tag.name, tag.color])
+    ),
     sets,
     posts,
     workspace: {
       sources,
+      webhook: {
+        configured: Boolean(process.env.DRIVE_WEBHOOK_URL),
+        active: watches[0]?.count ?? 0,
+        error: syncStatus[0]?.watch_error ?? syncStatus[0]?.last_error ?? null,
+      },
       last_synced_at:
         sources
           .map((source) => source.last_synced_at)
@@ -113,6 +159,19 @@ export async function mutate(
     })
     return { ok: true }
   }
+  if (action === "tag-color") {
+    const value = z
+      .object({
+        name: z.string().trim().min(1).max(50),
+        color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+      })
+      .parse(input)
+    await pool.execute(
+      "UPDATE tag_definition SET color=? WHERE user_id=? AND name=?",
+      [value.color, userId, value.name]
+    )
+    return { ok: true }
+  }
   if (action === "create-set") {
     const value = newSet.parse(input),
       setId = randomUUID()
@@ -126,6 +185,7 @@ export async function mutate(
         JSON.stringify(value.tags),
       ]
     )
+    await ensureTags(userId, value.tags)
     return { id: setId }
   }
   if (action === "add-tags") {
@@ -141,6 +201,7 @@ export async function mutate(
         throw new Error(
           "Some selected media is no longer available. Refresh and try again."
         )
+      await ensureTags(userId, value.tags, connection)
       for (const item of media) {
         const merged = tags.parse([...new Set([...item.tags, ...value.tags])])
         await connection.execute(
@@ -156,6 +217,35 @@ export async function mutate(
       connection.release()
     }
     return { count: value.ids.length }
+  }
+  if (action === "remove-tag") {
+    const value = removeMediaTag.parse(input)
+    const connection = await pool.getConnection()
+    try {
+      await connection.beginTransaction()
+      const [media] = await connection.query<import("mysql2").RowDataPacket[]>(
+        "SELECT tags FROM media WHERE user_id=? AND id=? AND available=TRUE FOR UPDATE",
+        [userId, value.id]
+      )
+      if (!media.length) throw new Error("This media is no longer available.")
+      await connection.execute(
+        "UPDATE media SET tags=? WHERE id=? AND user_id=?",
+        [
+          JSON.stringify(
+            media[0].tags.filter((tag: string) => tag !== value.tag)
+          ),
+          value.id,
+          userId,
+        ]
+      )
+      await connection.commit()
+    } catch (error) {
+      await connection.rollback()
+      throw error
+    } finally {
+      connection.release()
+    }
+    return { ok: true }
   }
   if (action === "metadata") {
     const value = metadata.parse(input)
@@ -175,6 +265,7 @@ export async function mutate(
           userId,
         ]
       )
+      await ensureTags(userId, value.tags, connection)
       if (value.kind === "media" && value.setIds) {
         await connection.execute("DELETE FROM set_member WHERE media_id=?", [
           value.id,
@@ -247,6 +338,10 @@ async function editSources(
     await connection.beginTransaction()
     try {
       await edit(connection)
+      await connection.execute(
+        "INSERT INTO drive_sync_state(user_id) VALUES (?) ON DUPLICATE KEY UPDATE watch_next_check=NOW(3)",
+        [userId]
+      )
       await connection.commit()
     } catch (error) {
       await connection.rollback()

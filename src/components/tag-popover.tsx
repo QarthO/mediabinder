@@ -1,11 +1,10 @@
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { Popover } from "radix-ui"
-import { Check, Plus } from "lucide-react"
+import { Plus } from "lucide-react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 import { action } from "@/lib/api"
-import { Button } from "./ui/button"
-import { Input } from "./ui/input"
+import { Command, CommandInput, CommandItem, CommandList } from "./ui/command"
 
 export function TagPopover({
   ids,
@@ -22,29 +21,44 @@ export function TagPopover({
 }) {
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState("")
-  const [chosen, setChosen] = useState<string[]>([])
+  const [added, setAdded] = useState<string[]>([])
+  const input = useRef<HTMLInputElement>(null)
+  const busy = useRef(false)
   const client = useQueryClient()
   const save = useMutation({
-    mutationFn: () => action("add-tags", { ids, tags: chosen }),
-    onSuccess: async () => {
-      setOpen(false)
+    mutationFn: (tag: string) => action("add-tags", { ids, tags: [tag] }),
+    onSuccess: async (_result, tag) => {
+      setAdded((tags) => [...tags, tag])
       await client.invalidateQueries({ queryKey: ["library"] })
-      toast.success(
-        `Tags added to ${ids.length === 1 ? "1 item" : `${ids.length} items`}`
-      )
+      input.current?.focus()
     },
     onError: (error) => toast.error(error.message),
+    onSettled: () => {
+      busy.current = false
+    },
   })
   const term = search.trim().toLowerCase()
-  const options = [...new Set([...allTags, ...chosen])]
-    .filter((tag) => !existing.includes(tag) && tag.includes(term))
-    .sort()
-  const toggle = (tag: string) =>
-    setChosen((current) =>
-      current.includes(tag)
-        ? current.filter((value) => value !== tag)
-        : [...current, tag]
+  const options = allTags
+    .filter(
+      (tag) =>
+        !existing.includes(tag) && !added.includes(tag) && tag.includes(term)
     )
+    .sort(
+      (a, b) => Number(b === term) - Number(a === term) || a.localeCompare(b)
+    )
+  const create = Boolean(
+    term &&
+    !allTags.includes(term) &&
+    !existing.includes(term) &&
+    !added.includes(term)
+  )
+  const add = (tag: string) => {
+    if (!busy.current) {
+      busy.current = true
+      setSearch("")
+      save.mutate(tag)
+    }
+  }
   return (
     <Popover.Root
       open={open}
@@ -52,7 +66,7 @@ export function TagPopover({
         setOpen(value)
         if (value) {
           setSearch("")
-          setChosen([])
+          setAdded([])
         }
       }}
     >
@@ -74,57 +88,49 @@ export function TagPopover({
           collisionPadding={12}
           aria-label={bulk ? "Add tags to selected media" : "Add media tags"}
         >
-          <form
-            onSubmit={(event) => {
-              event.preventDefault()
-              if (chosen.length) save.mutate()
-            }}
-          >
-            <h3>{bulk ? `Add tags to ${ids.length} items` : "Add tags"}</h3>
-            <Input
+          <h3>{bulk ? `Add tags to ${ids.length} items` : "Add tags"}</h3>
+          <Command shouldFilter={false} loop>
+            <CommandInput
+              ref={input}
               aria-label="Find or create a tag"
               placeholder="Find or create a tag…"
               maxLength={50}
               value={search}
-              onChange={(event) => setSearch(event.target.value)}
+              onValueChange={setSearch}
             />
-            <div className="tag-options">
+            <CommandList className="tag-options" aria-busy={save.isPending}>
               {options.map((tag) => (
-                <button
-                  type="button"
+                <CommandItem
                   key={tag}
-                  aria-pressed={chosen.includes(tag)}
-                  onClick={() => toggle(tag)}
+                  value={tag}
+                  disabled={save.isPending}
+                  onSelect={() => add(tag)}
                 >
-                  <span>{tag}</span>
-                  {chosen.includes(tag) && <Check size={15} />}
-                </button>
+                  {tag}
+                </CommandItem>
               ))}
-              {term &&
-                !allTags.includes(term) &&
-                !chosen.includes(term) &&
-                !existing.includes(term) && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      toggle(term)
-                      setSearch("")
-                    }}
-                  >
-                    <Plus size={15} />
-                    <span>Create “{term}”</span>
-                  </button>
-                )}
-              {!options.length && !term && <p>Type a name to create a tag.</p>}
-              {existing.includes(term) && <p>This tag is already added.</p>}
-            </div>
-            <div className="tag-popover-footer">
-              <span>{chosen.length} selected</span>
-              <Button type="submit" disabled={!chosen.length || save.isPending}>
-                {save.isPending ? "Adding…" : "Add tags"}
-              </Button>
-            </div>
-          </form>
+              {create && (
+                <CommandItem
+                  value={term}
+                  disabled={save.isPending}
+                  onSelect={() => add(term)}
+                >
+                  <Plus size={15} />
+                  Create “{term}”
+                </CommandItem>
+              )}
+              {!options.length && !create && (
+                <p>
+                  {term
+                    ? "This tag is already added."
+                    : "Type a name to create a tag."}
+                </p>
+              )}
+            </CommandList>
+          </Command>
+          <div className="tag-popover-hint" role="status">
+            {save.isPending ? "Adding tag…" : "↑ ↓ to choose · Enter to add"}
+          </div>
         </Popover.Content>
       </Popover.Portal>
     </Popover.Root>

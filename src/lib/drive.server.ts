@@ -13,12 +13,13 @@ export interface DriveFile {
     height?: number
     durationMillis?: string
   }
+  parents?: string[]
   thumbnailLink?: string
 }
-export async function driveToken(headers: Headers) {
+export async function driveToken(headers?: Headers, userId?: string) {
   const result = await auth.api.getAccessToken({
-    headers,
-    body: { providerId: "google" },
+    ...(headers ? { headers } : {}),
+    body: { providerId: "google", ...(userId ? { userId } : {}) },
   })
   if (!result.accessToken)
     throw new Error("Reconnect Google Drive in settings.")
@@ -69,7 +70,7 @@ export async function listFolders(headers: Headers) {
   } while (pageToken)
   return folders.sort((a, b) => a.name.localeCompare(b.name))
 }
-export async function syncDrive(userId: string, headers: Headers) {
+export async function syncDrive(userId: string, headers?: Headers) {
   const connection = await pool.getConnection()
   const lockName = `drive:${userId}`
   try {
@@ -85,7 +86,7 @@ export async function syncDrive(userId: string, headers: Headers) {
     )
     if (!sources.length)
       throw new Error("Choose a Google Drive folder in settings first.")
-    const token = await driveToken(headers)
+    const token = await driveToken(headers, userId)
     const sourceFiles = new Map<string, DriveFile[]>()
     for (const source of sources) {
       const pending = [source.folder_id],
@@ -103,7 +104,7 @@ export async function syncDrive(userId: string, headers: Headers) {
           }>(token, "files", {
             q: `'${parent}' in parents and trashed = false and (mimeType contains 'image/' or mimeType contains 'video/' or mimeType = 'application/vnd.google-apps.folder')`,
             fields:
-              "nextPageToken,files(id,name,mimeType,createdTime,size,imageMediaMetadata,videoMediaMetadata)",
+              "nextPageToken,files(id,name,mimeType,createdTime,size,parents,imageMediaMetadata,videoMediaMetadata)",
             pageSize: "1000",
             supportsAllDrives: "true",
             includeItemsFromAllDrives: "true",
@@ -170,6 +171,12 @@ export async function syncDrive(userId: string, headers: Headers) {
             dimensions?.height ?? null,
             Number(file.videoMediaMetadata?.durationMillis) || null,
           ]
+        )
+      }
+      for (const file of files) {
+        await connection.execute(
+          "INSERT INTO media_location(media_id,parent_ids) SELECT id,? FROM media WHERE user_id=? AND drive_id=? ON DUPLICATE KEY UPDATE parent_ids=VALUES(parent_ids)",
+          [JSON.stringify(file.parents ?? []), userId, file.id]
         )
       }
       for (const [folderId, members] of sourceFiles) {

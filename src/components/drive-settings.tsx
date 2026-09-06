@@ -152,6 +152,19 @@ export function DriveSettings({
               </div>
             ))}
           </div>
+          <div className="webhook-status">
+            <h3>Automatic sync</h3>
+            <p>
+              {workspace.webhook.configured
+                ? workspace.webhook.active
+                  ? "Google Drive notifications are connected. Changes sync automatically."
+                  : "Waiting for the worker to register Google Drive notifications."
+                : "Syncs on fresh page loads and when you press Sync Drive. Configure a public webhook URL to receive changes automatically."}
+            </p>
+            {workspace.webhook.error && (
+              <p role="alert">{workspace.webhook.error}</p>
+            )}
+          </div>
           <h3>Link another folder</h3>
           <form
             onSubmit={(e) => {

@@ -12,6 +12,8 @@ export interface Media {
   duration_ms: number | null
   available: boolean
   drive_id: string
+  source_ids: string[]
+  parent_ids: string[]
   set_ids: string[]
   post_count: number
 }
@@ -41,11 +43,13 @@ export interface DriveSource {
   last_synced_at: string | null
 }
 export interface Library {
+  tag_colors: Record<string, string>
   media: Media[]
   sets: MediaSet[]
   posts: Post[]
   workspace: {
     sources: DriveSource[]
+    webhook: { configured: boolean; active: number; error: string | null }
     last_synced_at: string | null
   }
   user: { name: string; email: string; role: string }

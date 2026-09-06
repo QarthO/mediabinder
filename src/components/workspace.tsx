@@ -1,4 +1,13 @@
-import { useEffect, useMemo, useState } from "react"
+import { FolderSelector } from "./folder-selector"
+import { Select } from "./ui/select"
+import { tagStyle } from "@/lib/tag-colors"
+import {
+  Outlet,
+  useNavigate,
+  useRouterState,
+  useSearch,
+} from "@tanstack/react-router"
+import { useEffect, useMemo, useState, useRef } from "react"
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query"
 import { type SortingState } from "@tanstack/react-table"
 import { DataTable, useMediaTable } from "./data-table"
@@ -59,8 +68,16 @@ const navItems = [
 export function Workspace() {
   const query = useQuery(libraryQuery),
     client = useQueryClient()
-  const [page, setPage] = useState("all"),
-    [view, setView] = useState<"grid" | "list">("grid"),
+  const navigate = useNavigate()
+  const pathname = useRouterState({
+    select: (state) => state.location.pathname,
+  })
+  const { folders: selectedFolders = [] } = useSearch({ from: "/_app" })
+  const setId = pathname.startsWith("/sets/")
+    ? decodeURIComponent(pathname.slice(6))
+    : null
+  const page = setId || pathname === "/media" ? "all" : pathname.slice(1)
+  const [view, setView] = useState<"grid" | "list">("grid"),
     [search, setSearch] = useState(""),
     [tag, setTag] = useState(""),
     [sorting, setSorting] = useState<SortingState>([
@@ -73,12 +90,13 @@ export function Workspace() {
       id: string
       kind: "media" | "set"
     } | null>(null),
-    [collapsed, setCollapsed] = useState(false),
-    [setId, setSetId] = useState<string | null>(null)
+    [collapsed, setCollapsed] = useState(false)
   const changePage = (value: string) => {
     window.scrollTo({ top: 0 })
-    setPage(value)
-    setSetId(null)
+    void navigate({
+      to: value === "all" ? "/media" : (`/${value}` as "/images"),
+      search: { folders: selectedFolders },
+    })
     setSearch("")
     setTag("")
     setCommand(false)
@@ -104,15 +122,32 @@ export function Workspace() {
     return () => window.removeEventListener("keydown", handler)
   }, [])
   const sync = useMutation({
-    mutationFn: () => action<{ count: number }>("sync"),
-    onSuccess: async (result) => {
+    mutationFn: (_automatic?: boolean) => action<{ count: number }>("sync"),
+    onSuccess: async (result, automatic) => {
       await client.invalidateQueries({ queryKey: ["library"] })
-      toast.success(
-        `Synced ${result.count} media ${result.count === 1 ? "item" : "items"}`
-      )
+      if (!automatic)
+        toast.success(
+          `Synced ${result.count} media ${result.count === 1 ? "item" : "items"}`
+        )
     },
-    onError: (e) => toast.error(e.message),
+    onError: (e, automatic) => {
+      if (!automatic || !e.message.startsWith("A sync")) toast.error(e.message)
+    },
   })
+  const freshSync = useRef(false)
+  useEffect(() => {
+    if (query.data && !freshSync.current) {
+      freshSync.current = true
+      if (query.data.workspace.sources.length) {
+        sync.mutate(true)
+      }
+    }
+  }, [query.data, client])
+  useEffect(() => {
+    setSearch("")
+    setTag("")
+    setSelected(null)
+  }, [pathname])
   const createSet = useMutation({
     mutationFn: () =>
       action<{ id: string }>("create-set", { displayName: setName }),
@@ -128,29 +163,51 @@ export function Workspace() {
   const data = query.data
   useEffect(() => {
     if (data && setId && !data.sets.some((set) => set.id === setId)) {
-      setSetId(null)
-      setPage("sets")
+      void navigate({ to: "/sets", search: { folders: selectedFolders } })
     }
   }, [data?.sets, setId])
+  const catalogMedia = useMemo(
+    () =>
+      (data?.media ?? []).filter(
+        (media) =>
+          !selectedFolders.length ||
+          media.source_ids.some((id) => selectedFolders.includes(id))
+      ),
+    [data?.media, selectedFolders]
+  )
+  useEffect(() => {
+    if (!data || !selectedFolders.length) return
+    const folders = selectedFolders.filter((id) =>
+      data.workspace.sources.some((source) => source.folder_id === id)
+    )
+    if (folders.length !== selectedFolders.length)
+      void navigate({
+        to: pathname as "/media",
+        search: { folders },
+        replace: true,
+      })
+  }, [data?.workspace.sources, selectedFolders, pathname, navigate])
   const allTags = useMemo(
     () =>
       [
         ...new Set(
-          [...(data?.media ?? []), ...(data?.sets ?? [])].flatMap((m) => m.tags)
+          [...catalogMedia, ...(data?.sets ?? [])].flatMap((m) => m.tags)
         ),
       ].sort(),
-    [data?.media, data?.sets]
+    [catalogMedia, data?.sets]
   )
   const scopedMedia = useMemo(
     () =>
-      (data?.media ?? []).filter(
+      catalogMedia.filter(
         (m) =>
           (page !== "images" || m.mime_type.startsWith("image/")) &&
           (page !== "videos" || m.mime_type.startsWith("video/")) &&
           (!setId || m.set_ids.includes(setId)) &&
-          (!tag || m.tags.includes(tag))
+          (!tag || m.tags.includes(tag)) &&
+          (!selectedFolders.length ||
+            m.source_ids.some((id) => selectedFolders.includes(id)))
       ),
-    [data?.media, page, setId, tag]
+    [catalogMedia, page, setId, tag, selectedFolders]
   )
   const table = useMediaTable(
     scopedMedia,
@@ -158,7 +215,8 @@ export function Workspace() {
     sorting,
     setSorting,
     (media) => setSelected({ id: media.id, kind: "media" }),
-    allTags
+    allTags,
+    data?.tag_colors ?? {}
   )
   const items = table.getRowModel().rows.map((row) => row.original)
   const sort =
@@ -176,8 +234,11 @@ export function Workspace() {
     "Settings"
   const openSet = (set: MediaSet) => {
     window.scrollTo({ top: 0 })
-    setPage("all")
-    setSetId(set.id)
+    void navigate({
+      to: "/sets/$setId",
+      params: { setId: set.id },
+      search: { folders: selectedFolders },
+    })
     setSearch("")
     setTag("")
     setCommand(false)
@@ -199,9 +260,9 @@ export function Workspace() {
       </div>
     )
   const counts: Record<string, number> = {
-    all: data.media.length,
-    images: data.media.filter((m) => m.mime_type.startsWith("image/")).length,
-    videos: data.media.filter((m) => m.mime_type.startsWith("video/")).length,
+    all: catalogMedia.length,
+    images: catalogMedia.filter((m) => m.mime_type.startsWith("image/")).length,
+    videos: catalogMedia.filter((m) => m.mime_type.startsWith("video/")).length,
     tags: allTags.length,
     sets: data.sets.length,
   }
@@ -211,6 +272,14 @@ export function Workspace() {
         <div className="sidebar-brand">
           <Brand compact={collapsed} />
         </div>
+        <FolderSelector
+          sources={data.workspace.sources}
+          selected={selectedFolders}
+          onChange={(folders) =>
+            void navigate({ to: pathname as "/media", search: { folders } })
+          }
+          compact={collapsed}
+        />
         <button
           className="search-trigger"
           onClick={() => setCommand(true)}
@@ -260,7 +329,7 @@ export function Workspace() {
               aria-label="Sign out of MediaBinder"
               onClick={async () => {
                 await authClient.signOut()
-                window.location.assign("/login")
+                window.location.assign("/")
               }}
             >
               <LogOut size={15} />
@@ -306,7 +375,7 @@ export function Workspace() {
                     const matchingSets = data.sets.filter((set) =>
                       set.tags.includes(value)
                     )
-                    const count = data.media.filter((media) =>
+                    const count = catalogMedia.filter((media) =>
                       media.tags.includes(value)
                     ).length
                     return (
@@ -318,12 +387,34 @@ export function Workspace() {
                           }}
                         >
                           <Tags size={19} />
-                          <strong>{value}</strong>
+                          <strong style={{ color: data.tag_colors[value] }}>
+                            {value}
+                          </strong>
                           <span>
                             {count} media
                             <ChevronRight size={15} />
                           </span>
                         </button>
+                        <label className="tag-color-control">
+                          Color
+                          <input
+                            type="color"
+                            aria-label={`Color for ${value}`}
+                            value={data.tag_colors[value] ?? "#7dd3fc"}
+                            onChange={(event) => {
+                              void action("tag-color", {
+                                name: value,
+                                color: event.target.value,
+                              })
+                                .then(() =>
+                                  client.invalidateQueries({
+                                    queryKey: ["library"],
+                                  })
+                                )
+                                .catch((error) => toast.error(error.message))
+                            }}
+                          />
+                        </label>
                         {matchingSets.length > 0 && (
                           <div className="tag-sets">
                             {matchingSets.map((set) => (
@@ -384,7 +475,11 @@ export function Workspace() {
                       {set.tags.length > 0 && (
                         <div className="tags">
                           {set.tags.map((t) => (
-                            <span className="tag" key={t}>
+                            <span
+                              className="tag"
+                              style={tagStyle(data.tag_colors[t])}
+                              key={t}
+                            >
                               {t}
                             </span>
                           ))}
@@ -446,39 +541,41 @@ export function Workspace() {
                   <RefreshCw className={sync.isPending ? "spin" : ""} />
                   {sync.isPending ? "Syncing…" : "Sync Drive"}
                 </Button>
-                <select
-                  aria-label="Filter by tag"
-                  value={tag}
-                  onChange={(e) => setTag(e.target.value)}
-                >
-                  <option value="">All tags</option>
-                  {allTags.map((t) => (
-                    <option key={t}>{t}</option>
-                  ))}
-                </select>
+                <Select
+                  label="Filter by tag"
+                  value={tag ? `tag:${tag}` : "all"}
+                  onChange={(value) =>
+                    setTag(value === "all" ? "" : value.slice(4))
+                  }
+                  options={[
+                    { value: "all", label: "All tags" },
+                    ...allTags.map((value) => ({
+                      value: `tag:${value}`,
+                      label: value,
+                    })),
+                  ]}
+                />
                 <div className="toolbar-spacer" />
-                <select
-                  aria-label="Sort media"
+                <Select
+                  label="Sort media"
                   value={sort}
-                  onChange={(e) =>
+                  onChange={(value) =>
                     setSorting([
                       {
-                        id:
-                          e.target.value === "name"
-                            ? "display_name"
-                            : "uploaded_at",
-                        desc: e.target.value === "newest",
+                        id: value === "name" ? "display_name" : "uploaded_at",
+                        desc: value === "newest",
                       },
                     ])
                   }
-                >
-                  {sort === "custom" && (
-                    <option value="custom">Custom sort</option>
-                  )}
-                  <option value="newest">Newest first</option>
-                  <option value="oldest">Oldest first</option>
-                  <option value="name">Name A–Z</option>
-                </select>
+                  options={[
+                    { value: "newest", label: "Newest first" },
+                    { value: "oldest", label: "Oldest first" },
+                    { value: "name", label: "Name A–Z" },
+                    ...(sort === "custom"
+                      ? [{ value: "custom", label: "Custom sort" }]
+                      : []),
+                  ]}
+                />
                 <div className="view-switch">
                   {(["grid", "list"] as const).map((v) => (
                     <button
@@ -502,7 +599,7 @@ export function Workspace() {
               </div>
               {tag && (
                 <div className="active-filter">
-                  <span className="tag">
+                  <span className="tag" style={tagStyle(data.tag_colors[tag])}>
                     {tag}
                     <button
                       aria-label="Clear tag filter"
@@ -715,7 +812,7 @@ export function Workspace() {
                 </CommandItem>
               </CommandGroup>
               <CommandGroup heading="Media">
-                {data.media.map((m) => (
+                {catalogMedia.map((m) => (
                   <CommandItem
                     key={m.id}
                     value={`media ${m.display_name} ${m.raw_name} ${m.tags.join(" ")} ${m.id}`}
@@ -750,6 +847,7 @@ export function Workspace() {
           </Command>
         </DialogContent>
       </Dialog>
+      <Outlet />
       {selected && (
         <Detail
           key={`${selected.kind}-${selected.id}`}

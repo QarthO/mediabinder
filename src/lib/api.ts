@@ -5,7 +5,7 @@ export const libraryQuery = queryOptions({
   queryFn: async (): Promise<Library> => {
     const response = await fetch("/api/library")
     if (response.status === 401) {
-      window.location.assign("/login")
+      window.location.assign("/")
       throw new Error("Sign in to continue.")
     }
     if (!response.ok)
@@ -24,7 +24,7 @@ export async function action<T = { ok: boolean }>(
     body: JSON.stringify({ action, data }),
   })
   if (response.status === 401) {
-    window.location.assign("/login")
+    window.location.assign("/")
     throw new Error("Sign in to continue.")
   }
   const result = await response.json()
