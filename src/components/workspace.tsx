@@ -22,6 +22,8 @@ import {
 } from "./data-table"
 import {
   ArrowUpDown,
+  Eye,
+  EyeOff,
   Inbox,
   Images,
   ImageIcon,
@@ -61,7 +63,7 @@ import {
   CommandItem,
 } from "./ui/command"
 import { Brand } from "./brand"
-import { Thumbnail } from "./thumbnail"
+import { Thumbnail, ThumbnailBlurContext } from "./thumbnail"
 import { Detail } from "./detail"
 import { DriveSettings } from "./drive-settings"
 import { libraryQuery, action } from "@/lib/api"
@@ -73,6 +75,26 @@ const navItems = [
   { id: "all", label: "All media", icon: Images },
 ] as const
 export function Workspace() {
+  const [thumbnailsBlurred, setThumbnailsBlurred] = useState(false)
+  return (
+    <ThumbnailBlurContext value={thumbnailsBlurred}>
+      <WorkspaceContent
+        thumbnailsBlurred={thumbnailsBlurred}
+        onToggleThumbnailBlur={() =>
+          setThumbnailsBlurred((blurred) => !blurred)
+        }
+      />
+    </ThumbnailBlurContext>
+  )
+}
+
+function WorkspaceContent({
+  thumbnailsBlurred,
+  onToggleThumbnailBlur,
+}: {
+  thumbnailsBlurred: boolean
+  onToggleThumbnailBlur: () => void
+}) {
   const mobile = useMobile()
   const [selectionEnabled, setSelectionMode] = useState(false)
   const [mobileSidebar, setMobileSidebar] = useState(false)
@@ -654,6 +676,19 @@ export function Workspace() {
                       : []),
                   ]}
                 />
+                <Button
+                  className="thumbnail-blur-toggle"
+                  variant="outline"
+                  size="icon"
+                  aria-label="Blur thumbnails"
+                  aria-pressed={thumbnailsBlurred}
+                  title={
+                    thumbnailsBlurred ? "Unblur thumbnails" : "Blur thumbnails"
+                  }
+                  onClick={onToggleThumbnailBlur}
+                >
+                  {thumbnailsBlurred ? <EyeOff /> : <Eye />}
+                </Button>
                 <div className="view-switch">
                   {(["grid", "list"] as const).map((v) => (
                     <button

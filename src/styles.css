@@ -3910,3 +3910,41 @@ html {
   flex-wrap: wrap;
   gap: 12px;
 }
+
+img[data-blurred] {
+  filter: blur(28px);
+  clip-path: inset(0);
+}
+.library-toolbar .thumbnail-blur-toggle {
+  width: 36px;
+  flex-shrink: 0;
+}
+.thumbnail-blur-toggle[aria-pressed="true"] {
+  color: var(--primary);
+  border-color: var(--primary);
+  background: var(--accent);
+}
+@media (max-width: 760px) {
+  .library-toolbar .thumbnail-blur-toggle {
+    width: 40px;
+    height: 40px;
+  }
+}
+@media (max-width: 360px) {
+  .media-workspace .library-toolbar {
+    gap: 2px;
+  }
+  .library-toolbar .mobile-icon-select,
+  .library-toolbar .mobile-search-toggle,
+  .library-toolbar .thumbnail-blur-toggle {
+    width: 36px;
+    min-width: 36px;
+    max-width: 36px;
+    flex-basis: 36px;
+  }
+}
+@media (min-width: 961px) {
+  .library-toolbar .filter-search {
+    flex: 0 1 190px;
+  }
+}
