@@ -1,3 +1,4 @@
+import { flushSync } from "react-dom"
 import { useMobile } from "@/hooks/use-mobile"
 import { SidebarTags } from "./sidebar-tags"
 import { FolderSelector } from "./folder-selector"
@@ -68,7 +69,8 @@ const navItems = [
 ] as const
 export function Workspace() {
   const mobile = useMobile()
-  const [selectionMode, setSelectionMode] = useState(false)
+  const [mobileSelectionMode, setSelectionMode] = useState(false)
+  const selectionMode = mobile && mobileSelectionMode
   const [mobileSidebar, setMobileSidebar] = useState(false)
   const [mobileSearch, setMobileSearch] = useState(false)
   const searchInput = useRef<HTMLInputElement>(null)
@@ -87,7 +89,6 @@ export function Workspace() {
   const [view, setView] = useState<"grid" | "list">("grid"),
     [search, setSearch] = useState(""),
     [selectedTags, setSelectedTags] = useState<string[]>([]),
-    [tagsOpen, setTagsOpen] = useState(false),
     [mediaType, setMediaType] = useState("all"),
     [catalogStatus, setCatalogStatus] = useState("all"),
     [setFilter, setSetFilter] = useState(""),
@@ -352,11 +353,8 @@ export function Workspace() {
             catalogMedia.filter((media) => media.tags.includes(tag)).length,
           ])
         )}
-        expanded={tagsOpen && !sidebarCollapsed}
-        onExpanded={(open) => {
-          setCollapsed(false)
-          setTagsOpen(open)
-        }}
+        compact={sidebarCollapsed}
+        onExpand={() => setCollapsed(false)}
         onChange={(tags) => {
           setSelectedTags(tags)
           if (page !== "all") {
@@ -406,7 +404,7 @@ export function Workspace() {
   )
   return (
     <div
-      className={`app ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${tagsOpen && !sidebarCollapsed ? "sidebar-filter-open" : ""}`}
+      className={`app ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${!sidebarCollapsed ? "sidebar-filter-open" : ""}`}
     >
       {mobile ? (
         <Dialog open={mobileSidebar} onOpenChange={setMobileSidebar}>
@@ -447,7 +445,7 @@ export function Workspace() {
           <span className="muted">Library</span>
           <ChevronRight size={13} />
           <span className="breadcrumb">{title}</span>
-          {page === "all" && (
+          {page === "all" && mobile && (
             <Button
               className="header-select"
               variant="outline"
@@ -557,8 +555,8 @@ export function Workspace() {
                   className="mobile-search-toggle icon-button"
                   aria-label="Open media search"
                   onClick={() => {
-                    setMobileSearch(true)
-                    requestAnimationFrame(() => searchInput.current?.focus())
+                    flushSync(() => setMobileSearch(true))
+                    searchInput.current?.focus()
                   }}
                 >
                   <Search size={18} />

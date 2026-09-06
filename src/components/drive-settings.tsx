@@ -5,8 +5,6 @@ import {
   ArrowUpRight,
   RefreshCw,
   Check,
-  HardDrive,
-  ShieldCheck,
   Unlink,
 } from "lucide-react"
 import { toast } from "sonner"
@@ -66,23 +64,10 @@ export function DriveSettings({
   return (
     <div className="settings-content">
       <section className="settings-card">
-        <div className="settings-section-heading">
-          <div className="settings-icon">
-            <HardDrive size={21} />
-          </div>
-          <div>
-            <h2>Google Drive</h2>
-            <p>Your files live here. MediaBinder keeps them organized.</p>
-          </div>
-          <span className="connection-badge">
-            <span className="status-dot connected" />
-            Connected
-          </span>
-        </div>
         <div className="settings-body">
           <div className="section-heading">
             <h3>
-              Linked folders <span>{workspace.sources.length}</span>
+              Google Drive folders <span>{workspace.sources.length}</span>
             </h3>
             <Button
               variant="outline"
@@ -93,10 +78,7 @@ export function DriveSettings({
               {sync.isPending ? "Syncing…" : "Sync all folders"}
             </Button>
           </div>
-          <p>
-            Images and videos from these folders and their subfolders appear in
-            your library. Shared folders work too.
-          </p>
+          {!workspace.sources.length && <p>No folders linked yet.</p>}
           <div className="source-list">
             {workspace.sources.map((source) => (
               <div className="source-entry" key={source.folder_id}>
@@ -131,9 +113,8 @@ export function DriveSettings({
                 {removing === source.folder_id && (
                   <div className="unlink-confirm" role="alert">
                     <p>
-                      Unlink this folder? Its media will be hidden unless it
-                      belongs to another linked folder. Names, tags, sets, and
-                      post links are kept for when you link it again.
+                      Unlink this folder? Media unique to it will be hidden.
+                      Your edits are kept if you link it again.
                     </p>
                     <div className="settings-actions">
                       <Button variant="ghost" onClick={() => setRemoving(null)}>
@@ -152,20 +133,7 @@ export function DriveSettings({
               </div>
             ))}
           </div>
-          <div className="webhook-status">
-            <h3>Automatic sync</h3>
-            <p>
-              {workspace.webhook.configured
-                ? workspace.webhook.active
-                  ? "Google Drive notifications are connected. Changes sync automatically."
-                  : "Waiting for the worker to register Google Drive notifications."
-                : "Syncs on fresh page loads and when you press Sync Drive. Configure a public webhook URL to receive changes automatically."}
-            </p>
-            {workspace.webhook.error && (
-              <p role="alert">{workspace.webhook.error}</p>
-            )}
-          </div>
-          <h3>Link another folder</h3>
+          <h3>Link folder</h3>
           <form
             onSubmit={(e) => {
               e.preventDefault()
@@ -191,6 +159,7 @@ export function DriveSettings({
                 Browse folders
               </Button>
               <Button
+                variant="secondary"
                 type="submit"
                 disabled={
                   !folder.trim() ||
@@ -257,16 +226,8 @@ export function DriveSettings({
               )}
             </div>
           )}
-          <div className="settings-note">
-            <ShieldCheck size={17} />
-            <p>
-              Drive access is read-only. Names, tags, sets, and post links are
-              stored in MediaBinder. Your original files stay as they are.
-            </p>
-          </div>
         </div>
         <div className="settings-card-footer">
-          <span>Having trouble accessing your files?</span>
           <Button
             variant="outline"
             onClick={async () => {
@@ -286,16 +247,6 @@ export function DriveSettings({
             <RefreshCw />
             Reconnect Google
           </Button>
-        </div>
-      </section>
-      <section className="settings-card privacy-card">
-        <ShieldCheck size={21} />
-        <div>
-          <h3>A private workspace</h3>
-          <p>
-            New sign-ups are disabled by default. The first account is the
-            superuser. Access is controlled by your server configuration.
-          </p>
         </div>
       </section>
     </div>
