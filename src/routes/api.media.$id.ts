@@ -1,7 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router"
 import { requireSession } from "@/lib/auth.server"
 import { rows } from "@/lib/database.server"
-import { driveJson, driveToken } from "@/lib/drive.server"
+import { thumbnailResponse } from "@/effect/thumbnails.server"
+import { driveToken } from "@/lib/drive.server"
 export const Route = createFileRoute("/api/media/$id")({
   server: {
     handlers: {
@@ -18,32 +19,18 @@ export const Route = createFileRoute("/api/media/$id")({
         if (!media?.available)
           return new Response("File unavailable.", { status: 404 })
         try {
-          const token = await driveToken(request.headers)
-          const thumbnail = new URL(request.url).searchParams.has("thumbnail")
-          let url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(media.drive_id)}?alt=media&supportsAllDrives=true`
-          if (thumbnail) {
-            const file = await driveJson<{ thumbnailLink?: string }>(
-              token,
-              `files/${encodeURIComponent(media.drive_id)}`,
-              { fields: "thumbnailLink", supportsAllDrives: "true" }
+          if (new URL(request.url).searchParams.has("thumbnail")) {
+            return await thumbnailResponse(
+              session.user.id,
+              media.drive_id,
+              request
             )
-            if (!file.thumbnailLink)
-              return new Response("No thumbnail available.", { status: 404 })
-            const thumbUrl = new URL(file.thumbnailLink)
-            if (
-              thumbUrl.protocol !== "https:" ||
-              !["googleusercontent.com", "google.com"].some(
-                (host) =>
-                  thumbUrl.hostname === host ||
-                  thumbUrl.hostname.endsWith(`.${host}`)
-              )
-            )
-              return new Response("Invalid thumbnail.", { status: 502 })
-            url = file.thumbnailLink.replace(/=s\d+$/, "=s640")
           }
+          const token = await driveToken(request.headers)
+          const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(media.drive_id)}?alt=media&supportsAllDrives=true`
           const headers = new Headers({ Authorization: `Bearer ${token}` })
           const range = request.headers.get("range")
-          if (range && !thumbnail) {
+          if (range) {
             if (!/^bytes=\d*-\d*$/.test(range))
               return new Response("Invalid range.", { status: 416 })
             headers.set("Range", range)
@@ -56,9 +43,7 @@ export const Route = createFileRoute("/api/media/$id")({
             "Cache-Control": "private, no-store",
             "X-Content-Type-Options": "nosniff",
             "Content-Security-Policy": "default-src 'none'; sandbox",
-            "Content-Type": thumbnail
-              ? (upstream.headers.get("content-type") ?? "image/jpeg")
-              : media.mime_type,
+            "Content-Type": media.mime_type,
           })
           for (const key of [
             "content-length",

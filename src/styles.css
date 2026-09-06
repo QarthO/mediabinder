@@ -3027,3 +3027,25 @@ html {
 .post-link-dialog {
   z-index: 61;
 }
+
+.thumbnail-loading {
+  color: transparent;
+  background: linear-gradient(
+    110deg,
+    var(--muted) 25%,
+    var(--accent) 45%,
+    var(--muted) 65%
+  );
+  background-size: 200% 100%;
+  animation: thumbnail-shimmer 1.6s ease-in-out infinite;
+}
+@keyframes thumbnail-shimmer {
+  to {
+    background-position: -200% 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .thumbnail-loading {
+    animation: none;
+  }
+}

@@ -70,3 +70,11 @@ The focused database regression check runs with `docker compose exec web pnpm ex
 ## Preview fixtures
 
 The initial browser validation uses only `ExampleMediaFolder`, with eight sample photos from [Lorem Picsum](https://picsum.photos/) and the [MDN CC0 flower video](https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4). These are test uploads, not application assets. They are not committed to this repository. Example social links in the preview are metadata fixtures, not published posts.
+
+### Thumbnail loading and diagnostics
+
+Thumbnails use a focused Effect service; the rest of the app still uses TanStack Query and async/await. The virtual table eagerly loads its eight overscan rows in each direction. A loading placeholder covers cold requests, and the browser retries failed thumbnail requests once.
+
+Thumbnail responses use a private five-minute browser cache (`Vary: Cookie`) with ETags for revalidation. The web process caches at most 64 thumbnails for fifteen minutes, each capped at 1 MiB, with six concurrent Google loads. Concurrent requests for the same user/file share a lookup; failed loads are not cached. Nothing is written to disk. A cold server restart empties this cache. Drive image replacements can take up to twenty minutes to appear across the two cache layers. Every network request still checks the session, ownership, and current availability before accessing the server cache. Original images and video streams retain `no-store` and byte-range streaming.
+
+Each thumbnail response includes `Server-Timing` for duration and cache reuse. Effect emits JSON timing/error logs in the web container, without tokens, signed URLs, file names, or user IDs. Inspect them with `docker compose logs web`. Set `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` to an OTLP HTTP/JSON collector (including `/v1/traces`) to export the thumbnail/token/lookup/download spans. No collector is required or deployed by default.

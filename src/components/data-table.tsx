@@ -92,6 +92,7 @@ export function useMediaTable(
               <Thumbnail
                 id={row.original.id}
                 name=""
+                eager
                 video={row.original.mime_type.startsWith("video/")}
               />
             </div>
@@ -194,7 +195,7 @@ export function DataTable({
     getScrollElement: () => body.current,
     estimateSize: () => 84,
     getItemKey: (index) => rows[index].id,
-    overscan: 6,
+    overscan: 8,
   })
   useEffect(() => {
     if (body.current) body.current.scrollTop = 0
