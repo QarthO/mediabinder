@@ -1,3 +1,4 @@
+import { ChipOverflow } from "./chip-overflow"
 import { useRef, useState } from "react"
 import { Popover } from "radix-ui"
 import { Plus, X } from "lucide-react"
@@ -7,7 +8,15 @@ import { action } from "@/lib/api"
 import type { Media, MediaSet } from "@/lib/types"
 import { Command, CommandInput, CommandItem, CommandList } from "./ui/command"
 
-export function MediaSets({ media, sets }: { media: Media; sets: MediaSet[] }) {
+export function MediaSets({
+  media,
+  sets,
+  compact = false,
+}: {
+  media: Media
+  sets: MediaSet[]
+  compact?: boolean
+}) {
   const [search, setSearch] = useState("")
   const input = useRef<HTMLInputElement>(null)
   const busy = useRef(false)
@@ -46,6 +55,21 @@ export function MediaSets({ media, sets }: { media: Media; sets: MediaSet[] }) {
   const create =
     term &&
     !sets.some((s) => s.display_name.toLowerCase() === term.toLowerCase())
+  const chips = sets
+    .filter((s) => media.set_ids.includes(s.id))
+    .map((set) => (
+      <span className="tag" key={set.id}>
+        <span title={set.display_name}>{set.display_name}</span>
+        <button
+          type="button"
+          aria-label={`Remove ${media.display_name} from ${set.display_name}`}
+          disabled={update.isPending}
+          onClick={() => mutate({ setId: set.id, remove: true })}
+        >
+          <X size={12} />
+        </button>
+      </span>
+    ))
   return (
     <div className="table-tags">
       <Popover.Root
@@ -115,21 +139,11 @@ export function MediaSets({ media, sets }: { media: Media; sets: MediaSet[] }) {
       </Popover.Root>
       <div className="tag-chips">
         {media.set_ids.length ? (
-          sets
-            .filter((s) => media.set_ids.includes(s.id))
-            .map((set) => (
-              <span className="tag" key={set.id}>
-                <span title={set.display_name}>{set.display_name}</span>
-                <button
-                  type="button"
-                  aria-label={`Remove ${media.display_name} from ${set.display_name}`}
-                  disabled={update.isPending}
-                  onClick={() => mutate({ setId: set.id, remove: true })}
-                >
-                  <X size={12} />
-                </button>
-              </span>
-            ))
+          compact ? (
+            <ChipOverflow label="sets">{chips}</ChipOverflow>
+          ) : (
+            chips
+          )
         ) : (
           <span className="no-tags">None</span>
         )}

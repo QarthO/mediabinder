@@ -1,3 +1,4 @@
+import { ChipOverflow } from "./chip-overflow"
 import { MediaSets } from "./media-sets"
 import { tagStyle } from "@/lib/tag-colors"
 import {
@@ -114,6 +115,7 @@ export function useMediaTable(
             media={row.original}
             allTags={(table.options.meta as MediaTableMeta).allTags}
             colors={(table.options.meta as MediaTableMeta).tagColors}
+            compact
           />
         ),
       },
@@ -126,6 +128,7 @@ export function useMediaTable(
           <MediaSets
             media={row.original}
             sets={(table.options.meta as MediaTableMeta).sets}
+            compact
           />
         ),
       },
@@ -193,7 +196,11 @@ export function DataTable({
   const virtual = useVirtualizer({
     count: rows.length,
     getScrollElement: () => body.current,
-    estimateSize: () => 84,
+    estimateSize: () =>
+      typeof window !== "undefined" &&
+      window.matchMedia("(max-width: 600px)").matches
+        ? 240
+        : 96,
     getItemKey: (index) => rows[index].id,
     overscan: 8,
   })
@@ -373,10 +380,12 @@ export function MediaTags({
   media,
   allTags,
   colors,
+  compact = false,
 }: {
   media: Media
   allTags: string[]
   colors: Record<string, string>
+  compact?: boolean
 }) {
   const client = useQueryClient()
   const remove = useMutation({
@@ -384,6 +393,19 @@ export function MediaTags({
     onSuccess: () => client.invalidateQueries({ queryKey: ["library"] }),
     onError: (error) => toast.error(error.message),
   })
+  const chips = media.tags.map((tag) => (
+    <span className="tag" style={tagStyle(colors[tag])} key={tag}>
+      <span title={tag}>{tag}</span>
+      <button
+        type="button"
+        aria-label={`Remove ${tag} tag from ${media.display_name}`}
+        disabled={remove.isPending}
+        onClick={() => remove.mutate(tag)}
+      >
+        <X size={12} />
+      </button>
+    </span>
+  ))
   return (
     <div className="table-tags">
       <TagPopover
@@ -394,19 +416,11 @@ export function MediaTags({
       />
       <div className="tag-chips">
         {media.tags.length ? (
-          media.tags.map((tag) => (
-            <span className="tag" style={tagStyle(colors[tag])} key={tag}>
-              <span title={tag}>{tag}</span>
-              <button
-                type="button"
-                aria-label={`Remove ${tag} tag from ${media.display_name}`}
-                disabled={remove.isPending}
-                onClick={() => remove.mutate(tag)}
-              >
-                <X size={12} />
-              </button>
-            </span>
-          ))
+          compact ? (
+            <ChipOverflow label="tags">{chips}</ChipOverflow>
+          ) : (
+            chips
+          )
         ) : (
           <span className="no-tags">None</span>
         )}

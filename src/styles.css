@@ -3049,3 +3049,112 @@ html {
     animation: none;
   }
 }
+
+/* Two chip lines are reserved even when a row has no tags or sets. */
+.data-table tr {
+  grid-template-columns:
+    36px minmax(0, 1.15fr) minmax(0, 1.5fr) minmax(0, 0.7fr)
+    112px 70px 68px;
+}
+.data-table tbody tr[data-index] {
+  height: 96px;
+  min-height: 96px;
+  max-height: 96px;
+}
+.data-table .table-thumbnail {
+  width: 72px;
+  height: 72px;
+  border: 1px solid var(--border);
+  flex-shrink: 0;
+  box-sizing: border-box;
+}
+.table-tags .tag,
+.table-tags .tag-add {
+  height: 28px;
+  min-height: 28px;
+  box-sizing: border-box;
+}
+.table-tags .tag-add {
+  width: 28px;
+}
+.table-tags .no-tags {
+  line-height: 28px;
+}
+.data-table .table-tags {
+  width: 100%;
+  min-width: 0;
+  height: 62px;
+}
+.data-table .table-tags > .tag-chips {
+  flex: 1;
+  align-items: flex-start;
+}
+.chip-overflow {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+  height: 62px;
+}
+.chip-visible {
+  height: 62px;
+  overflow: hidden;
+  align-content: flex-start;
+}
+.chip-measure {
+  position: absolute;
+  inset: 0 0 auto;
+  visibility: hidden;
+  pointer-events: none;
+  height: 62px;
+  overflow: hidden;
+}
+.table-tags .chip-more {
+  justify-content: center;
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  padding: 3px 2px;
+  border: 0;
+  background: transparent;
+  color: var(--muted-foreground);
+  font: inherit;
+  font-size: 0.8125rem;
+  line-height: 20px;
+  box-sizing: border-box;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+.chip-more:hover {
+  color: var(--primary);
+  text-decoration: underline;
+}
+.chip-overflow-popover {
+  max-height: 300px;
+  overflow: auto;
+}
+@media (min-width: 601px) and (max-width: 1000px) {
+  .data-table tr {
+    grid-template-columns:
+      28px minmax(0, 1fr) minmax(0, 1.4fr) minmax(0, 0.7fr)
+      82px 55px 54px;
+  }
+}
+@media (max-width: 600px) {
+  .data-table tr {
+    grid-template-columns: 26px minmax(0, 1fr) 78px 32px;
+  }
+  .data-table tbody tr[data-index] {
+    height: 240px;
+    min-height: 240px;
+    max-height: 240px;
+    grid-template-rows: 80px 68px 68px;
+  }
+  .data-table .table-thumbnail {
+    display: block;
+    width: 64px;
+    height: 64px;
+  }
+  .data-table .table-name {
+    gap: 6px;
+  }
+}
