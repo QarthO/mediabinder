@@ -1,5 +1,4 @@
 import { useMobile } from "@/hooks/use-mobile"
-import { Popover } from "radix-ui"
 import { ChipOverflow } from "./chip-overflow"
 import { MediaSets } from "./media-sets"
 import { tagStyle } from "@/lib/tag-colors"
@@ -24,8 +23,6 @@ import {
 } from "@tanstack/react-table"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import {
-  Tags,
-  FolderOpen,
   ArrowDown,
   ArrowUp,
   ArrowUpDown,
@@ -573,39 +570,17 @@ function MobileMetadata({
   meta: MediaTableMeta
   kind: "tags" | "sets"
 }) {
-  const Icon = kind === "tags" ? Tags : FolderOpen
-  const count = kind === "tags" ? media.tags.length : media.set_ids.length
-  return (
-    <Popover.Root>
-      <Popover.Trigger asChild>
-        <button
-          className="icon-button"
-          data-populated={count > 0 || undefined}
-          aria-label={`Manage ${kind} for ${media.display_name}`}
-        >
-          <Icon size={18} />
-        </button>
-      </Popover.Trigger>
-      <Popover.Portal>
-        <Popover.Content
-          className="tag-popover mobile-metadata-popover"
-          sideOffset={8}
-          align="end"
-          collisionPadding={12}
-        >
-          <h3>{kind === "tags" ? "Tags" : "Sets"}</h3>
-          {kind === "tags" ? (
-            <MediaTags
-              media={media}
-              allTags={meta.allTags}
-              colors={meta.tagColors}
-            />
-          ) : (
-            <MediaSets media={media} sets={meta.sets} />
-          )}
-        </Popover.Content>
-      </Popover.Portal>
-    </Popover.Root>
+  return kind === "tags" ? (
+    <TagPopover
+      media={media}
+      ids={[media.id]}
+      existing={media.tags}
+      allTags={meta.allTags}
+      label={`Manage tags for ${media.display_name}`}
+      iconOnly
+    />
+  ) : (
+    <MediaSets media={media} sets={meta.sets} iconOnly />
   )
 }
 
@@ -629,6 +604,9 @@ export function MediaSelectionActions({
       <span aria-live="polite">{selected.length} selected</span>
       <TagPopover
         ids={selected}
+        mediaItems={table
+          .getFilteredSelectedRowModel()
+          .rows.map((row) => row.original)}
         allTags={allTags}
         label="Add tags to selected media"
         bulk

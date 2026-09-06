@@ -272,19 +272,22 @@ export async function mutate(
       await markCataloged(connection, value.id)
       return { id: setId }
     }
-    if (action === "add-tags") {
+    if (action === "add-tags" || action === "remove-tags") {
       const value = addMediaTags.parse(input)
       for (const target of value.ids)
         await accessible(connection, userId, "media", target)
-      await ensureTags(userId, value.tags, connection)
+      if (action === "add-tags")
+        await ensureTags(userId, value.tags, connection)
       for (const target of value.ids) {
         const [items] = await connection.query<RowDataPacket[]>(
           "SELECT tags FROM catalog WHERE id=?",
           [target]
         )
-        const merged = tags.parse([
-          ...new Set([...items[0].tags, ...value.tags]),
-        ])
+        const merged = tags.parse(
+          action === "remove-tags"
+            ? items[0].tags.filter((tag: string) => !value.tags.includes(tag))
+            : [...new Set([...items[0].tags, ...value.tags])]
+        )
         await connection.execute("UPDATE catalog SET tags=? WHERE id=?", [
           JSON.stringify(merged),
           target,

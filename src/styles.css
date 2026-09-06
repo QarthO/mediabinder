@@ -3741,3 +3741,71 @@ html {
     animation: none;
   }
 }
+
+/* Shared tag/set drawers have distinct summary, choices, and search sections. */
+.mobile-tag-drawer {
+  padding: 0;
+}
+.mobile-tag-drawer .mobile-tag-heading {
+  padding: 10px 40px 18px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--background) 30%, transparent);
+}
+.mobile-tag-drawer .tag-options {
+  padding: 12px;
+}
+.mobile-tag-drawer .picker-search {
+  order: 2;
+  flex-shrink: 0;
+  padding: 14px 12px max(14px, env(safe-area-inset-bottom));
+  border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--background) 30%, transparent);
+}
+.mobile-tag-drawer .picker-search input {
+  max-width: none;
+}
+.drawer-album {
+  position: relative;
+  height: 86px;
+  margin: 4px auto 12px;
+}
+.drawer-album .drawer-media-thumbnail {
+  position: absolute;
+  left: calc(50% - 27px);
+  top: 8px;
+  width: 54px;
+  height: 68px;
+  transform: translateX(var(--fan-offset)) rotate(var(--fan-angle));
+  background: var(--surface);
+  border: 2px solid var(--surface);
+  box-shadow: 0 3px 10px #0006;
+}
+.membership-checkbox {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  accent-color: var(--primary);
+  pointer-events: none;
+}
+.tag-options [cmdk-item] > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+@media (max-height: 550px) {
+  .mobile-tag-drawer .mobile-tag-heading {
+    padding-bottom: 10px;
+  }
+  .mobile-tag-drawer .drawer-album {
+    height: 54px;
+    margin-bottom: 8px;
+  }
+  .mobile-tag-drawer .drawer-album .drawer-media-thumbnail {
+    width: 36px;
+    height: 46px;
+    left: calc(50% - 18px);
+    top: 0;
+  }
+  .mobile-tag-drawer .drawer-handle {
+    margin-bottom: 8px;
+  }
+}

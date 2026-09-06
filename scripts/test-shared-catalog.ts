@@ -164,6 +164,37 @@ test("shared catalog deduplicates bytes, shares curation, isolates access and pr
       new Headers()
     )
   )
+  await mutate(
+    "add-tags",
+    { ids: [target, privateId], tags: ["bulk-toggle"] },
+    a,
+    new Headers()
+  )
+  await assert.rejects(() =>
+    mutate(
+      "remove-tags",
+      { ids: [target, privateId], tags: ["bulk-toggle"] },
+      b,
+      new Headers()
+    )
+  )
+  assert.ok(
+    (await library(user(a))).media.every((m) => m.tags.includes("bulk-toggle"))
+  )
+  await mutate(
+    "remove-tags",
+    { ids: [target, privateId], tags: ["bulk-toggle"] },
+    a,
+    new Headers()
+  )
+  assert.ok(
+    (await library(user(a))).media.every((m) => !m.tags.includes("bulk-toggle"))
+  )
+  assert.ok(
+    (await library(user(a))).media
+      .find((m) => m.id === target)!
+      .tags.includes("a")
+  )
   // Replacing bytes under an existing Drive ID must return to the inbox.
   bFiles = [file(third, "new-content.jpg", hashB)]
   await syncDrive(b)
