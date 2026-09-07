@@ -2,6 +2,7 @@ import { MediaTags } from "./data-table"
 import { MediaSets } from "./media-sets"
 import { useContext, useRef, useState } from "react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { useRouter } from "@tanstack/react-router"
 import {
   ArrowUpRight,
   EyeOff,
@@ -28,7 +29,55 @@ import { Input } from "./ui/input"
 import { Thumbnail, MediaCensorContext } from "./thumbnail"
 import { action } from "@/lib/api"
 import { bytes, dateValue, isoDate } from "@/lib/utils"
-import type { Library } from "@/lib/types"
+import type { Library, Media } from "@/lib/types"
+import { canPreview, useMediaPreview } from "@/lib/media-preview"
+
+function PreviewImage({
+  media,
+  censored,
+  onError,
+  src,
+}: {
+  media: Media
+  censored: boolean
+  onError: () => void
+  src?: string
+}) {
+  const [loaded, setLoaded] = useState(false)
+  return (
+    <>
+      {!loaded && (
+        <img
+          data-blurred={censored || undefined}
+          src={`/api/media/${encodeURIComponent(media.id)}?thumbnail`}
+          alt={media.display_name}
+          decoding="async"
+        />
+      )}
+      {src && (
+        <img
+          data-blurred={censored || undefined}
+          src={src}
+          alt={loaded ? media.display_name : ""}
+          decoding="async"
+          style={loaded ? undefined : { position: "absolute", opacity: 0 }}
+          onLoad={() => setLoaded(true)}
+          onError={onError}
+        />
+      )}
+    </>
+  )
+}
+
+function CachedPreviewImage(props: {
+  media: Media
+  censored: boolean
+  onError: () => void
+}) {
+  const src = useMediaPreview(props.media)
+  return <PreviewImage {...props} src={src} />
+}
+
 export function Detail({
   selected,
   data,
@@ -68,6 +117,7 @@ export function Detail({
     [confirmDelete, setConfirmDelete] = useState(false)
   const dialogRef = useRef<HTMLDivElement>(null)
   const client = useQueryClient()
+  const router = useRouter()
   const save = useMutation({
     mutationFn: () =>
       action("metadata", {
@@ -123,6 +173,7 @@ export function Detail({
     onSuccess: async () => {
       await client.invalidateQueries({ queryKey: ["library"] })
       onClose()
+      await router.invalidate()
       toast.success("Set deleted")
     },
     onError: (e) => toast.error(e.message),
@@ -287,14 +338,21 @@ export function Detail({
                   autoPlay={false}
                   playsInline
                   preload="metadata"
+                  poster={`/api/media/${encodeURIComponent(media.id)}?thumbnail`}
                   src={`/api/media/${media.id}`}
                   onError={() => setFailed(true)}
                 />
+              ) : canPreview(media) ? (
+                <CachedPreviewImage
+                  media={media}
+                  censored={censored}
+                  onError={() => setFailed(true)}
+                />
               ) : (
-                <img
-                  data-blurred={censored || undefined}
-                  src={`/api/media/${media.id}`}
-                  alt={media.display_name}
+                <PreviewImage
+                  media={media}
+                  censored={censored}
+                  src={`/api/media/${encodeURIComponent(media.id)}`}
                   onError={() => setFailed(true)}
                 />
               )

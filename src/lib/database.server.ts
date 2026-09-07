@@ -6,6 +6,8 @@ export const pool = mysql.createPool({
   timezone: "Z",
   dateStrings: true,
 })
+if (import.meta.hot) import.meta.hot.dispose(() => pool.end())
+
 export async function rows<T>(
   sql: string,
   values: (string | number | boolean | Date | null)[] = []

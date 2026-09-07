@@ -1,18 +1,22 @@
-// MySQL date strings are UTC; presentation uses the browser's locale and timezone.
-export function mediaDate(value: string, now = Date.now()) {
+// A null clock renders a deterministic UTC date until the browser hydrates.
+// Afterwards, presentation uses the browser's locale and timezone.
+export function mediaDate(value: string, now: number | null = Date.now()) {
   const date = new Date(
     value.includes("T") ? value : value.replace(" ", "T") + "Z"
   )
   if (Number.isNaN(date.getTime()))
     return { label: "—", timestamp: "Unknown date", iso: undefined }
-  const seconds = Math.floor((now - date.getTime()) / 1000)
+  const locale = now === null ? "en-US" : undefined
+  const timeZone = now === null ? "UTC" : undefined
+  const seconds = Math.floor(((now ?? 0) - date.getTime()) / 1000)
   const days = Math.floor(seconds / 86400)
   const label =
-    seconds < 0 || days > 30
-      ? date.toLocaleDateString(undefined, {
+    now === null || seconds < 0 || days > 30
+      ? date.toLocaleDateString(locale, {
           month: "short",
           day: "numeric",
           year: "numeric",
+          timeZone,
         })
       : seconds < 60
         ? "Just now"
@@ -28,7 +32,7 @@ export function mediaDate(value: string, now = Date.now()) {
   return {
     label,
     iso: date.toISOString(),
-    timestamp: date.toLocaleString(undefined, {
+    timestamp: date.toLocaleString(locale, {
       year: "numeric",
       month: "long",
       day: "numeric",
@@ -36,6 +40,7 @@ export function mediaDate(value: string, now = Date.now()) {
       minute: "2-digit",
       second: "2-digit",
       timeZoneName: "short",
+      timeZone,
     }),
   }
 }

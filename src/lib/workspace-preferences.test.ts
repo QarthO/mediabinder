@@ -1,8 +1,8 @@
+import { readWorkspacePreferences } from "./workspace-preferences.server"
 import { test } from "node:test"
 import assert from "node:assert/strict"
 import {
   preferencesCookieName,
-  readWorkspacePreferences,
   workspacePreferencesCookie,
 } from "./workspace-preferences"
 

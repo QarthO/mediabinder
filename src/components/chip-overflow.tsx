@@ -1,7 +1,7 @@
-import { useLayoutEffect, useRef, useState, type ReactNode } from "react"
+import { type ReactNode } from "react"
 import { Popover } from "radix-ui"
 
-// Measure against the actual column width, reserving room for the overflow count.
+// A fixed two-row summary needs no layout reads or hidden duplicate controls.
 export function ChipOverflow({
   children,
   label,
@@ -9,61 +9,25 @@ export function ChipOverflow({
   children: ReactNode[]
   label: string
 }) {
-  const measure = useRef<HTMLDivElement>(null)
-  const [visible, setVisible] = useState(children.length)
-  useLayoutEffect(() => {
-    const element = measure.current
-    if (!element) return
-    const update = () => {
-      const width = element.clientWidth
-      if (!width) return
-      const chips = Array.from(element.children) as HTMLElement[]
-      const counter = chips.pop()!
-      const widths = chips.map((chip) => chip.getBoundingClientRect().width)
-      const fits = (values: number[]) => {
-        let row = 1,
-          used = 0
-        for (const value of values) {
-          if (used && used + 6 + value > width + 0.5) {
-            row++
-            used = 0
-          }
-          used += (used ? 6 : 0) + value
-        }
-        return row <= 2
-      }
-      let count = children.length
-      while (count > 0) {
-        counter.textContent = `+${children.length - count}`
-        if (
-          fits(
-            count === children.length
-              ? widths
-              : [
-                  ...widths.slice(0, count),
-                  counter.getBoundingClientRect().width,
-                ]
-          )
-        )
-          break
-        count--
-      }
-      setVisible(count)
-    }
-    update()
-    const observer = new ResizeObserver(update)
-    observer.observe(element)
-    document.fonts.addEventListener("loadingdone", update)
-    return () => {
-      observer.disconnect()
-      document.fonts.removeEventListener("loadingdone", update)
-    }
-  }, [children])
+  const visible = Math.min(2, children.length)
   const hidden = children.length - visible
   return (
     <div className="chip-overflow">
-      <div className="tag-chips chip-visible">
-        {children.slice(0, visible)}
+      <div
+        className="tag-chips chip-visible"
+        style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto" }}
+      >
+        {children.slice(0, visible).map((child, index) => (
+          <div
+            key={index}
+            style={{
+              minWidth: 0,
+              gridColumn: index === 0 || !hidden ? "1 / -1" : "1",
+            }}
+          >
+            {child}
+          </div>
+        ))}
         {hidden > 0 && (
           <Popover.Root>
             <Popover.Trigger asChild>
@@ -90,15 +54,6 @@ export function ChipOverflow({
             </Popover.Portal>
           </Popover.Root>
         )}
-      </div>
-      <div
-        className="tag-chips chip-measure"
-        ref={measure}
-        aria-hidden="true"
-        inert
-      >
-        {children}
-        <span className="chip-more">+{children.length}</span>
       </div>
     </div>
   )

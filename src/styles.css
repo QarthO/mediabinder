@@ -3974,3 +3974,30 @@ html {
   outline: 2px solid var(--primary);
   outline-offset: -4px;
 }
+
+.bounded-media-grid {
+  position: relative;
+  overflow-x: hidden;
+  overflow-anchor: none;
+  scrollbar-gutter: stable;
+}
+.media-grid.virtual-media-grid {
+  display: block;
+}
+.virtual-media-grid-space {
+  width: 100%;
+  pointer-events: none;
+}
+.bounded-media-grid .media-info {
+  height: 64px;
+}
+.bounded-media-grid .media-card-tags {
+  height: 74px;
+}
+
+@media (max-width: 760px) {
+  .media-card-checkbox { display: none; }
+}
+@media (min-width: 761px) {
+  .header-select.mobile-only-selection { display: none; }
+}

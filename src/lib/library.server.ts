@@ -37,6 +37,7 @@ export async function library(
     definitions,
     watches,
     syncStatus,
+    sourceMembership,
   ] = await Promise.all([
     rows<Media & { physical_id: string }>(
       `SELECT m.*,m.id AS physical_id,c.id,c.display_name,c.tags,c.created_at,c.cataloged_at,c.sha256,
@@ -77,11 +78,11 @@ export async function library(
       "SELECT watch_error,last_error FROM drive_sync_state WHERE user_id=?",
       [user.id]
     ),
+    rows<{ media_id: string; folder_id: string }>(
+      "SELECT media_id,folder_id FROM media_source WHERE user_id=?",
+      [user.id]
+    ),
   ])
-  const sourceMembership = await rows<{ media_id: string; folder_id: string }>(
-    "SELECT media_id,folder_id FROM media_source WHERE user_id=?",
-    [user.id]
-  )
   const foldersByCopy = new Map<string, string[]>()
   for (const source of sourceMembership)
     foldersByCopy.set(source.media_id, [
@@ -119,27 +120,35 @@ export async function library(
     (a, b) =>
       b.uploaded_at.localeCompare(a.uploaded_at) || a.id.localeCompare(b.id)
   )
+  const visibleTags = new Set([...media, ...sets].flatMap((item) => item.tags))
+  const setSummaries = new Map<
+    string,
+    { media_count: number; cover_id: string }
+  >()
+  for (const item of media)
+    for (const setId of item.set_ids) {
+      const summary = setSummaries.get(setId)
+      if (summary) summary.media_count++
+      else setSummaries.set(setId, { media_count: 1, cover_id: item.id })
+    }
+  const postCounts = new Map<string, number>()
+  for (const post of posts)
+    if (post.set_id)
+      postCounts.set(post.set_id, (postCounts.get(post.set_id) ?? 0) + 1)
   return {
     user: { name: user.name, email: user.email, role: user.role },
     media,
     tag_colors: Object.fromEntries(
       definitions
-        .filter(
-          (t) =>
-            media.some((m) => m.tags.includes(t.name)) ||
-            sets.some((s) => s.tags.includes(t.name))
-        )
+        .filter((t) => visibleTags.has(t.name))
         .map((t) => [t.name, t.color])
     ),
-    sets: sets.map((s) => {
-      const members = media.filter((m) => m.set_ids.includes(s.id))
-      return {
-        ...s,
-        media_count: members.length,
-        cover_id: members[0]?.id ?? null,
-        post_count: posts.filter((p) => p.set_id === s.id).length,
-      }
-    }),
+    sets: sets.map((s) => ({
+      ...s,
+      media_count: setSummaries.get(s.id)?.media_count ?? 0,
+      cover_id: setSummaries.get(s.id)?.cover_id ?? null,
+      post_count: postCounts.get(s.id) ?? 0,
+    })),
     posts,
     workspace: {
       sources,
