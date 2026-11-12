@@ -108,7 +108,7 @@ Setup, in the same Google Cloud project:
 2. Set `GOOGLE_SERVICE_ACCOUNT_KEY_FILE` to that file (mounted read-only into the containers), or `GOOGLE_SERVICE_ACCOUNT_KEY` to its JSON, raw or base64.
 3. Enable the **Google Picker API**. Create a browser API key restricted to that API and to your app's origins, and set it as `GOOGLE_PICKER_API_KEY`. Set `GOOGLE_CLOUD_PROJECT_NUMBER` to the project number.
 
-4. Optional: give users a friendlier address. Create a Google Group (for example `sync@rien.cloud`, with Cloud Identity Free on your domain), allow members outside the organization, add the service account as its only member, and set `GOOGLE_DRIVE_SHARE_GROUP` to the group's address. MediaBinder then shows and shares with the group; the service account reads through its membership.
+4. Recommended: give users a friendly address instead of the service account's `…iam.gserviceaccount.com` email. Create a Google Group on your domain (Cloud Identity Free is enough), allow members outside the organization, add the service account as its **only** member, and set `GOOGLE_DRIVE_SHARE_GROUP` to the group's address. MediaBinder then shows, copies and shares with the group, and the service account reads through its membership. rien.cloud uses `sync@rien.cloud`. Anyone added to the group could read every shared folder, so keep the service account its only member.
 
 Linking works three ways in **Settings → Link folder**:
 
@@ -116,7 +116,9 @@ Linking works three ways in **Settings → Link folder**:
 - **Create a new MediaBinder folder** creates an empty folder and shares it with the service account in one step; anything added to it later syncs.
 - A pasted link works for folders already shared with the service account and owned by the signed-in user.
 
-Because the service account can read every folder anyone shares with it, a user may only link a folder they chose in the picker (their `drive.file` token can see it) or own. Unlinking removes MediaBinder's share when Google allows it; otherwise the user is told to remove the service account from the folder's sharing in Drive. Right after a share, Google can take a moment to extend it to files in subfolders; the next sync picks them up.
+Because the service account can read every folder anyone shares with it, a user may only link a folder they chose in the picker (their `drive.file` token can see it) or own. Unlinking removes MediaBinder's share when Google allows it; otherwise the user is told to remove MediaBinder's address from the folder's sharing in Drive. Right after a share, Google can take a moment to extend it to files in subfolders; the next sync picks them up.
+
+Each MediaBinder account still sees only the folders it linked. The service account does the reading for everyone, so access is checked when a folder is linked: the user must choose it in the picker or own it. After that, MediaBinder keeps syncing it while the folder stays shared with MediaBinder's address, even if the folder's owner later removes that user's own access in Drive. Tags, names, sets and posts on identical media are shared across accounts as described under **Shared catalog and inbox**.
 
 `scripts/test-shared-folders.ts` checks these linking rules against a disposable database with mocked Google responses. `scripts/try-shared-folder-link.ts` exercises the share, link, sync and unlink path against real Google APIs for the first signed-in user; it creates and deletes a temporary folder in that user's Drive.
 
