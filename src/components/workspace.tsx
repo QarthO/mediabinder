@@ -22,8 +22,17 @@ import {
   useQueryClient,
   useMutation,
 } from "@tanstack/react-query"
-import { type SortingState, type OnChangeFn } from "@tanstack/react-table"
-import { DataTable, MediaSelectionActions, useMediaTable } from "./data-table"
+import {
+  Subscribe,
+  type SortingState,
+  type OnChangeFn,
+} from "@tanstack/react-table"
+import {
+  DataTable,
+  MediaSelectionActions,
+  MediaStage,
+  useMediaTable,
+} from "./data-table"
 import {
   Images,
   ImageIcon,
@@ -657,14 +666,7 @@ function WorkspaceContent({
                   ))}
                 </div>
               )}
-              <div
-                className="media-stage"
-                data-selecting={selectionMode || undefined}
-                data-has-selection={
-                  table.getFilteredSelectedRowModel().rows.length > 0 ||
-                  undefined
-                }
-              >
+              <MediaStage table={table} selectionMode={selectionMode}>
                 {!items.length ? (
                   <Empty
                     icon={setId ? FolderOpen : Images}
@@ -713,18 +715,22 @@ function WorkspaceContent({
                     }
                   />
                 ) : view === "grid" ? (
-                  <MediaGrid
-                    key={`${page}:${setId}:${selectedTags.join(",")}:${setFilter}:${mediaType}:${catalogStatus}:${search}`}
-                    items={items}
-                    selection={table.getState().rowSelection}
-                    previewIntent={previewIntent}
-                    mobile={mobile}
-                    selectionMode={selectionMode}
-                    onOpen={openMedia}
-                    onToggleSelection={toggleSelection}
-                    allTags={allTags}
-                    colors={data.tag_colors}
-                  />
+                  <Subscribe source={table.atoms.rowSelection}>
+                    {(selection) => (
+                      <MediaGrid
+                        key={`${page}:${setId}:${selectedTags.join(",")}:${setFilter}:${mediaType}:${catalogStatus}:${search}`}
+                        items={items}
+                        selection={selection}
+                        previewIntent={previewIntent}
+                        mobile={mobile}
+                        selectionMode={selectionMode}
+                        onOpen={openMedia}
+                        onToggleSelection={toggleSelection}
+                        allTags={allTags}
+                        colors={data.tag_colors}
+                      />
+                    )}
+                  </Subscribe>
                 ) : (
                   <DataTable
                     table={table}
@@ -732,7 +738,7 @@ function WorkspaceContent({
                   />
                 )}
                 <MediaSelectionActions table={table} allTags={allTags} />
-              </div>
+              </MediaStage>
             </>
           )}
         </div>
