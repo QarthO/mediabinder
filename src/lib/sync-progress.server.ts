@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto"
-import type { PoolConnection, RowDataPacket } from "mysql2/promise"
+import type { RowDataPacket } from "mysql2/promise"
 import { Effect, Fiber, Semaphore } from "effect"
 import { Database } from "@/effect/database"
 import type { DatabaseSession } from "@/effect/database"
@@ -9,6 +9,7 @@ import {
   runAppEffectUntraced,
 } from "@/effect/runtime.server"
 import { legacySession } from "./database.server"
+import type { LegacyConnection } from "./database.server"
 import { publicErrorMessage } from "./http-errors"
 import type { SyncRun } from "./types"
 
@@ -185,7 +186,7 @@ export const claimSyncRun = (userId: string) =>
   runTracedAppEffect(claim(userId))
 
 export async function startSyncRun(
-  connection: PoolConnection,
+  connection: LegacyConnection,
   userId: string,
   origin: SyncRun["origin"]
 ) {

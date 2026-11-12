@@ -4,6 +4,7 @@ import {
   AuthenticationError,
   DatabaseError,
   DriveApiError,
+  LockBusyError,
   NotFoundError,
   ValidationError,
 } from "@/effect/errors"
@@ -69,6 +70,26 @@ describe("error responses", () => {
       new ValidationError({ message: "x" }),
     ])
       expect(isHandledError(error)).toBe(true)
+  })
+
+  test("a busy sync lock keeps its message and a busy catalog lock gets the fallback", async () => {
+    const sync = new LockBusyError({
+      operation: "drive.withUserLock",
+      lock: "drive:user-1",
+    })
+    const busySync = errorResponse(sync, fallback)
+    expect(busySync.status).toBe(400)
+    expect(await busySync.json()).toEqual({
+      error: "A sync is already running. Try again shortly.",
+    })
+    const catalog = new LockBusyError({
+      operation: "catalog.transaction",
+      lock: "mediabinder-catalog",
+    })
+    const busyCatalog = errorResponse(catalog, fallback)
+    expect(busyCatalog.status).toBe(400)
+    expect(await busyCatalog.json()).toEqual({ error: fallback })
+    expect(isHandledError(sync) && isHandledError(catalog)).toBe(true)
   })
 
   test("a thrown Response from an unconverted module is passed through", () => {

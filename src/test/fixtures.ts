@@ -2,7 +2,9 @@ import { randomUUID } from "node:crypto"
 import { afterAll, afterEach, beforeAll, beforeEach, vi } from "vite-plus/test"
 
 import { auth } from "@/lib/auth.server"
+import { NotFoundError } from "@/effect/errors"
 import { pool, rows } from "@/lib/database.server"
+import { errorResponse } from "@/lib/http-errors"
 import { library, mutate } from "@/lib/library.server"
 
 export type TestUser = Parameters<typeof library>[0]
@@ -176,6 +178,8 @@ export async function rejectedStatus(promise: Promise<unknown>) {
     () => "resolved" as const,
     (error: unknown) => error
   )
+  // Converted modules fail with a NotFoundError, answered as a 404.
+  if (outcome instanceof NotFoundError) return errorResponse(outcome).status
   if (!(outcome instanceof Response))
     throw new Error(`Expected a rejected Response, got ${String(outcome)}`)
   return outcome.status

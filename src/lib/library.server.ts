@@ -3,6 +3,7 @@ import { z } from "zod"
 import { ensureTags } from "./tags.server"
 import { randomUUID } from "node:crypto"
 import { rows } from "./database.server"
+import type { LegacyConnection } from "./database.server"
 import {
   catalogTransaction,
   accessible,
@@ -647,7 +648,7 @@ async function removeShareIfUnused(
 
 async function editSources(
   userId: string,
-  edit: (connection: import("mysql2/promise").PoolConnection) => Promise<void>
+  edit: (connection: LegacyConnection) => Promise<void>
 ) {
   return withDriveLock(userId, (connection) =>
     catalogTransaction(async (connection) => {
