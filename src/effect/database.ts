@@ -158,7 +158,7 @@ export function databaseClientConfig(
  * connections only on demand, so the ceiling for a web process is 20 of
  * MySQL's default 151, and the Drive worker process adds the same again.
  */
-const QUERY_POOL_SIZE = 4
+export const QUERY_POOL_SIZE = 4
 const LOCK_POOL_SIZE = 8
 
 const globalDatabase = globalThis as typeof globalThis & {

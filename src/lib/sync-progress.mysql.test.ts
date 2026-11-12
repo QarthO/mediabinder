@@ -11,8 +11,12 @@ import {
 } from "@/test/fixtures"
 import { pool } from "./database.server"
 import { runTracedAppEffect } from "@/effect/runtime.server"
-import { startDriveSync, sync, syncDrive } from "./drive.server"
-import { syncStatus } from "./sync-progress.server"
+import { startSync, sync, syncDrive } from "./drive.server"
+import { status } from "./sync-progress.server"
+
+const startDriveSync = (userId: string, headers: Headers) =>
+  runTracedAppEffect(startSync(userId, headers))
+const syncStatus = (userId: string) => runTracedAppEffect(status(userId))
 
 const FOLDER = "application/vnd.google-apps.folder"
 const files = (parent: string, count: number) =>

@@ -44,21 +44,6 @@ export interface DriveFile {
   // Limited-access folder: it doesn't inherit its parent's sharing.
   inheritedPermissionsDisabled?: boolean
 }
-// Promise facades over the Drive Effects (effect/drive-api.server.ts) for the
-// webhook worker, library.server.ts and scripts, which aren't converted yet.
-// They go with their last caller.
-export const driveToken = (headers?: Headers, userId?: string) =>
-  runTracedAppEffect(Drive.token(headers, userId))
-export const driveReadToken = (userId?: string, headers?: Headers) =>
-  runTracedAppEffect(Drive.readToken(userId, headers))
-export const driveJson = <T>(
-  token: string,
-  path: string,
-  params: Record<string, string> = {}
-) => runTracedAppEffect(Drive.json<T>(token, path, params))
-export const listFolders = (headers: Headers) =>
-  runTracedAppEffect(Drive.listFolders(headers))
-
 // The sync is one unit of work, so it has a span; pages and files are
 // numerous, so they are counted instead. Attributes never carry folder or
 // file names.
@@ -271,10 +256,6 @@ export const syncDrive = (
       )
     )
   )
-
-// Facade for library.server.ts.
-export const startDriveSync = (userId: string, headers: Headers) =>
-  runTracedAppEffect(startSync(userId, headers))
 
 const unopenable = () =>
   new DriveAccessError({

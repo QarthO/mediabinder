@@ -4,7 +4,6 @@ import { Effect, Fiber, Semaphore } from "effect"
 import { Database } from "@/effect/database"
 import type { DatabaseSession } from "@/effect/database"
 import type { DatabaseError } from "@/effect/errors"
-import { runTracedAppEffect } from "@/effect/runtime.server"
 import { publicErrorMessage } from "./http-errors"
 import type { SyncRun } from "./types"
 
@@ -172,6 +171,3 @@ export const start = Effect.fn("SyncProgress.start")(function* (
     fail: (error) => finish("failed", { error }),
   }
 })
-
-// For library.server.ts, which isn't converted yet.
-export const syncStatus = (userId: string) => runTracedAppEffect(status(userId))

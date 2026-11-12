@@ -1,15 +1,30 @@
-import { driveWebhookUrl } from "./config"
-import { z } from "zod"
-import { ensureTags } from "./tags.server"
+import { Effect } from "effect"
 import { randomUUID } from "node:crypto"
-import { rows } from "./database.server"
-import type { LegacyConnection } from "./database.server"
+import type { RowDataPacket } from "mysql2/promise"
+import { z } from "zod"
+import { Database, QUERY_POOL_SIZE } from "@/effect/database"
+import type { DatabaseSession } from "@/effect/database"
+import * as Drive from "@/effect/drive-api.server"
+import { UnknownActionError, ValidationError } from "@/effect/errors"
+import { mutation, parseInput } from "@/effect/operation"
+import type { MutationContext, MutationHandler } from "@/effect/operation"
+import { driveWebhookUrl } from "./config"
 import {
-  catalogTransaction,
   accessible,
+  catalogTransaction,
   markCataloged,
-  withDriveLock,
+  transaction,
+  withUserLock,
 } from "./catalog.server"
+import * as DriveAccess from "./drive-access.server"
+import {
+  pickerConfig,
+  shareAddress,
+  sharedFolderMode,
+} from "./drive-access.server"
+import { startSync } from "./drive.server"
+import { status as syncStatus } from "./sync-progress.server"
+import { ensureTags } from "./tags.server"
 import type { Library, Media, MediaSet, Post, DriveSource } from "./types"
 import {
   metadata,
@@ -24,41 +39,25 @@ import {
   tags,
   linkFolder,
 } from "./validation"
-import { DriveAccessError } from "@/effect/errors"
-import { runTracedAppEffect } from "@/effect/runtime.server"
-import * as DriveAccess from "./drive-access.server"
-import {
-  pickerConfig,
-  shareAddress,
-  sharedFolderMode,
-} from "./drive-access.server"
-import {
-  driveJson,
-  driveToken,
-  listFolders,
-  startDriveSync,
-} from "./drive.server"
-import { syncStatus } from "./sync-progress.server"
-import type { RowDataPacket } from "mysql2/promise"
 
-// Promise facades over the DriveAccess Effects, until this module is converted.
-const createFolder = (...args: Parameters<typeof DriveAccess.createFolder>) =>
-  runTracedAppEffect(DriveAccess.createFolder(...args))
-const getFolder = (...args: Parameters<typeof DriveAccess.getFolder>) =>
-  runTracedAppEffect(DriveAccess.getFolder(...args))
-const shareFolderWithApp = (
-  ...args: Parameters<typeof DriveAccess.shareFolderWithApp>
-) => runTracedAppEffect(DriveAccess.shareFolderWithApp(...args))
-const removeAppShare = (
-  ...args: Parameters<typeof DriveAccess.removeAppShare>
-) => runTracedAppEffect(DriveAccess.removeAppShare(...args))
-const waitForAppAccess = (
-  ...args: Parameters<typeof DriveAccess.waitForAppAccess>
-) => runTracedAppEffect(DriveAccess.waitForAppAccess(...args))
-
-export async function library(
+/**
+ * The signed-in user's whole library. The nine reads run side by side, as many
+ * at a time as the Database service's query pool has connections, so one load
+ * never queues behind itself.
+ */
+export const load = Effect.fn("Library.load")(function* (
   user: Library["user"] & { id: string }
-): Promise<Library> {
+) {
+  yield* Effect.annotateCurrentSpan("mediabinder.user_id", user.id)
+  const database = yield* Database
+  const query = <T>(
+    operation: string,
+    sql: string,
+    values: Array<string> = []
+  ) =>
+    database
+      .queryRows<T & RowDataPacket>(operation, sql, values)
+      .pipe(Effect.map((result) => result as unknown as T[]))
   const [
     copies,
     sets,
@@ -67,53 +66,67 @@ export async function library(
     membership,
     definitions,
     watches,
-    syncStatus,
+    syncState,
     sourceMembership,
-  ] = await Promise.all([
-    rows<Media & { physical_id: string }>(
-      `SELECT m.*,m.id AS physical_id,c.id,c.display_name,c.tags,c.created_at,c.cataloged_at,c.sha256,
+  ] = yield* Effect.all(
+    [
+      query<Media & { physical_id: string }>(
+        "library.copies",
+        `SELECT m.*,m.id AS physical_id,c.id,c.display_name,c.tags,c.created_at,c.cataloged_at,c.sha256,
       COALESCE(l.parent_ids,JSON_ARRAY()) AS parent_ids,
       (SELECT COUNT(*) FROM post p WHERE p.catalog_id=c.id) AS post_count
       FROM media m JOIN catalog c ON c.id=m.catalog_id LEFT JOIN media_location l ON l.media_id=m.id
       WHERE m.user_id=? AND m.available=TRUE ORDER BY m.uploaded_at DESC,m.id ASC`,
-      [user.id]
-    ),
-    rows<MediaSet>(
-      `SELECT s.* FROM media_set s WHERE s.user_id=? OR EXISTS(
+        [user.id]
+      ),
+      query<MediaSet>(
+        "library.sets",
+        `SELECT s.* FROM media_set s WHERE s.user_id=? OR EXISTS(
       SELECT 1 FROM catalog_set_member sm JOIN media m ON m.catalog_id=sm.catalog_id
       WHERE sm.set_id=s.id AND m.user_id=? AND m.available=TRUE) ORDER BY s.created_at DESC,s.id`,
-      [user.id, user.id]
-    ),
-    rows<Post>(
-      `SELECT p.id,p.catalog_id AS media_id,p.set_id,p.platform,p.url,p.external_id,p.created_at FROM post p
+        [user.id, user.id]
+      ),
+      query<Post>(
+        "library.posts",
+        `SELECT p.id,p.catalog_id AS media_id,p.set_id,p.platform,p.url,p.external_id,p.created_at FROM post p
       WHERE EXISTS(SELECT 1 FROM media m WHERE m.catalog_id=p.catalog_id AND m.user_id=? AND m.available=TRUE)
       OR EXISTS(SELECT 1 FROM media_set s WHERE s.id=p.set_id AND (s.user_id=? OR EXISTS(
         SELECT 1 FROM catalog_set_member sm JOIN media m ON m.catalog_id=sm.catalog_id WHERE sm.set_id=s.id AND m.user_id=? AND m.available=TRUE)))
       ORDER BY p.created_at DESC,p.id`,
-      [user.id, user.id, user.id]
-    ),
-    rows<DriveSource>(
-      "SELECT folder_id,folder_name,last_synced_at,share_permission_id IS NOT NULL AS shared_by_app FROM drive_folder WHERE user_id=? ORDER BY folder_name",
-      [user.id]
-    ),
-    rows<{ set_id: string; catalog_id: string }>(
-      "SELECT sm.* FROM catalog_set_member sm WHERE EXISTS(SELECT 1 FROM media m WHERE m.catalog_id=sm.catalog_id AND m.user_id=? AND m.available=TRUE)",
-      [user.id]
-    ),
-    rows<{ name: string; color: string }>("SELECT name,color FROM catalog_tag"),
-    rows<{ count: number }>(
-      "SELECT COUNT(*) AS count FROM drive_watch WHERE user_id=? AND resource_id IS NOT NULL AND expires_at>NOW(3)",
-      [user.id]
-    ),
-    rows<{ watch_error: string | null; last_error: string | null }>(
-      "SELECT watch_error,last_error FROM drive_sync_state WHERE user_id=?",
-      [user.id]
-    ),
-    rows<{ media_id: string; folder_id: string }>(
-      "SELECT media_id,folder_id FROM media_source WHERE user_id=?",
-      [user.id]
-    ),
-  ])
+        [user.id, user.id, user.id]
+      ),
+      query<DriveSource>(
+        "library.sources",
+        "SELECT folder_id,folder_name,last_synced_at,share_permission_id IS NOT NULL AS shared_by_app FROM drive_folder WHERE user_id=? ORDER BY folder_name",
+        [user.id]
+      ),
+      query<{ set_id: string; catalog_id: string }>(
+        "library.membership",
+        "SELECT sm.* FROM catalog_set_member sm WHERE EXISTS(SELECT 1 FROM media m WHERE m.catalog_id=sm.catalog_id AND m.user_id=? AND m.available=TRUE)",
+        [user.id]
+      ),
+      query<{ name: string; color: string }>(
+        "library.tagColors",
+        "SELECT name,color FROM catalog_tag"
+      ),
+      query<{ count: number }>(
+        "library.watches",
+        "SELECT COUNT(*) AS count FROM drive_watch WHERE user_id=? AND resource_id IS NOT NULL AND expires_at>NOW(3)",
+        [user.id]
+      ),
+      query<{ watch_error: string | null; last_error: string | null }>(
+        "library.syncState",
+        "SELECT watch_error,last_error FROM drive_sync_state WHERE user_id=?",
+        [user.id]
+      ),
+      query<{ media_id: string; folder_id: string }>(
+        "library.sourceMembership",
+        "SELECT media_id,folder_id FROM media_source WHERE user_id=?",
+        [user.id]
+      ),
+    ],
+    { concurrency: QUERY_POOL_SIZE }
+  )
   const foldersByCopy = new Map<string, string[]>()
   for (const source of sourceMembership)
     foldersByCopy.set(source.media_id, [
@@ -193,7 +206,7 @@ export async function library(
       webhook: {
         configured: Boolean(driveWebhookUrl()),
         active: watches[0]?.count ?? 0,
-        error: syncStatus[0]?.watch_error ?? syncStatus[0]?.last_error ?? null,
+        error: syncState[0]?.watch_error ?? syncState[0]?.last_error ?? null,
       },
       last_synced_at:
         sources
@@ -202,95 +215,347 @@ export async function library(
           .sort()
           .at(-1) ?? null,
     },
+  } satisfies Library
+})
+
+// Source edits share the sync lock, so an in-flight scan cannot restore an unlinked folder.
+export type LinkResult =
+  | { ok: true; status: "linked"; folder_name: string; shared: boolean }
+  | {
+      ok: false
+      status: "needs-share"
+      folder_id: string
+      folder_name: string | null
+      share_address: string
+      reason: string
+    }
+
+// Shared-folder linking. The service account can read every folder any user
+// shared with it, so a user may only link a folder they can prove they reach:
+// either their drive.file token sees it (they chose it in Google's picker) or
+// Google lists them as its owner.
+const linkSharedFolder = Effect.fn("Library.linkSharedFolder")(function* (
+  userId: string,
+  input: unknown
+) {
+  yield* Effect.annotateCurrentSpan("mediabinder.user_id", userId)
+  const value = yield* parseInput(linkFolder, input)
+  const address = shareAddress()!
+  const database = yield* Database
+  const [user] = yield* database.queryRows<{ email: string } & RowDataPacket>(
+    "library.userEmail",
+    "SELECT email FROM user WHERE id=?",
+    [userId]
+  )
+  // A folder the user's own token can't see isn't one they picked.
+  const picked = yield* Drive.token(undefined, userId).pipe(
+    Effect.flatMap((token) => DriveAccess.getFolder(token, value.folderId)),
+    Effect.catchTag("DriveAccessError", () => Effect.succeed(null))
+  )
+  let permissionId: string | null = null
+  if (value.share) {
+    if (!picked)
+      return yield* new ValidationError({
+        message:
+          "Choose the folder with the Google Drive picker so MediaBinder can share it.",
+      })
+    const shared = yield* Drive.token(undefined, userId).pipe(
+      Effect.flatMap((token) =>
+        DriveAccess.shareFolderWithApp(token, value.folderId)
+      ),
+      Effect.map((id) => ({ refused: null, id })),
+      Effect.catchTag("DriveAccessError", (error) =>
+        error.code === "scope"
+          ? Effect.fail(error)
+          : Effect.succeed({ refused: error.message, id: null })
+      )
+    )
+    if (shared.refused !== null)
+      return {
+        ok: false,
+        status: "needs-share",
+        folder_id: value.folderId,
+        folder_name: picked.name,
+        share_address: address,
+        reason: shared.refused,
+      } satisfies LinkResult
+    permissionId = shared.id
   }
+  const source = yield* DriveAccess.waitForAppAccess(
+    value.folderId,
+    value.share ? 6 : 2
+  ).pipe(
+    Effect.catchTag("DriveAccessError", (error) =>
+      error.code === "unavailable" ? Effect.fail(error) : Effect.succeed(null)
+    )
+  )
+  if (!source)
+    return {
+      ok: false,
+      status: "needs-share",
+      folder_id: value.folderId,
+      folder_name: picked?.name ?? null,
+      share_address: address,
+      reason: "MediaBinder can't see this folder yet.",
+    } satisfies LinkResult
+  const owner = source.owners?.some(
+    (owner) => owner.emailAddress?.toLowerCase() === user?.email.toLowerCase()
+  )
+  if (!picked && !owner)
+    return yield* new ValidationError({
+      message:
+        "Choose this folder with the Google Drive picker to confirm you have access to it.",
+    })
+  yield* editSources(userId, (session) =>
+    Effect.asVoid(
+      session.execute(
+        `INSERT INTO drive_folder(user_id,folder_id,folder_name,share_permission_id) VALUES (?,?,?,?)
+      ON DUPLICATE KEY UPDATE folder_name=VALUES(folder_name),share_permission_id=COALESCE(VALUES(share_permission_id),share_permission_id)`,
+        [userId, source.id, source.name, permissionId]
+      )
+    )
+  )
+  return {
+    ok: true,
+    status: "linked",
+    folder_name: source.name,
+    shared: Boolean(permissionId),
+  } satisfies LinkResult
+})
+
+// Remove MediaBinder's viewer access once no MediaBinder user links the folder.
+// Best effort: unlinking succeeds even if Google refuses (the user can remove
+// the share in Drive), and the service account then simply stops reading it.
+const removeShareIfUnused = Effect.fn("Library.removeShareIfUnused")(function* (
+  userId: string,
+  folderId: string,
+  permissionId: string
+) {
+  yield* Effect.annotateCurrentSpan("mediabinder.user_id", userId)
+  const database = yield* Database
+  const [others] = yield* database.queryRows<{ count: number } & RowDataPacket>(
+    "library.folderLinks",
+    "SELECT COUNT(*) AS count FROM drive_folder WHERE folder_id=?",
+    [folderId]
+  )
+  // Another MediaBinder user still syncs this folder; keep the share.
+  if (Number(others?.count) > 0) return false
+  return yield* Drive.token(undefined, userId).pipe(
+    Effect.flatMap((token) =>
+      DriveAccess.removeAppShare(token, folderId, permissionId)
+    ),
+    Effect.as(true),
+    Effect.catch((error) =>
+      Effect.logWarning("Could not remove MediaBinder's folder share").pipe(
+        Effect.annotateLogs({
+          "mediabinder.user_id": userId,
+          "error.type": error._tag,
+        }),
+        Effect.as(false)
+      )
+    )
+  )
+})
+
+const editSources = Effect.fn("Library.editSources")(function* <
+  TError,
+  TRequirements,
+>(
+  userId: string,
+  edit: (session: DatabaseSession) => Effect.Effect<void, TError, TRequirements>
+) {
+  yield* Effect.annotateCurrentSpan("mediabinder.user_id", userId)
+  return yield* withUserLock(userId, (locked) =>
+    transaction(
+      (session) =>
+        Effect.gen(function* () {
+          yield* edit(session)
+          yield* session.execute(
+            "INSERT INTO drive_sync_state(user_id) VALUES (?) ON DUPLICATE KEY UPDATE watch_next_check=NOW(3)",
+            [userId]
+          )
+        }),
+      locked
+    )
+  )
+})
+
+const sourceActions = {
+  sync: mutation("sync", {
+    run: (_, { userId, headers }) => startSync(userId, headers),
+  }),
+  "sync-status": mutation("sync-status", {
+    run: (_, { userId }) => syncStatus(userId),
+  }),
+  folders: mutation("folders", {
+    run: (_, { headers }) => Drive.listFolders(headers),
+  }),
+  "picker-session": mutation("picker-session", {
+    run: (_, { userId }) =>
+      Effect.gen(function* () {
+        const picker = pickerConfig()
+        if (!sharedFolderMode() || !picker)
+          return yield* new ValidationError({
+            message: "The Google Drive picker isn't set up.",
+          })
+        // The user's own drive.file token: it can only reach files they pick.
+        return { ...picker, token: yield* Drive.token(undefined, userId) }
+      }),
+  }),
+  "create-folder": mutation("create-folder", {
+    input: z.object({ name: z.string().trim().min(1).max(100) }),
+    run: ({ name }, { userId }) =>
+      Effect.gen(function* () {
+        if (!sharedFolderMode())
+          return yield* new ValidationError({
+            message: "Create folders from Google Drive instead.",
+          })
+        const created = yield* Drive.token(undefined, userId).pipe(
+          Effect.flatMap((token) => DriveAccess.createFolder(token, name))
+        )
+        return yield* linkSharedFolder(userId, {
+          folderId: created.id,
+          share: true,
+        })
+      }),
+  }),
+  source: mutation("source", {
+    run: (data, { userId, headers }) =>
+      Effect.gen(function* () {
+        if (sharedFolderMode()) return yield* linkSharedFolder(userId, data)
+        const value = yield* parseInput(folder, data)
+        const token = yield* Drive.token(headers)
+        const source = yield* Drive.json<{
+          id: string
+          name: string
+          mimeType: string
+        }>(token, `files/${value.folderId}`, {
+          fields: "id,name,mimeType",
+          supportsAllDrives: "true",
+        })
+        if (source.mimeType !== "application/vnd.google-apps.folder")
+          return yield* new ValidationError({
+            message: "Choose a Google Drive folder.",
+          })
+        yield* editSources(userId, (session) =>
+          Effect.asVoid(
+            session.execute(
+              "INSERT INTO drive_folder(user_id,folder_id,folder_name) VALUES (?,?,?) ON DUPLICATE KEY UPDATE folder_name=VALUES(folder_name)",
+              [userId, source.id, source.name]
+            )
+          )
+        )
+        return { ok: true }
+      }),
+  }),
+  "remove-source": mutation("remove-source", {
+    input: folder,
+    run: (value, { userId }) =>
+      Effect.gen(function* () {
+        const database = yield* Database
+        const [linked] = yield* database.queryRows<
+          { share_permission_id: string | null } & RowDataPacket
+        >(
+          "library.linkedFolder",
+          "SELECT share_permission_id FROM drive_folder WHERE user_id=? AND folder_id=?",
+          [userId, value.folderId]
+        )
+        yield* editSources(userId, (session) =>
+          Effect.gen(function* () {
+            yield* session.execute(
+              "DELETE FROM drive_folder WHERE user_id=? AND folder_id=?",
+              [userId, value.folderId]
+            )
+            yield* session.execute(
+              "UPDATE media m SET available=EXISTS(SELECT 1 FROM media_source s WHERE s.media_id=m.id AND s.user_id=m.user_id) WHERE m.user_id=?",
+              [userId]
+            )
+          })
+        )
+        if (!sharedFolderMode()) return { ok: true }
+        // Whether MediaBinder's service account lost access to the folder. Google
+        // only lets MediaBinder remove the share while it can write everything
+        // inside, so the user may need to remove it in Drive.
+        const access_removed = linked?.share_permission_id
+          ? yield* removeShareIfUnused(
+              userId,
+              value.folderId,
+              linked.share_permission_id
+            )
+          : false
+        return {
+          ok: true,
+          access_removed,
+          share_address: shareAddress(),
+        }
+      }),
+  }),
 }
 
-export async function mutate(
+// Layer 19 converts these. Until then each runs the Promise code below as it
+// always has, in the one catalog transaction, behind the same table.
+type LegacyAction =
+  | "tag-color"
+  | "create-set"
+  | "add-sets"
+  | "set-membership"
+  | "add-tags"
+  | "remove-tags"
+  | "remove-tag"
+  | "metadata"
+  | "create-post"
+  | "delete-post"
+  | "delete-set"
+
+const legacy = (action: LegacyAction) =>
+  mutation(action, {
+    run: (data, { userId }) =>
+      Effect.tryPromise({
+        try: () => legacyMutate(action, data, userId),
+        catch: (error) => error,
+      }),
+  })
+
+/**
+ * Every library action, by the name the client posts. This is the one place
+ * that lists them: the route dispatches through it and nothing else mutates
+ * the library. Each handler runs for `context.userId`, the signed-in user.
+ */
+export type ActionName = LegacyAction | keyof typeof sourceActions
+
+export const actions: Record<ActionName, MutationHandler> = {
+  ...sourceActions,
+  "tag-color": legacy("tag-color"),
+  "create-set": legacy("create-set"),
+  "add-sets": legacy("add-sets"),
+  "set-membership": legacy("set-membership"),
+  "add-tags": legacy("add-tags"),
+  "remove-tags": legacy("remove-tags"),
+  "remove-tag": legacy("remove-tag"),
+  metadata: legacy("metadata"),
+  "create-post": legacy("create-post"),
+  "delete-post": legacy("delete-post"),
+  "delete-set": legacy("delete-set"),
+}
+
+/** Runs one library action for a user; an unknown name is a 404. */
+export const mutate = (
   action: string,
-  input: unknown,
+  data: unknown,
   userId: string,
   headers: Headers
+) => {
+  const context: MutationContext = { userId, headers }
+  return Object.hasOwn(actions, action)
+    ? actions[action as ActionName](data, context)
+    : Effect.fail(new UnknownActionError())
+}
+
+async function legacyMutate(
+  action: LegacyAction,
+  input: unknown,
+  userId: string
 ) {
-  if (action === "sync") return startDriveSync(userId, headers)
-  if (action === "sync-status") return syncStatus(userId)
-  if (action === "folders") return listFolders(headers)
-  if (action === "picker-session") {
-    const picker = pickerConfig()
-    if (!sharedFolderMode() || !picker)
-      throw new Error("The Google Drive picker isn't set up.")
-    // The user's own drive.file token: it can only reach files they pick.
-    return { ...picker, token: await driveToken(undefined, userId) }
-  }
-  if (action === "create-folder") {
-    if (!sharedFolderMode())
-      throw new Error("Create folders from Google Drive instead.")
-    const { name } = z
-      .object({ name: z.string().trim().min(1).max(100) })
-      .parse(input)
-    const created = await createFolder(
-      await driveToken(undefined, userId),
-      name
-    )
-    return linkSharedFolder(userId, {
-      folderId: created.id,
-      share: true,
-    })
-  }
-  if (action === "source") {
-    if (sharedFolderMode()) return linkSharedFolder(userId, input)
-    const value = folder.parse(input),
-      token = await driveToken(headers)
-    const source = await driveJson<{
-      id: string
-      name: string
-      mimeType: string
-    }>(token, `files/${value.folderId}`, {
-      fields: "id,name,mimeType",
-      supportsAllDrives: "true",
-    })
-    if (source.mimeType !== "application/vnd.google-apps.folder")
-      throw new Error("Choose a Google Drive folder.")
-    await editSources(userId, async (connection) => {
-      await connection.execute(
-        "INSERT INTO drive_folder(user_id,folder_id,folder_name) VALUES (?,?,?) ON DUPLICATE KEY UPDATE folder_name=VALUES(folder_name)",
-        [userId, source.id, source.name]
-      )
-    })
-    return { ok: true }
-  }
-  if (action === "remove-source") {
-    const value = folder.parse(input)
-    const [linked] = await rows<{ share_permission_id: string | null }>(
-      "SELECT share_permission_id FROM drive_folder WHERE user_id=? AND folder_id=?",
-      [userId, value.folderId]
-    )
-    await editSources(userId, async (connection) => {
-      await connection.execute(
-        "DELETE FROM drive_folder WHERE user_id=? AND folder_id=?",
-        [userId, value.folderId]
-      )
-      await connection.execute(
-        "UPDATE media m SET available=EXISTS(SELECT 1 FROM media_source s WHERE s.media_id=m.id AND s.user_id=m.user_id) WHERE m.user_id=?",
-        [userId]
-      )
-    })
-    if (!sharedFolderMode()) return { ok: true }
-    // Whether MediaBinder's service account lost access to the folder. Google
-    // only lets MediaBinder remove the share while it can write everything
-    // inside, so the user may need to remove it in Drive.
-    const access_removed = linked?.share_permission_id
-      ? await removeShareIfUnused(
-          userId,
-          value.folderId,
-          linked.share_permission_id
-        )
-      : false
-    return {
-      ok: true,
-      access_removed,
-      share_address: shareAddress(),
-    }
-  }
   return catalogTransaction(async (connection) => {
     if (action === "tag-color") {
       const value = z
@@ -528,147 +793,5 @@ export async function mutate(
       await connection.execute("DELETE FROM media_set WHERE id=?", [target])
       return { ok: true }
     }
-    throw new Response("Unknown action.", { status: 404 })
   })
-}
-
-// Source edits share the sync lock, so an in-flight scan cannot restore an unlinked folder.
-export type LinkResult =
-  | { ok: true; status: "linked"; folder_name: string; shared: boolean }
-  | {
-      ok: false
-      status: "needs-share"
-      folder_id: string
-      folder_name: string | null
-      share_address: string
-      reason: string
-    }
-
-// Shared-folder linking. The service account can read every folder any user
-// shared with it, so a user may only link a folder they can prove they reach:
-// either their drive.file token sees it (they chose it in Google's picker) or
-// Google lists them as its owner.
-async function linkSharedFolder(
-  userId: string,
-  input: unknown
-): Promise<LinkResult> {
-  const value = linkFolder.parse(input)
-  const address = shareAddress()!
-  const [user] = await rows<{ email: string }>(
-    "SELECT email FROM user WHERE id=?",
-    [userId]
-  )
-  let picked: { name: string } | null = null
-  try {
-    picked = await getFolder(
-      await driveToken(undefined, userId),
-      value.folderId
-    )
-  } catch (error) {
-    if (!(error instanceof DriveAccessError)) throw error
-  }
-  let permissionId: string | null = null
-  if (value.share) {
-    if (!picked)
-      throw new Error(
-        "Choose the folder with the Google Drive picker so MediaBinder can share it."
-      )
-    try {
-      permissionId = await shareFolderWithApp(
-        await driveToken(undefined, userId),
-        value.folderId
-      )
-    } catch (error) {
-      if (!(error instanceof DriveAccessError)) throw error
-      if (error.code === "scope") throw error
-      return {
-        ok: false,
-        status: "needs-share",
-        folder_id: value.folderId,
-        folder_name: picked.name,
-        share_address: address,
-        reason: error.message,
-      }
-    }
-  }
-  let source
-  try {
-    source = await waitForAppAccess(value.folderId, value.share ? 6 : 2)
-  } catch (error) {
-    if (!(error instanceof DriveAccessError) || error.code === "unavailable")
-      throw error
-    return {
-      ok: false,
-      status: "needs-share",
-      folder_id: value.folderId,
-      folder_name: picked?.name ?? null,
-      share_address: address,
-      reason: "MediaBinder can't see this folder yet.",
-    }
-  }
-  const owner = source.owners?.some(
-    (owner) => owner.emailAddress?.toLowerCase() === user?.email.toLowerCase()
-  )
-  if (!picked && !owner)
-    throw new Error(
-      "Choose this folder with the Google Drive picker to confirm you have access to it."
-    )
-  await editSources(userId, async (connection) => {
-    await connection.execute(
-      `INSERT INTO drive_folder(user_id,folder_id,folder_name,share_permission_id) VALUES (?,?,?,?)
-      ON DUPLICATE KEY UPDATE folder_name=VALUES(folder_name),share_permission_id=COALESCE(VALUES(share_permission_id),share_permission_id)`,
-      [userId, source.id, source.name, permissionId]
-    )
-  })
-  return {
-    ok: true,
-    status: "linked",
-    folder_name: source.name,
-    shared: Boolean(permissionId),
-  }
-}
-
-// Remove MediaBinder's viewer access once no MediaBinder user links the folder.
-// Best effort: unlinking succeeds even if Google refuses (the user can remove
-// the share in Drive), and the service account then simply stops reading it.
-async function removeShareIfUnused(
-  userId: string,
-  folderId: string,
-  permissionId: string
-) {
-  const [others] = await rows<{ count: number }>(
-    "SELECT COUNT(*) AS count FROM drive_folder WHERE folder_id=?",
-    [folderId]
-  )
-  // Another MediaBinder user still syncs this folder; keep the share.
-  if (Number(others?.count) > 0) return false
-  try {
-    await removeAppShare(
-      await driveToken(undefined, userId),
-      folderId,
-      permissionId
-    )
-    return true
-  } catch (error) {
-    console.warn(
-      "Could not remove MediaBinder's folder share:",
-      error instanceof Error ? error.message : "Unknown error"
-    )
-    return false
-  }
-}
-
-async function editSources(
-  userId: string,
-  edit: (connection: LegacyConnection) => Promise<void>
-) {
-  return withDriveLock(userId, (connection) =>
-    catalogTransaction(async (connection) => {
-      await edit(connection)
-      await connection.execute(
-        "INSERT INTO drive_sync_state(user_id) VALUES (?) ON DUPLICATE KEY UPDATE watch_next_check=NOW(3)",
-        [userId]
-      )
-    }, connection)
-  )
 }

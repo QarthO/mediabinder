@@ -4,7 +4,9 @@
 // are visible to that token, like a folder chosen in the picker), then runs the
 // same link flow the settings page uses: share with the service account, link, sync.
 import { rows, pool } from "../src/lib/database.server"
-import { driveToken, syncDrive } from "../src/lib/drive.server"
+import * as Drive from "../src/effect/drive-api.server"
+import { syncDrive } from "../src/lib/drive.server"
+import { runTracedAppEffect } from "../src/effect/runtime.server"
 import { mutate } from "../src/lib/library.server"
 
 const [user] = await rows<{ id: string; email: string }>(
@@ -12,7 +14,7 @@ const [user] = await rows<{ id: string; email: string }>(
 )
 if (!user) throw new Error("Sign in with Google first.")
 const headers = new Headers() // no browser session: tokens are looked up by user ID
-const token = await driveToken(undefined, user.id)
+const token = await runTracedAppEffect(Drive.token(undefined, user.id))
 const folder = (await (
   await fetch("https://www.googleapis.com/drive/v3/files?fields=id,name", {
     method: "POST",
@@ -27,11 +29,8 @@ const folder = (await (
   })
 ).json()) as { id: string; name: string }
 console.log("created folder with user token:", folder.name)
-const result = await mutate(
-  "source",
-  { folderId: folder.id, share: true },
-  user.id,
-  headers
+const result = await runTracedAppEffect(
+  mutate("source", { folderId: folder.id, share: true }, user.id, headers)
 )
 console.log("link result:", JSON.stringify(result))
 const [linked] = await rows<{ share_permission_id: string | null }>(
@@ -40,7 +39,9 @@ const [linked] = await rows<{ share_permission_id: string | null }>(
 )
 console.log("stored share permission:", Boolean(linked?.share_permission_id))
 console.log("sync:", JSON.stringify(await syncDrive(user.id)))
-await mutate("remove-source", { folderId: folder.id }, user.id, headers)
+await runTracedAppEffect(
+  mutate("remove-source", { folderId: folder.id }, user.id, headers)
+)
 const perms = (await (
   await fetch(
     `https://www.googleapis.com/drive/v3/files/${folder.id}/permissions?fields=permissions(emailAddress,role)`,

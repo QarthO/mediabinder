@@ -8,6 +8,7 @@ import {
   DriveReconnectError,
   LockBusyError,
   NotFoundError,
+  UnknownActionError,
   ValidationError,
 } from "@/effect/errors"
 import { errorResponse, isHandledError } from "./http-errors"
@@ -99,6 +100,10 @@ describe("error responses", () => {
     expect(missing.status).toBe(404)
     expect(await body(missing)).toBe("Tag not found.")
 
+    const unknown = errorResponse(new UnknownActionError(), fallback)
+    expect(unknown.status).toBe(404)
+    expect(await body(unknown)).toBe("Unknown action.")
+
     const invalid = errorResponse(new ValidationError({ message: "Too long." }))
     expect(invalid.status).toBe(400)
     expect(await invalid.json()).toEqual({ error: "Too long." })
@@ -112,6 +117,7 @@ describe("error responses", () => {
     for (const error of [
       new AuthenticationError(),
       new NotFoundError({ resource: "Tag" }),
+      new UnknownActionError(),
       new ValidationError({ message: "x" }),
     ])
       expect(isHandledError(error)).toBe(true)
