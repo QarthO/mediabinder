@@ -17,6 +17,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
         { name: "viewport", content: "width=device-width, initial-scale=1" },
         { title: "MediaBinder" },
         { name: "robots", content: "noindex, nofollow" },
+        { name: "theme-color", content: "#111316" },
       ],
       links: [
         {
