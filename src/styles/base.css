@@ -1,0 +1,86 @@
+/* Resets, element defaults, headings, and shared type roles. */
+* {
+  box-sizing: border-box;
+  border-color: var(--border);
+}
+body {
+  margin: 0;
+  background: var(--background);
+  color: var(--foreground);
+  font: 0.875rem/1.5 var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+button,
+input,
+select {
+  font: inherit;
+}
+button,
+a,
+input,
+select {
+  -webkit-tap-highlight-color: transparent;
+}
+button {
+  cursor: pointer;
+}
+button:disabled {
+  cursor: default;
+}
+button:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 3px;
+}
+input:focus-visible,
+select:focus-visible {
+  outline: 1px solid var(--primary);
+  outline-offset: 1px;
+}
+button {
+  color: inherit;
+}
+a {
+  color: inherit;
+  text-decoration: none;
+}
+svg {
+  flex-shrink: 0;
+}
+h1,
+h2,
+h3,
+p {
+  margin: 0;
+}
+h1 {
+  font-size: 1.75rem;
+  font-weight: 580;
+  letter-spacing: -1px;
+  line-height: 1.3;
+}
+h2 {
+  font-size: 1rem;
+  font-weight: 560;
+  letter-spacing: -0.3px;
+}
+h3 {
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+.muted {
+  color: var(--muted-foreground);
+}
+.eyebrow {
+  font: 0.75rem var(--font-mono);
+  color: #7e8899;
+  letter-spacing: 1.5px;
+}
+.type-control,
+.type-input {
+  font-size: 0.875rem;
+}
+.type-control-sm,
+.type-label {
+  font-size: 0.8125rem;
+}

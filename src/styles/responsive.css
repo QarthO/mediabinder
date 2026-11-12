@@ -1,0 +1,297 @@
+/* Collapsed sidebar, shared keyframes, and breakpoint overrides for the sections above. */
+.sidebar-collapsed .sidebar {
+  width: 60px;
+  padding: 0 9px;
+}
+.sidebar-collapsed .main {
+  margin-left: 60px;
+}
+.sidebar-collapsed .sidebar-brand {
+  padding: 0 6px;
+}
+.sidebar-collapsed .nav-item {
+  justify-content: center;
+  padding: 10px;
+}
+.sidebar-collapsed .nav-item > span:not(.set-dot),
+.sidebar-collapsed .nav-item small,
+.sidebar-collapsed .nav-label,
+.sidebar-collapsed .drive-status,
+.sidebar-collapsed .account > div:nth-child(2) {
+  display: none;
+}
+.sidebar-collapsed .search-trigger {
+  padding: 8px 11px;
+  margin-bottom: 20px;
+}
+.sidebar-collapsed .account {
+  justify-content: center;
+}
+.sidebar-collapsed .nav-item.active:before {
+  left: -9px;
+}
+.sidebar-collapsed .sets-label + nav {
+  margin-top: 25px;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@media (min-width: 1500px) {
+  .media-grid {
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  }
+}
+@media (max-width: 1100px) {
+  .sidebar {
+    width: 200px;
+  }
+  .main {
+    margin-left: 200px;
+  }
+  .workspace-content {
+    padding: 28px 23px 20px;
+  }
+  .heading-actions button {
+    font-size: 0.8125rem;
+  }
+  .page-heading {
+    gap: 12px;
+  }
+  .media-grid {
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  }
+  .header {
+    padding: 0 23px;
+  }
+  .sync-status {
+    display: none;
+  }
+  .filter-search {
+    width: 180px;
+  }
+  .detail-dialog {
+    grid-template-columns: minmax(0, 1fr) 320px;
+  }
+}
+@media (max-width: 760px) {
+  .sidebar {
+    width: 60px;
+    padding: 0 9px;
+  }
+  .main {
+    margin-left: 60px;
+  }
+  .sidebar-brand {
+    padding: 0 6px;
+  }
+  .sidebar-brand .brand > span,
+  .nav-item > span:not(.set-dot),
+  .nav-item small,
+  .nav-label,
+  .drive-status,
+  .account > div:nth-child(2),
+  .search-trigger span,
+  .search-trigger kbd {
+    display: none;
+  }
+  .nav-item {
+    justify-content: center;
+    padding: 10px;
+  }
+  .search-trigger {
+    padding: 8px 11px;
+    margin-bottom: 20px;
+  }
+  .account {
+    justify-content: center;
+  }
+  .nav-item.active:before {
+    left: -9px;
+  }
+  .sets-label + nav {
+    margin-top: 25px;
+  }
+  .workspace-content {
+    padding: 24px 18px;
+  }
+  .header {
+    padding: 0 15px;
+    gap: 9px;
+  }
+  .page-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 20px;
+  }
+  .page-heading h1 {
+    font-size: 1.5rem;
+  }
+  .page-heading p {
+    font-size: 0.8125rem;
+  }
+  .heading-actions {
+    width: 100%;
+  }
+  .library-toolbar {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .filter-search {
+    width: 100%;
+    padding-bottom: 8px;
+  }
+  .toolbar-spacer {
+    flex: 1;
+  }
+  .library-toolbar select {
+    max-width: 130px;
+    font-size: 0.75rem;
+  }
+  .media-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+  .media-info {
+    padding: 9px;
+  }
+  .media-info > strong {
+    font-size: 0.8125rem;
+  }
+  .media-info > span {
+    font-size: 0.75rem;
+  }
+  .media-card-open > .tags {
+    padding: 0 9px 9px;
+    gap: 3px;
+  }
+  .tag {
+    font-size: 0.75rem;
+    max-width: 90px;
+  }
+  .library-footer {
+    font-size: 0.75rem;
+    gap: 12px;
+  }
+  .library-footer > span:last-child {
+    display: none;
+  }
+  .detail-dialog {
+    display: block;
+    width: calc(100% - 24px);
+    height: 90dvh;
+    overflow: auto;
+  }
+  .detail-preview {
+    height: 300px;
+    padding-top: 35px;
+  }
+  .detail-panel {
+    overflow: visible;
+    border-left: 0;
+    border-top: 1px solid var(--border);
+  }
+  .detail-dialog .dialog-close {
+    background: #151c27;
+    padding: 5px;
+    top: 8px;
+    right: 8px;
+  }
+  .settings-section-heading {
+    padding: 16px;
+    gap: 10px;
+  }
+  .settings-section-heading p {
+    display: none;
+  }
+  .connection-badge {
+    font-size: 0.75rem;
+  }
+  .settings-body {
+    padding: 17px;
+  }
+  .settings-card-footer {
+    padding: 16px;
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .settings-note {
+    font-size: 0.75rem;
+  }
+  .settings-body > p {
+    font-size: 0.8125rem;
+  }
+  .settings-icon {
+    width: 32px;
+    height: 32px;
+  }
+  .settings-section-heading h2 {
+    font-size: 0.875rem;
+  }
+  .post-row {
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .post-row > span {
+    font-size: 0.75rem;
+  }
+  .external-link {
+    margin-left: auto;
+  }
+  .set-grid {
+    grid-template-columns: 1fr;
+  }
+  .empty-state {
+    padding: 25px 10px;
+  }
+  .empty-state h2 {
+    font-size: 1rem;
+  }
+  .breadcrumb {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .header-right {
+    gap: 0;
+  }
+}
+@media (max-width: 420px) {
+  .media-grid {
+    grid-template-columns: 1fr;
+  }
+  .media-image {
+    aspect-ratio: 4/3;
+  }
+  .view-switch button {
+    width: 27px;
+  }
+  .workspace-content {
+    padding: 22px 14px;
+  }
+  .library-toolbar select {
+    padding-left: 5px;
+    max-width: 110px;
+  }
+  .login-card h1 {
+    font-size: 1.5rem;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *:before,
+  *:after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}

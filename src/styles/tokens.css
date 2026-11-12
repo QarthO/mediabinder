@@ -1,0 +1,42 @@
+/* Dark variant, Tailwind theme tokens, and :root custom properties. */
+@custom-variant dark (&:is(.dark *));
+@theme inline {
+  --font-sans: "Geist Variable", sans-serif;
+  --font-mono: "JetBrains Mono Variable", monospace;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--foreground);
+  --color-border: var(--border);
+  --color-input: var(--border);
+  --color-ring: var(--primary);
+  --color-popover: var(--surface);
+  --color-popover-foreground: var(--foreground);
+  --color-secondary: var(--surface-raised);
+  --color-secondary-foreground: var(--foreground);
+  --color-destructive: #f28b82;
+}
+:root {
+  color-scheme: dark;
+  --brand-blue: #397cf6;
+  --brand-sky: #78acfa;
+  --brand-ink: #111a2b;
+  --brand-ice: #eaf2ff;
+  --background: #111316;
+  --surface: #171a1f;
+  --surface-raised: #20252d;
+  --sidebar: #14171b;
+  --foreground: var(--brand-ice);
+  --muted: #1d222a;
+  --muted-foreground: #a5b4cc;
+  --primary: var(--brand-sky);
+  --primary-foreground: var(--brand-ink);
+  --accent: #213249;
+  --border: #2b313b;
+  --font-sans: "Geist Variable", sans-serif;
+  --font-mono: "JetBrains Mono Variable", monospace;
+}

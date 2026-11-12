@@ -1,0 +1,66 @@
+/* Rem-based type roles and viewport scaling match Kiln. */
+html {
+  font-size: 16px;
+}
+@media (min-width: 768px) {
+  html {
+    font-size: 17px;
+  }
+}
+@media (min-width: 1920px) {
+  html {
+    font-size: 18px;
+  }
+}
+@media (min-width: 2560px) {
+  html {
+    font-size: 20px;
+  }
+}
+@media (min-width: 3840px) {
+  html {
+    font-size: 22px;
+  }
+}
+.nav-item,
+.button,
+.filter-search input,
+.library-toolbar select {
+  font-size: 0.875rem;
+}
+.nav-item {
+  min-height: 40px;
+}
+.sidebar {
+  width: 250px;
+}
+.main {
+  margin-left: 250px;
+}
+.account {
+  gap: 7px;
+}
+.account .avatar {
+  flex-shrink: 0;
+}
+.account strong {
+  font-size: 0.8125rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.account button {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 34px;
+  flex-shrink: 0;
+}
+.account button:hover,
+.account button.active {
+  color: var(--primary);
+  background: var(--accent);
+}
+.sidebar-collapsed .account {
+  flex-direction: column;
+}

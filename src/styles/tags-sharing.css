@@ -1,0 +1,173 @@
+/* Tags page, linked sources, and folder sharing. */
+.tags-page > .filter-search {
+  margin-bottom: 24px;
+  width: min(100%, 360px);
+}
+.tag-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 16px;
+}
+.tag-card {
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+.tag-card > button {
+  width: 100%;
+  padding: 20px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+}
+.tag-card > button > svg {
+  color: var(--primary);
+  flex-shrink: 0;
+}
+.tag-card strong {
+  overflow-wrap: anywhere;
+}
+.tag-card > button > span {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+}
+.tag-card:hover {
+  border-color: #4b6485;
+}
+.tag-sets {
+  padding: 0 20px 16px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.tag-sets button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--primary);
+  font-size: 0.75rem;
+}
+.source-list {
+  margin: 20px 0 28px;
+}
+.source-entry {
+  border: 1px solid var(--border);
+  margin-bottom: 10px;
+}
+.source-entry .current-folder {
+  border: 0;
+  margin: 0;
+}
+.current-folder > div {
+  min-width: 0;
+  flex: 1;
+}
+.current-folder strong {
+  overflow-wrap: anywhere;
+}
+.current-folder a,
+.current-folder button {
+  flex-shrink: 0;
+}
+.unlink-confirm {
+  padding: 0 18px 18px;
+}
+.settings-hint {
+  margin: 6px 0 16px;
+  font-size: 0.8125rem;
+  line-height: 1.7;
+  color: #879bb7;
+}
+.paste-folder {
+  margin-top: 22px;
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+}
+.paste-folder .field {
+  flex: 1;
+  margin: 0;
+}
+.settings-actions-start {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.share-steps {
+  margin: 12px 0 8px !important;
+}
+.share-waiting {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.share-waiting svg {
+  flex-shrink: 0;
+  animation: spin 1.2s linear infinite;
+}
+.share-panel {
+  display: flex;
+  gap: 14px;
+  margin-top: 14px;
+  padding: 18px;
+  border: 1px solid #344965;
+  background: #151d2a;
+}
+.share-panel > svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--primary);
+}
+.share-panel > div {
+  min-width: 0;
+  flex: 1;
+}
+.share-panel p,
+.share-panel li {
+  font-size: 0.8125rem;
+  line-height: 1.7;
+  color: #a5b4cc;
+}
+.share-panel p {
+  margin: 6px 0 12px;
+}
+.share-panel ol {
+  margin: 0 0 16px;
+  padding-left: 20px;
+  display: grid;
+  gap: 8px;
+}
+.share-panel a {
+  color: var(--primary);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.share-address {
+  display: inline-block;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  font: 0.75rem var(--font-mono);
+  padding: 6px 9px;
+  background: var(--background);
+  border: 1px solid var(--border);
+  color: var(--foreground);
+  margin-bottom: 14px;
+}
+.share-copy {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+.share-copy .share-address {
+  margin-bottom: 0;
+}
+.folder-options button:disabled {
+  opacity: 0.5;
+}
