@@ -5,7 +5,8 @@ import {
   Outlet,
 } from "@tanstack/react-router"
 import type { QueryClient } from "@tanstack/react-query"
-import { Toaster } from "sonner"
+import { Toaster } from "@/components/ui/sonner"
+import { TooltipProvider } from "@/components/ui/tooltip"
 import geist from "@fontsource-variable/geist/files/geist-latin-wght-normal.woff2?url"
 import mono from "@fontsource-variable/jetbrains-mono/files/jetbrains-mono-latin-wght-normal.woff2?url"
 import css from "../styles.css?url"
@@ -44,8 +45,8 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
           <HeadContent />
         </head>
         <body>
-          {children}
-          <Toaster theme="dark" position="bottom-right" richColors />
+          <TooltipProvider>{children}</TooltipProvider>
+          <Toaster />
           <Scripts />
         </body>
       </html>

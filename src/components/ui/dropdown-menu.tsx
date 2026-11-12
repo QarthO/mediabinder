@@ -10,6 +10,7 @@ export function DropdownMenuContent({
   return (
     <Primitive.Portal>
       <Primitive.Content
+        data-slot="dropdown-menu-content"
         className={cn("dropdown-content", className)}
         sideOffset={6}
         collisionPadding={12}
@@ -23,6 +24,10 @@ export function DropdownMenuItem({
   ...props
 }: React.ComponentProps<typeof Primitive.Item>) {
   return (
-    <Primitive.Item className={cn("dropdown-item", className)} {...props} />
+    <Primitive.Item
+      data-slot="dropdown-menu-item"
+      className={cn("dropdown-item", className)}
+      {...props}
+    />
   )
 }

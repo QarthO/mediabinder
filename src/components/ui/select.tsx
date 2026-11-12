@@ -16,6 +16,7 @@ export function Select({
   return (
     <Primitive.Root value={value} onValueChange={onChange}>
       <Primitive.Trigger
+        data-slot="select-trigger"
         className={`select-trigger ${MobileIcon ? "mobile-icon-select" : ""}`}
         aria-label={label}
         title={options.find((option) => option.value === value)?.label}
@@ -31,6 +32,7 @@ export function Select({
       </Primitive.Trigger>
       <Primitive.Portal>
         <Primitive.Content
+          data-slot="select-content"
           className="select-content"
           position="popper"
           sideOffset={5}
@@ -42,6 +44,7 @@ export function Select({
           <Primitive.Viewport>
             {options.map((option) => (
               <Primitive.Item
+                data-slot="select-item"
                 className="select-item"
                 key={option.value}
                 value={option.value}

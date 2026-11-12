@@ -11,13 +11,25 @@ export function DialogHeader({
   className,
   ...props
 }: React.ComponentProps<"div">) {
-  return <div className={cn("dialog-header", className)} {...props} />
+  return (
+    <div
+      data-slot="dialog-header"
+      className={cn("dialog-header", className)}
+      {...props}
+    />
+  )
 }
 export function DialogFooter({
   className,
   ...props
 }: React.ComponentProps<"div">) {
-  return <div className={cn("dialog-footer", className)} {...props} />
+  return (
+    <div
+      data-slot="dialog-footer"
+      className={cn("dialog-footer", className)}
+      {...props}
+    />
+  )
 }
 export function DialogContent({
   children,
@@ -31,11 +43,22 @@ export function DialogContent({
 }) {
   return (
     <Primitive.Portal>
-      <Primitive.Overlay className={cn("dialog-overlay", overlayClassName)} />
-      <Primitive.Content className={cn("dialog-content", className)} {...props}>
+      <Primitive.Overlay
+        data-slot="dialog-overlay"
+        className={cn("dialog-overlay", overlayClassName)}
+      />
+      <Primitive.Content
+        data-slot="dialog-content"
+        className={cn("dialog-content", className)}
+        {...props}
+      >
         {children}
         {showCloseButton && (
-          <Primitive.Close className="dialog-close" aria-label="Close">
+          <Primitive.Close
+            data-slot="dialog-close"
+            className="dialog-close"
+            aria-label="Close"
+          >
             <X size={18} />
           </Primitive.Close>
         )}

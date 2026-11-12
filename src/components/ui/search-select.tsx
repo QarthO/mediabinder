@@ -26,6 +26,7 @@ export function SearchSelect({
     <Popover.Root open={open} onOpenChange={setOpen}>
       <Popover.Trigger asChild>
         <button
+          data-slot="search-select-trigger"
           className={`select-trigger ${MobileIcon ? "mobile-icon-select" : ""}`}
           role="combobox"
           aria-expanded={open}
