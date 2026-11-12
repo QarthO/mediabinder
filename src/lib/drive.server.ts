@@ -100,7 +100,7 @@ type SyncOptions = {
   token?: string
   origin?: SyncRun["origin"]
   // Called once the Drive lock is held and the progress row exists.
-  onStarted?: (runId: string) => void
+  onStarted?: (run: SyncRun) => void
 }
 
 export async function syncDrive(userId: string, options: SyncOptions = {}) {
@@ -117,7 +117,7 @@ export async function syncDrive(userId: string, options: SyncOptions = {}) {
       userId,
       options.origin ?? "automatic"
     )
-    options.onStarted?.(run.runId)
+    options.onStarted?.(run.started)
     try {
       const result = await reconcileDrive(
         connection,
@@ -145,9 +145,11 @@ export async function startDriveSync(userId: string, headers: Headers) {
     syncDrive(userId, {
       token,
       origin: "manual",
-      onStarted: () => {
+      // Resolved from the sync's own connection: waiting for another pool
+      // connection here could stall while every connection runs a sync.
+      onStarted: (run) => {
         started = true
-        syncStatus(userId).then(resolve, reject)
+        resolve(run)
       },
     }).catch(async (error: unknown) => {
       // The run row already holds the user-facing error; log for operators.

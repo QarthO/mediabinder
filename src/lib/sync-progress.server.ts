@@ -39,7 +39,11 @@ export async function claimSyncRun(userId: string) {
 }
 
 // Progress rows are written outside the catalog transaction so that other
-// requests can read them while the sync is still uncommitted.
+// requests can read them while the sync is still uncommitted. Progress updates
+// are best effort and never awaited: a sync already holds a pool connection,
+// so waiting for another one could deadlock when the pool is exhausted. The
+// final status uses the sync's own connection once its transaction has ended,
+// and late progress updates cannot overwrite a finished run.
 export async function startSyncRun(
   connection: PoolConnection,
   userId: string,
@@ -51,6 +55,10 @@ export async function startSyncRun(
     VALUES (?,?,?,'running','scanning',0,0,0,0,NULL,NULL,NOW(3),NOW(3),NULL)
     ON DUPLICATE KEY UPDATE run_id=VALUES(run_id),origin=VALUES(origin),status='running',phase='scanning',folders_scanned=0,files_found=0,files_saved=0,files_total=0,item_count=NULL,error=NULL,started_at=NOW(3),updated_at=NOW(3),finished_at=NULL`,
     [userId, runId, origin]
+  )
+  const [[started]] = await connection.query<(SyncRun & RowDataPacket)[]>(
+    `SELECT ${columns} FROM drive_sync_run WHERE user_id=?`,
+    [userId]
   )
   let latest: SyncProgress = {
     phase: "scanning",
@@ -65,12 +73,12 @@ export async function startSyncRun(
   // Write at most a few times per second; the browser polls once a second.
   const flush = () => {
     timer = undefined
-    if (written === latest) return writing
+    if (written === latest) return
     const next = (written = latest)
     writing = writing
       .then(() =>
         pool.execute(
-          "UPDATE drive_sync_run SET phase=?,folders_scanned=?,files_found=?,files_saved=?,files_total=?,updated_at=NOW(3) WHERE user_id=? AND run_id=?",
+          "UPDATE drive_sync_run SET phase=?,folders_scanned=?,files_found=?,files_saved=?,files_total=?,updated_at=NOW(3) WHERE user_id=? AND run_id=? AND status='running'",
           [
             next.phase,
             next.folders_scanned,
@@ -90,12 +98,15 @@ export async function startSyncRun(
     detail: { count?: number; error?: unknown }
   ) => {
     clearTimeout(timer)
-    await flush()
-    await pool
+    await connection
       .execute(
-        "UPDATE drive_sync_run SET status=?,phase='done',item_count=?,error=?,updated_at=NOW(3),finished_at=NOW(3) WHERE user_id=? AND run_id=?",
+        "UPDATE drive_sync_run SET status=?,phase='done',folders_scanned=?,files_found=?,files_saved=?,files_total=?,item_count=?,error=?,updated_at=NOW(3),finished_at=NOW(3) WHERE user_id=? AND run_id=?",
         [
           status,
+          latest.folders_scanned,
+          latest.files_found,
+          latest.files_saved,
+          latest.files_total,
           detail.count ?? null,
           status === "failed"
             ? publicErrorMessage(detail.error, "Sync failed. Please try again.")
@@ -107,7 +118,7 @@ export async function startSyncRun(
       .catch(() => undefined)
   }
   return {
-    runId,
+    started: { ...started } as SyncRun,
     report(progress: Partial<SyncProgress>) {
       latest = { ...latest, ...progress }
       timer ??= setTimeout(flush, 250)

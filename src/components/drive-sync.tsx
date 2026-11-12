@@ -19,6 +19,14 @@ export const syncStatusQuery = queryOptions({
   staleTime: 5_000,
 })
 const startKey = ["sync-start"]
+// Other tabs stop polling while idle, so a new run is announced to them.
+const channelName = "mediabinder-drive-sync"
+function announceSync() {
+  if (typeof BroadcastChannel === "undefined") return
+  const channel = new BroadcastChannel(channelName)
+  channel.postMessage("started")
+  channel.close()
+}
 const isRunning = (run: SyncRun | null) => run?.status === "running"
 
 export function useDriveSyncBusy() {
@@ -41,7 +49,10 @@ export function DriveSyncButton({
   const start = useMutation({
     mutationKey: startKey,
     mutationFn: () => action<SyncRun | null>("sync"),
-    onSuccess: (run) => client.setQueryData(syncStatusQuery.queryKey, run),
+    onSuccess: (run) => {
+      client.setQueryData(syncStatusQuery.queryKey, run)
+      announceSync()
+    },
     onError: (error) => toast.error(error.message),
   })
   return (
@@ -99,7 +110,16 @@ export function DriveSyncMonitor() {
     ...syncStatusQuery,
     refetchInterval: (query) =>
       query.state.data?.status === "running" ? 1000 : false,
+    // Picks up runs started on another device or by a webhook.
+    refetchOnWindowFocus: true,
   })
+  useEffect(() => {
+    if (typeof BroadcastChannel === "undefined") return
+    const channel = new BroadcastChannel(channelName)
+    channel.onmessage = () =>
+      void client.invalidateQueries({ queryKey: syncStatusQuery.queryKey })
+    return () => channel.close()
+  }, [client])
   const watched = useRef(new Map<string, "running" | "hidden" | "done">())
   useEffect(() => {
     if (!run) return
@@ -110,8 +130,11 @@ export function DriveSyncMonitor() {
       if (run.origin !== "manual" || state === "hidden" || state === "done")
         return
       watched.current.set(run.run_id, "running")
-      toast.loading("Syncing Google Drive", {
+      // A default toast with a spinner icon: Sonner's loading toasts cannot be
+      // closed, and this one lasts as long as the sync.
+      toast("Syncing Google Drive", {
         id,
+        icon: <RefreshCw className="spin" size={16} aria-hidden />,
         description: <SyncProgress run={run} />,
         duration: Infinity,
         closeButton: true,
@@ -129,12 +152,14 @@ export function DriveSyncMonitor() {
       void client.invalidateQueries({ queryKey: ["library"] })
       toast.success(`Synced ${items(run.item_count ?? run.files_total)}`, {
         id,
+        icon: undefined,
         description: undefined,
         duration: 5000,
       })
     } else
       toast.error(run.error ?? "Sync failed. Please try again.", {
         id,
+        icon: undefined,
         description: undefined,
         duration: 8000,
       })
