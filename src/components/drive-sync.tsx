@@ -63,7 +63,9 @@ export function DriveSyncButton({
   const start = useMutation({
     mutationKey: startKey,
     mutationFn: () => action<SyncRun | null>("sync"),
-    onSuccess: (run) => {
+    onSuccess: async (run) => {
+      // An in-flight status request would overwrite this newer result.
+      await client.cancelQueries({ queryKey: syncStatusQuery.queryKey })
       client.setQueryData(syncStatusQuery.queryKey, run)
       announceSync()
     },

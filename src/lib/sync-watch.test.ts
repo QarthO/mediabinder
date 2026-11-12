@@ -84,7 +84,14 @@ test("a superseded run's toast is retired without inventing a result", () => {
   const watcher = createSyncWatcher()
   observeSyncRun(watcher, run({}))
   assert.deepEqual(
-    observeSyncRun(watcher, run({ run_id: "b", origin: "automatic" })),
+    observeSyncRun(
+      watcher,
+      run({
+        run_id: "b",
+        origin: "automatic",
+        started_at: "2026-11-12T00:01:00.000",
+      })
+    ),
     {
       retire: "a",
       refreshLibrary: true,
@@ -92,8 +99,39 @@ test("a superseded run's toast is retired without inventing a result", () => {
     }
   )
   // A late result for the replaced run is not announced.
+  assert.deepEqual(observeSyncRun(watcher, run({ status: "succeeded" })), {
+    retire: null,
+    refreshLibrary: false,
+    toast: null,
+  })
+})
+
+test("a delayed older run cannot silence the newer run", () => {
+  const watcher = createSyncWatcher()
+  const older = { run_id: "a", origin: "automatic" as const }
+  const newer = { run_id: "b", started_at: "2026-11-12T00:01:00.000" }
+  observeSyncRun(watcher, run(older))
+  assert.equal(observeSyncRun(watcher, run(newer)).toast, "progress")
+  // A request that started before b returns a's row late.
+  assert.deepEqual(observeSyncRun(watcher, run(older)), {
+    retire: null,
+    refreshLibrary: false,
+    toast: null,
+  })
   assert.equal(
-    observeSyncRun(watcher, run({ status: "succeeded" })).toast,
-    null
+    observeSyncRun(watcher, run({ ...newer, phase: "saving" })).toast,
+    "progress"
+  )
+  assert.deepEqual(
+    observeSyncRun(watcher, run({ ...newer, status: "succeeded" })),
+    { retire: null, refreshLibrary: true, toast: "success" }
+  )
+  // The same holds for an older run this tab never saw.
+  const fresh = createSyncWatcher()
+  observeSyncRun(fresh, run(newer))
+  assert.equal(observeSyncRun(fresh, run(older)).retire, null)
+  assert.equal(
+    observeSyncRun(fresh, run({ ...newer, status: "failed" })).toast,
+    "error"
   )
 })

@@ -6,7 +6,7 @@ export type WatchState = "running" | "hidden" | "quiet" | "done"
 
 export interface SyncWatcher {
   runs: Map<string, WatchState>
-  latest: string | null
+  latest: { id: string; startedAt: string } | null
 }
 
 export interface SyncUpdate {
@@ -30,15 +30,18 @@ export function observeSyncRun(watcher: SyncWatcher, run: SyncRun): SyncUpdate {
     toast: null,
   }
   const previous = watcher.latest
-  watcher.latest = run.run_id
-  if (previous && previous !== run.run_id) {
-    const state = watcher.runs.get(previous)
+  if (previous && previous.id !== run.run_id) {
+    // A delayed response can return an older run after a newer one; it must
+    // not replace the run being followed. Timestamps share one SQL format.
+    if (run.started_at < previous.startedAt) return update
+    const state = watcher.runs.get(previous.id)
     if (state && state !== "done") {
-      watcher.runs.set(previous, "done")
-      update.retire = previous
+      watcher.runs.set(previous.id, "done")
+      update.retire = previous.id
       update.refreshLibrary = true
     }
   }
+  watcher.latest = { id: run.run_id, startedAt: run.started_at }
   const state = watcher.runs.get(run.run_id)
   if (run.status === "running") {
     if (state === "hidden" || state === "done") return update
