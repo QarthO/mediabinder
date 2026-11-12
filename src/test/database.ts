@@ -1,8 +1,8 @@
 import * as MysqlClient from "@effect/sql-mysql2/MysqlClient"
-import { Effect, Layer } from "effect"
+import { Effect, Layer, ManagedRuntime } from "effect"
 import { Reactivity } from "effect/reactivity"
 import { SqlClient } from "effect/sql"
-import { describe } from "vite-plus/test"
+import { afterAll, beforeAll, beforeEach, describe } from "vite-plus/test"
 
 import { Database, databaseClientConfig, makeDatabase } from "@/effect/database"
 import { migrate } from "@/effect/migrations"
@@ -59,3 +59,20 @@ export const resetDatabase = Effect.gen(function* () {
     })
   )
 })
+
+/**
+ * For suites that call the server modules directly (they use their own
+ * connection pool, not an Effect layer): migrates the worker's database once,
+ * empties it before every test, and closes the pool afterwards. Call it
+ * inside `describeMysql`.
+ */
+export function useTestDatabase() {
+  const runtime = ManagedRuntime.make(TestDatabase)
+  beforeAll(() => runtime.runPromise(Effect.void))
+  beforeEach(() => runtime.runPromise(resetDatabase))
+  afterAll(async () => {
+    await runtime.dispose()
+    const { pool } = await import("@/lib/database.server")
+    await pool.end()
+  })
+}

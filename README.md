@@ -124,7 +124,7 @@ People who signed in before shared-folder mode granted `drive.readonly`. Google 
 
 Each MediaBinder account still sees only the folders it linked. The service account does the reading for everyone, so access is checked when a folder is linked: the user must choose it in the picker or own it. After that, MediaBinder keeps syncing it while the folder stays shared with MediaBinder's address, even if the folder's owner later removes that user's own access in Drive. Tags, names, sets and posts on identical media are shared across accounts as described under **Shared catalog and inbox**.
 
-`scripts/test-shared-folders.ts` checks these linking rules against a disposable database with mocked Google responses. `scripts/try-shared-folder-link.ts` exercises the share, link, sync and unlink path against real Google APIs for the first signed-in user; it creates and deletes a temporary folder in that user's Drive.
+The linking rules are covered by `src/lib/shared-folders.mysql.test.ts`, with mocked Google responses. `scripts/try-shared-folder-link.ts` is a manual check, not a test: it exercises the share, link, sync and unlink path against real Google APIs for the first signed-in user, and creates and deletes a temporary folder in that user's Drive.
 
 ## Observability
 
@@ -151,7 +151,7 @@ Node 24 and pnpm 11 are used in Docker. On the host, `pnpm install --frozen-lock
 
 Use T3 Code's browser preview at http://localhost:3100 to check the real Google login and Drive flows. No development authentication bypass is included. `/api/health` checks the database connection. Back up MySQL before upgrading; versioned application migrations are in `migrations/`, and Better Auth manages its own tables during startup. The multiple-folder migration preserves your existing source and catalog.
 
-The focused database regression check runs with `docker compose exec web pnpm exec tsx scripts/test-drive-folders.ts` against a disposable migrated test database. It creates fixtures to verify additive tagging, removal, persistent colors, rejected partial or unauthorized edits, unlinking, overlapping folder membership, metadata retention, and user isolation. `docker compose exec web pnpm exec tsx scripts/test-drive-webhook.ts` runs the focused webhook integration check with isolated MySQL fixtures and mocked Google HTTP responses. `scripts/test-sync-progress.ts` checks background sync progress against a mocked 500-item Drive tree, and that more concurrent syncs than database connections still finish; run it only against a disposable test database.
+The `*.mysql.test.ts` suites run the server modules (library edits, shared catalog, shared folders, Drive webhooks, sync progress, the media proxy route) against a real MySQL, with Google and the session lookup faked at their single seams. They skip themselves unless `MEDIABINDER_TEST_MYSQL=1`. Start a disposable server, for example `docker run -d --rm -p 127.0.0.1:3306:3306 -e MYSQL_ROOT_PASSWORD=root mysql:8.4`, then run `MEDIABINDER_TEST_MYSQL=1 DB_HOST=127.0.0.1 DB_NAME=mediabinder_test DB_USER=root DB_PASS=root pnpm verify database`. Each Vitest worker gets its own `<DB_NAME>_<n>` database, so `DB_NAME` must end in `_test` and the account must be able to create databases; never point it at real data.
 
 ## Preview fixtures
 
@@ -185,7 +185,7 @@ Use **All content / Uncataloged / Cataloged** beside the media-type filter. Rena
 
 Catalog writes and merge transactions share one database lock to prevent edits being lost during consolidation. Google scans happen outside that lock, and failed scans preserve the existing catalog.
 
-Run `scripts/test-shared-catalog.ts` only against a disposable test database. It uses mocked Google responses and retains catalog fixtures to exercise history preservation.
+`src/lib/shared-catalog.mysql.test.ts` covers deduplication, shared curation, access isolation and history preservation; run it as described under **Development and checks**.
 
 ### Checking UI responsiveness
 
