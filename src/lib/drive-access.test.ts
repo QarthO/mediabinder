@@ -167,6 +167,7 @@ test("waiting for access retries until the share propagates", async () => {
           id: "f",
           name: "Folder",
           mimeType: "application/vnd.google-apps.folder",
+          capabilities: { canListChildren: true },
         })
   })
   const folder = await waitForAppAccess("f", 5, 1)

@@ -15,11 +15,15 @@ const { pool, rows } = await import("../src/lib/database.server")
 const { auth } = await import("../src/lib/auth.server")
 const { mutate } = await import("../src/lib/library.server")
 const { syncDrive } = await import("../src/lib/drive.server")
+const { revokeLegacyDriveGrants } = await import(
+  "../src/lib/google-grants.server"
+)
 after(() => pool.end())
 
 const FOLDER = "application/vnd.google-apps.folder"
 type Call = { method: string; url: URL; token: string }
 let calls: Call[] = []
+let revocations: string[] = []
 // Per-test Drive behaviour, keyed by who asks: the user's token or the service account's.
 let drive: (call: Call) => Response
 mock.method(auth.api, "getAccessToken", async () => ({
@@ -30,6 +34,13 @@ mock.method(
   "fetch",
   async (input: string | URL, init: RequestInit = {}) => {
     const url = new URL(String(input))
+    if (
+      url.hostname === "oauth2.googleapis.com" &&
+      url.pathname === "/revoke"
+    ) {
+      revocations.push(String(init.body))
+      return new Response(null, { status: 200 })
+    }
     if (url.hostname === "oauth2.googleapis.com")
       return Response.json({ access_token: "sa-token", expires_in: 3600 })
     const token = String(
@@ -46,6 +57,7 @@ const folderJson = (id: string, owner = "someone@example.com") =>
     name: `Folder ${id.slice(-4)}`,
     mimeType: FOLDER,
     owners: [{ emailAddress: owner }],
+    capabilities: { canListChildren: true },
   })
 const denied = (status: number, reason: string) =>
   Response.json({ error: { errors: [{ reason }] } }, { status })
@@ -217,6 +229,185 @@ test("syncing a folder MediaBinder can no longer open fails instead of hiding it
     } finally {
       await pool.execute("DELETE FROM drive_sync_run WHERE user_id=?", [userId])
       await pool.execute("DELETE FROM media WHERE id=?", [mediaId])
+    }
+  })
+})
+
+test("a folder MediaBinder sees but can't list isn't linked", async () => {
+  await withUser(async (userId) => {
+    const id = `${userId}-metadata-only`
+    // Inside a limited-access folder, Drive shows the folder to anyone with
+    // access to its parent but lists its contents as empty.
+    drive = ({ token }) =>
+      token === "user-token"
+        ? folderJson(id)
+        : Response.json({
+            id,
+            name: "Limited",
+            mimeType: FOLDER,
+            capabilities: { canListChildren: false },
+          })
+    const result = (await mutate(
+      "source",
+      { folderId: id },
+      userId,
+      new Headers()
+    )) as { ok: boolean; status: string }
+    assert.equal(result.status, "needs-share")
+    assert.deepEqual(await linkedFolder(userId, id), [])
+  })
+})
+
+test("syncing a linked folder MediaBinder can't list fails instead of hiding its media", async () => {
+  await withUser(async (userId) => {
+    const id = `${userId}-unlistable`,
+      mediaId = randomUUID()
+    await pool.execute(
+      "INSERT INTO drive_folder(user_id,folder_id,folder_name) VALUES (?,?,?)",
+      [userId, id, "Limited"]
+    )
+    await pool.execute(
+      "INSERT INTO media (id,user_id,drive_id,display_name,raw_name,mime_type,tags,created_at,uploaded_at,size,available,synced_at) VALUES (?,?,'fixture','Kept','kept.jpg','image/jpeg','[]',NOW(3),NOW(3),42,TRUE,NOW(3))",
+      [mediaId, userId]
+    )
+    drive = ({ url }) =>
+      url.pathname.endsWith(`/files/${id}`)
+        ? Response.json({ id, capabilities: { canListChildren: false } })
+        : Response.json({ files: [] })
+    try {
+      await assert.rejects(syncDrive(userId), /Share it with MediaBinder/)
+      assert.deepEqual(
+        await rows("SELECT available FROM media WHERE id=?", [mediaId]),
+        [{ available: 1 }]
+      )
+    } finally {
+      await pool.execute("DELETE FROM drive_sync_run WHERE user_id=?", [userId])
+      await pool.execute("DELETE FROM media WHERE id=?", [mediaId])
+    }
+  })
+})
+
+test("limited-access subfolders sync only for their owner", async () => {
+  await withUser(async (userId, email) => {
+    const root = `${userId}-root`,
+      foreign = `${userId}-limited-foreign`,
+      owned = `${userId}-limited-owned`,
+      open = `${userId}-open`
+    await pool.execute(
+      "INSERT INTO drive_folder(user_id,folder_id,folder_name) VALUES (?,?,?)",
+      [userId, root, "Root"]
+    )
+    const photo = (parent: string) => ({
+      id: `${parent}-photo`,
+      name: "IMG.jpg",
+      mimeType: "image/jpeg",
+      createdTime: "2026-09-01T00:00:00Z",
+      size: "42",
+      parents: [parent],
+    })
+    const subfolder = (id: string, limited: boolean) => ({
+      id,
+      name: id,
+      mimeType: FOLDER,
+      inheritedPermissionsDisabled: limited,
+    })
+    // MediaBinder can read every subfolder (each could be shared with it
+    // separately); this user owns only one of the two limited-access ones.
+    drive = ({ url }) => {
+      const parent = /'([^']+)' in parents/.exec(
+        url.searchParams.get("q") ?? ""
+      )?.[1]
+      if (parent === root)
+        return Response.json({
+          files: [
+            subfolder(foreign, true),
+            subfolder(owned, true),
+            subfolder(open, false),
+            photo(root),
+          ],
+        })
+      if (parent) return Response.json({ files: [photo(parent)] })
+      const id = url.pathname.split("/").pop()!
+      return Response.json({
+        id,
+        capabilities: { canListChildren: true },
+        owners: [
+          { emailAddress: id === owned ? email : "someone@example.com" },
+        ],
+      })
+    }
+    try {
+      await syncDrive(userId)
+      const synced = await rows<{ drive_id: string }>(
+        "SELECT drive_id FROM media WHERE user_id=? AND available=TRUE ORDER BY drive_id",
+        [userId]
+      )
+      assert.deepEqual(
+        synced.map((m) => m.drive_id),
+        [`${open}-photo`, `${owned}-photo`, `${root}-photo`].sort()
+      )
+      // The other user's limited-access folder is never listed.
+      assert.ok(
+        !calls.some((c) =>
+          c.url.searchParams.get("q")?.includes(`'${foreign}' in parents`)
+        )
+      )
+    } finally {
+      await pool.execute("DELETE FROM drive_sync_run WHERE user_id=?", [userId])
+      await pool.execute("DELETE FROM media_source WHERE user_id=?", [userId])
+      await pool.execute(
+        "DELETE FROM media_location WHERE media_id IN (SELECT id FROM media WHERE user_id=?)",
+        [userId]
+      )
+      await pool.execute("DELETE FROM media WHERE user_id=?", [userId])
+    }
+  })
+})
+
+test("old full-Drive grants are revoked once so sign-in asks only for drive.file", async () => {
+  await withUser(async (userId) => {
+    const legacy = randomUUID(),
+      current = randomUUID()
+    await pool.execute(
+      `INSERT INTO account(id,accountId,providerId,userId,accessToken,refreshToken,scope,createdAt,updatedAt)
+      VALUES (?,?,'google',?,'old-access','old-refresh',?,NOW(3),NOW(3)),(?,?,'credential',?,NULL,NULL,?,NOW(3),NOW(3))`,
+      [
+        legacy,
+        `${userId}-google`,
+        userId,
+        "https://www.googleapis.com/auth/drive.readonly,openid,https://www.googleapis.com/auth/drive.file",
+        current,
+        `${userId}-other`,
+        userId,
+        "https://www.googleapis.com/auth/drive.readonly",
+      ]
+    )
+    revocations = []
+    try {
+      assert.equal(await revokeLegacyDriveGrants(), 1)
+      // The user's token is revoked at Google, which drops the whole grant.
+      assert.deepEqual(revocations, ["token=user-token"])
+      assert.deepEqual(
+        await rows(
+          "SELECT accessToken,refreshToken,scope FROM account WHERE id=?",
+          [legacy]
+        ),
+        [{ accessToken: null, refreshToken: null, scope: null }]
+      )
+      // Only Google sign-ins are touched, and only once.
+      assert.equal(
+        (
+          await rows<{ scope: string }>(
+            "SELECT scope FROM account WHERE id=?",
+            [current]
+          )
+        )[0].scope,
+        "https://www.googleapis.com/auth/drive.readonly"
+      )
+      assert.equal(await revokeLegacyDriveGrants(), 0)
+      assert.equal(revocations.length, 1)
+    } finally {
+      await pool.execute("DELETE FROM account WHERE userId=?", [userId])
     }
   })
 })

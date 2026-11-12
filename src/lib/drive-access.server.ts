@@ -207,10 +207,12 @@ export interface DriveFolder {
   name: string
   mimeType: string
   owners?: { emailAddress?: string }[]
+  capabilities?: { canListChildren?: boolean }
 }
 export async function getFolder(token: string, folderId: string) {
   const folder = (await driveCall(token, "GET", `files/${folderId}`, {
-    fields: "id,name,mimeType,owners(emailAddress)",
+    fields:
+      "id,name,mimeType,owners(emailAddress),capabilities(canListChildren)",
     supportsAllDrives: "true",
   })) as DriveFolder
   if (folder.mimeType !== FOLDER_MIME)
@@ -263,7 +265,9 @@ export async function removeAppShare(
   )
 }
 
-// Sharing can take a moment to reach the service account.
+// Sharing can take a moment to reach the service account. Seeing a folder is
+// not enough: inside a limited-access folder, Drive shows the folder to anyone
+// with access to its parent but lists its contents as empty.
 export async function waitForAppAccess(
   folderId: string,
   attempts = 5,
@@ -271,7 +275,13 @@ export async function waitForAppAccess(
 ) {
   for (let attempt = 1; ; attempt++) {
     try {
-      return await getFolder(await serviceAccountToken(), folderId)
+      const folder = await getFolder(await serviceAccountToken(), folderId)
+      if (folder.capabilities?.canListChildren !== true)
+        throw new DriveAccessError(
+          "MediaBinder can't open this folder's contents.",
+          "not-allowed"
+        )
+      return folder
     } catch (error) {
       if (
         attempt >= attempts ||
