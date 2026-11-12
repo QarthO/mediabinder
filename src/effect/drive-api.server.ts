@@ -52,27 +52,29 @@ const statusMessage = (status: number) =>
         ? "This file or folder is no longer available in Google Drive."
         : `Google Drive is unavailable (${status}). Try again.`
 
-/**
- * A Drive v3 GET, decoded as JSON. The failure carries a message written for
- * the person. The result is only as typed as the caller's `T`: callers ask
- * Drive for `fields` they then read.
- *
- * Not a span: a sync calls this once per page of files. The request is counted
- * in the Drive request metrics instead.
- */
-export const json = Effect.fnUntraced(function* <T>(
+// One Drive v3 call decoded as JSON, failing with a message for the person:
+// `refusal` words Google's non-2xx answers, and a call that got no usable
+// answer reads "Network request failed".
+const call = Effect.fnUntraced(function* <T>(
+  method: "GET" | "POST",
   token: string,
   path: string,
-  params: Record<string, string> = {}
+  params: Record<string, string>,
+  body: unknown,
+  refusal: (status: number) => string
 ): Effect.fn.Return<T, DriveApiError> {
-  const request = HttpClientRequest.get(`${DRIVE_API}/${path}`, {
+  const request = HttpClientRequest.make(method)(`${DRIVE_API}/${path}`, {
     urlParams: params,
     headers: { Authorization: `Bearer ${token}` },
   })
-  const operation = driveOperation("GET", path)
-  const { status, body } = yield* driveJsonRequest(operation, request, {
-    timeout: "30 seconds",
-  }).pipe(
+  const operation = driveOperation(method, path)
+  const { status, body: payload } = yield* driveJsonRequest(
+    operation,
+    body === undefined
+      ? request
+      : HttpClientRequest.bodyJsonUnsafe(request, body),
+    { timeout: "30 seconds" }
+  ).pipe(
     Effect.mapError(
       (error) =>
         new DriveApiError({
@@ -89,10 +91,45 @@ export const json = Effect.fnUntraced(function* <T>(
     return yield* new DriveApiError({
       operation,
       status,
-      userMessage: statusMessage(status),
+      userMessage: refusal(status),
     })
-  return body as T
+  return payload as T
 })
+
+/**
+ * A Drive v3 GET, decoded as JSON. The failure carries a message written for
+ * the person. The result is only as typed as the caller's `T`: callers ask
+ * Drive for `fields` they then read.
+ *
+ * Not a span: a sync calls this once per page of files. The request is counted
+ * in the Drive request metrics instead.
+ */
+export const json = <T>(
+  token: string,
+  path: string,
+  params: Record<string, string> = {}
+) => call<T>("GET", token, path, params, undefined, statusMessage)
+
+/**
+ * A Drive v3 POST with a JSON body, decoded like `json` (`undefined` for a
+ * 204). Used for watch channels, so a refusal reads as a watch failure. Not
+ * retried: a registration may have succeeded when the connection dropped.
+ */
+export const post = <T>(
+  token: string,
+  path: string,
+  body: unknown,
+  params: Record<string, string> = {}
+) =>
+  call<T>(
+    "POST",
+    token,
+    path,
+    params,
+    body,
+    (status) =>
+      `Drive watch request failed (${status}). Check OAuth access, Drive permissions, and the public webhook URL.`
+  )
 
 /** Every folder the person's own token can see, by name. */
 export const listFolders = Effect.fn("Drive.listFolders")(function* (

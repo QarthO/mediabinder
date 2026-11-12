@@ -11,6 +11,7 @@ import type { Fiber, Tracer } from "effect"
 import { isExpectedAppError } from "@/observability/error-policy"
 import * as Telemetry from "@/telemetry"
 import { Database, DatabaseLive } from "./database"
+import { ProcessMetricsLive } from "./process-metrics.server"
 import { ThumbnailSourceLive } from "./thumbnail-source.server"
 import { Thumbnails } from "./thumbnails"
 
@@ -27,11 +28,18 @@ const sourceCommit =
   undefined
 
 // package.json carries no version, so the commit identifies the release.
-const TelemetryLive = Telemetry.layer({
-  serviceName: "mediabinder",
-  serviceVersion: sourceCommit,
-  attributes: sourceCommit ? { "vcs.ref.head.revision": sourceCommit } : {},
-})
+// The Drive worker is its own process with its own telemetry identity: it sets
+// MEDIABINDER_SERVICE_NAME before the runtime's first use, which is when this
+// layer is built (the runtime is lazy), not when the module loads.
+const TelemetryLive = Layer.unwrap(
+  Effect.sync(() =>
+    Telemetry.layer({
+      serviceName: process.env.MEDIABINDER_SERVICE_NAME || "mediabinder",
+      serviceVersion: sourceCommit,
+      attributes: sourceCommit ? { "vcs.ref.head.revision": sourceCommit } : {},
+    })
+  )
+)
 
 /** What every effect run on MediaBinder's runtime may use. */
 export type AppServices = Thumbnails | Database
@@ -44,7 +52,8 @@ const AppLive = Layer.mergeAll(
   // Connects on first query, so a MySQL outage doesn't stop this runtime
   // from building: thumbnails and /api/health still work.
   DatabaseLive,
-  TelemetryLive
+  TelemetryLive,
+  ProcessMetricsLive
 ).pipe(Layer.provideMerge(ConsoleLogLive))
 const runtime = ManagedRuntime.make(AppLive)
 
@@ -94,6 +103,17 @@ export function runAppEffectUntraced<TResult, TError>(
   effect: Effect.Effect<TResult, TError, AppServices>
 ): Promise<TResult> {
   return runtime.runPromise(Effect.withTracerEnabled(effect, false))
+}
+
+/**
+ * Starts a long-lived worker on the runtime, such as the Drive worker's loop.
+ * It gets no span of its own: the work it does is spanned job by job. Disposing
+ * the runtime doesn't interrupt it, so interrupt the fiber first.
+ */
+export function forkAppWorker<TResult, TError>(
+  effect: Effect.Effect<TResult, TError, AppServices>
+): Fiber.Fiber<TResult, TError> {
+  return runtime.runFork(effect)
 }
 
 export function forkAppEffect<TResult, TError>(
