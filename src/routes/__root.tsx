@@ -5,6 +5,7 @@ import {
   Outlet,
 } from "@tanstack/react-router"
 import type { QueryClient } from "@tanstack/react-query"
+import { AppErrorPage, AppNotFoundPage } from "@/components/app-error-page"
 import { Toaster } from "@/components/ui/sonner"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import geist from "@fontsource-variable/geist/files/geist-latin-wght-normal.woff2?url"
@@ -52,18 +53,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       </html>
     ),
     component: Outlet,
-    notFoundComponent: () => (
-      <main className="login">
-        <h1>Page not found</h1>
-        <a href="/">Back to your library</a>
-      </main>
-    ),
-    errorComponent: ({ reset }) => (
-      <main className="login">
-        <h1>Could not load MediaBinder</h1>
-        <p>Please try again.</p>
-        <button onClick={reset}>Retry</button>
-      </main>
-    ),
+    notFoundComponent: AppNotFoundPage,
+    errorComponent: AppErrorPage,
   }
 )
