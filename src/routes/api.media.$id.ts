@@ -1,4 +1,4 @@
-import { runServer } from "@/effect/runtime.server"
+import { runAppEffect } from "@/effect/runtime.server"
 import { createFileRoute } from "@tanstack/react-router"
 import { requireSession } from "@/lib/auth.server"
 import { rows } from "@/lib/database.server"
@@ -21,7 +21,9 @@ export const Route = createFileRoute("/api/media/$id")({
           return new Response("File unavailable.", { status: 404 })
         if (new URL(request.url).searchParams.has("thumbnail"))
           return thumbnailResponse(session.user.id, media.drive_id, request)
-        return runServer(mediaResponse(request, media), request.signal)
+        return runAppEffect("Media.get", mediaResponse(request, media), {
+          signal: request.signal,
+        })
       },
     },
   },

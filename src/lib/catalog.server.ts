@@ -2,7 +2,7 @@ import { Effect, Schema } from "effect"
 import { randomUUID } from "node:crypto"
 import type { PoolConnection, RowDataPacket } from "mysql2/promise"
 import { pool } from "./database.server"
-import { runServer } from "@/effect/runtime.server"
+import { runAppEffect } from "@/effect/runtime.server"
 import type { DriveFile } from "./drive.server"
 
 // Serialize catalog merges and edits. Google scans happen before this short lock.
@@ -10,7 +10,8 @@ export function catalogTransaction<A>(
   work: (connection: PoolConnection) => Promise<A>,
   existing?: PoolConnection
 ) {
-  return runServer(
+  return runAppEffect(
+    "Catalog.transaction",
     Effect.acquireUseRelease(
       existing
         ? Effect.succeed(existing)
@@ -184,7 +185,8 @@ export function withDriveLock<A>(
   userId: string,
   work: (connection: PoolConnection) => Promise<A>
 ) {
-  return runServer(
+  return runAppEffect(
+    "Drive.lock",
     Effect.acquireUseRelease(
       Effect.tryPromise(() => pool.getConnection()),
       (connection) =>

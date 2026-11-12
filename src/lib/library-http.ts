@@ -10,6 +10,8 @@ type Dependencies = {
     userId: string,
     headers: Headers
   ) => Promise<unknown>
+  // Exports unexpected failures; injected so this module stays server-free.
+  report: (cause: unknown, context: { operation: string }) => void
 }
 
 // Only known user-facing messages leave the server; others become the fallback.
@@ -22,7 +24,7 @@ export function publicErrorMessage(error: unknown, fallback: string) {
     : fallback
 }
 
-export const libraryPost = Effect.fn("library.post")(
+export const libraryPost = Effect.fnUntraced(
   function* (request: Request, dependencies: Dependencies) {
     const origin = yield* Effect.try({
       try: () => appUrl(),
@@ -62,21 +64,23 @@ export const libraryPost = Effect.fn("library.post")(
     })
     return Response.json(result, { headers: { "Cache-Control": "no-store" } })
   },
-  Effect.catch((error) => {
-    if (error instanceof Response) return Effect.succeed(error)
-    if (error instanceof ZodError)
-      return Effect.succeed(
-        Response.json(
-          { error: error.issues[0]?.message ?? "Check the entered values." },
-          { status: 400 }
+  (self, _request, dependencies) =>
+    Effect.catch(self, (error) => {
+      if (error instanceof Response) return Effect.succeed(error)
+      if (error instanceof ZodError)
+        return Effect.succeed(
+          Response.json(
+            { error: error.issues[0]?.message ?? "Check the entered values." },
+            { status: 400 }
+          )
         )
+      const message = publicErrorMessage(
+        error,
+        "Could not save this change. Please try again."
       )
-    const message = publicErrorMessage(
-      error,
-      "Could not save this change. Please try again."
-    )
-    return Effect.logError("Library action failed", { message }).pipe(
-      Effect.as(Response.json({ error: message }, { status: 400 }))
-    )
-  })
+      // Only the sanitized message goes in the response; the cause is logged.
+      return Effect.sync(() =>
+        dependencies.report(error, { operation: "Library.post" })
+      ).pipe(Effect.as(Response.json({ error: message }, { status: 400 })))
+    })
 )

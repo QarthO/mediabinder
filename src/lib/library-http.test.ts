@@ -15,12 +15,16 @@ describe("library POST", () => {
         vi.stubEnv("MEDIABINDER_URL", "https://rien.cloud/")
         vi.stubEnv("BETTER_AUTH_URL", undefined)
         let calls = 0
+        const reported: unknown[] = []
         const dependencies = {
           session: async () => ({ user: { id: "owner" } }),
           mutate: async (action: string) => {
             calls++
             expect(action).toBe("folders")
             return [{ id: "folder" }]
+          },
+          report: (cause: unknown) => {
+            reported.push(cause)
           },
         }
         const request = (origin: string) =>
@@ -53,6 +57,21 @@ describe("library POST", () => {
           },
         })
         expect(signedOut.status).toBe(401)
+        expect(reported).toEqual([])
+
+        // The response carries only the sanitized message; the cause is reported.
+        const cause = new Error("database exploded at 10.0.0.5")
+        const failed = yield* libraryPost(request("https://rien.cloud"), {
+          ...dependencies,
+          mutate: async () => {
+            throw cause
+          },
+        })
+        expect(failed.status).toBe(400)
+        expect(yield* Effect.promise(() => failed.json())).toEqual({
+          error: "Could not save this change. Please try again.",
+        })
+        expect(reported).toEqual([cause])
       })
   )
 })
