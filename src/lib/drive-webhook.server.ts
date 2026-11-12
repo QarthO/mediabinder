@@ -10,7 +10,7 @@ import {
   timingSafeEqual,
 } from "node:crypto"
 import { pool, rows } from "./database.server"
-import { driveJson, driveToken, syncDrive } from "./drive.server"
+import { driveJson, driveReadToken, syncDrive } from "./drive.server"
 
 export async function queueDriveSync(userId: string) {
   await pool.execute(
@@ -134,7 +134,7 @@ export async function maintainWatches(userId: string) {
     [userId]
   )
   if (!callback) return
-  const token = await driveToken(undefined, userId)
+  const token = await driveReadToken(userId)
   const scopes = new Set<string>()
   if (sources.length) scopes.add("")
   for (const source of sources) {

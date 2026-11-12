@@ -16,6 +16,7 @@ import { dateValue } from "@/lib/utils"
 import { Button } from "./ui/button"
 import { Input } from "./ui/input"
 import { DriveSyncButton, useDriveSyncBusy } from "./drive-sync"
+import { SharedFolderLink } from "./shared-folder-link"
 import type { Library } from "@/lib/types"
 export function DriveSettings({
   workspace,
@@ -45,16 +46,27 @@ export function DriveSettings({
     onError: (e) => toast.error(e.message),
   })
   const unlink = useMutation({
-    mutationFn: (folderId: string) => action("remove-source", { folderId }),
-    onSuccess: async () => {
+    mutationFn: (folderId: string) =>
+      action<{
+        ok: boolean
+        access_removed?: boolean
+        share_address?: string | null
+      }>("remove-source", { folderId }),
+    onSuccess: async (result) => {
       await client.invalidateQueries({ queryKey: ["library"] })
       await router.invalidate()
       setRemoving(null)
-      toast.success("Folder unlinked. Its metadata is preserved.")
+      if (result.share_address && !result.access_removed)
+        toast.info(
+          `Folder unlinked. MediaBinder no longer syncs it. To remove its access too, remove ${result.share_address} from the folder's sharing in Drive.`,
+          { duration: 12_000 }
+        )
+      else toast.success("Folder unlinked. Its metadata is preserved.")
     },
     onError: (e) => toast.error(e.message),
   })
   const syncing = useDriveSyncBusy()
+  const sharedMode = workspace.drive_access.mode === "shared-folder"
   const alreadyLinked = workspace.sources.some(
     (source) => source.folder_id === folderIdFromInput(folder)
   )
@@ -83,94 +95,108 @@ export function DriveSettings({
             </Button>
           </div>
           <h3>Link folder</h3>
-          <form
-            onSubmit={(e) => {
-              e.preventDefault()
-              save.mutate()
-            }}
-          >
-            <label className="field">
-              Folder link or ID
-              <Input
-                value={folder}
-                onChange={(e) => setFolder(e.target.value)}
-                placeholder="Paste a Google Drive folder link"
-                required
-              />
-            </label>
-            <div className="settings-actions">
-              <Button
-                variant="outline"
-                type="button"
-                onClick={() => setBrowse((v) => !v)}
+          {sharedMode ? (
+            <SharedFolderLink workspace={workspace} disabled={syncing} />
+          ) : (
+            <>
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault()
+                  save.mutate()
+                }}
               >
-                <FolderOpen />
-                Browse folders
-              </Button>
-              <Button
-                variant="secondary"
-                type="submit"
-                disabled={
-                  !folder.trim() || save.isPending || alreadyLinked || syncing
-                }
-              >
-                {alreadyLinked
-                  ? "Already linked"
-                  : save.isPending
-                    ? "Linking…"
-                    : "Link folder"}
-              </Button>
-            </div>
-          </form>
-          {browse && (
-            <div className="folder-picker">
-              <Input
-                aria-label="Find a Drive folder"
-                placeholder="Find a folder…"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-              {folders.isPending ? (
-                <p>Loading folders…</p>
-              ) : folders.isError ? (
-                <div role="alert">
-                  <p>{folders.error.message}</p>
-                  <Button variant="outline" onClick={() => folders.refetch()}>
-                    Retry
+                <label className="field">
+                  Folder link or ID
+                  <Input
+                    value={folder}
+                    onChange={(e) => setFolder(e.target.value)}
+                    placeholder="Paste a Google Drive folder link"
+                    required
+                  />
+                </label>
+                <div className="settings-actions">
+                  <Button
+                    variant="outline"
+                    type="button"
+                    onClick={() => setBrowse((v) => !v)}
+                  >
+                    <FolderOpen />
+                    Browse folders
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    type="submit"
+                    disabled={
+                      !folder.trim() ||
+                      save.isPending ||
+                      alreadyLinked ||
+                      syncing
+                    }
+                  >
+                    {alreadyLinked
+                      ? "Already linked"
+                      : save.isPending
+                        ? "Linking…"
+                        : "Link folder"}
                   </Button>
                 </div>
-              ) : (
-                <div className="folder-options">
-                  {folders.data
-                    .filter((f) =>
-                      f.name.toLowerCase().includes(search.toLowerCase())
-                    )
-                    .map((f) => (
-                      <button
-                        key={f.id}
-                        disabled={workspace.sources.some(
-                          (source) => source.folder_id === f.id
-                        )}
-                        onClick={() => setFolder(f.id)}
-                        className={folder === f.id ? "chosen" : ""}
+              </form>
+              {browse && (
+                <div className="folder-picker">
+                  <Input
+                    aria-label="Find a Drive folder"
+                    placeholder="Find a folder…"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                  />
+                  {folders.isPending ? (
+                    <p>Loading folders…</p>
+                  ) : folders.isError ? (
+                    <div role="alert">
+                      <p>{folders.error.message}</p>
+                      <Button
+                        variant="outline"
+                        onClick={() => folders.refetch()}
                       >
-                        <FolderOpen size={16} />
-                        <span>
-                          {f.name}
-                          <small>{f.id}</small>
-                        </span>
-                        {(folder === f.id ||
-                          workspace.sources.some(
-                            (source) => source.folder_id === f.id
-                          )) && <Check size={15} />}
-                      </button>
-                    ))}
-                  {!folders.data.length && (
-                    <p>No folders found. Paste a shared folder link above.</p>
+                        Retry
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="folder-options">
+                      {folders.data
+                        .filter((f) =>
+                          f.name.toLowerCase().includes(search.toLowerCase())
+                        )
+                        .map((f) => (
+                          <button
+                            key={f.id}
+                            disabled={workspace.sources.some(
+                              (source) => source.folder_id === f.id
+                            )}
+                            onClick={() => setFolder(f.id)}
+                            className={folder === f.id ? "chosen" : ""}
+                          >
+                            <FolderOpen size={16} />
+                            <span>
+                              {f.name}
+                              <small>{f.id}</small>
+                            </span>
+                            {(folder === f.id ||
+                              workspace.sources.some(
+                                (source) => source.folder_id === f.id
+                              )) && <Check size={15} />}
+                          </button>
+                        ))}
+                      {!folders.data.length && (
+                        <p>
+                          No folders found. Paste a shared folder link above.
+                        </p>
+                      )}
+                    </div>
                   )}
                 </div>
               )}
-            </div>
+            </>
           )}
           <div className="settings-folders">
             <div className="section-heading">
@@ -220,6 +246,10 @@ export function DriveSettings({
                       <p>
                         Unlink this folder? Media unique to it will be hidden.
                         Your edits are kept if you link it again.
+                        {sharedMode &&
+                          (source.shared_by_app
+                            ? " MediaBinder also tries to remove its access to the folder."
+                            : " MediaBinder stops syncing it; you can remove its access from the folder's sharing in Drive.")}
                       </p>
                       <div className="settings-actions">
                         <Button

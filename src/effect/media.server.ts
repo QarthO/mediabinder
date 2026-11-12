@@ -1,11 +1,13 @@
 import { Effect } from "effect"
-import { driveToken } from "@/lib/drive.server"
+import { driveReadToken } from "@/lib/drive.server"
 
 // Keep the native response stream alive after headers are returned. The incoming
 // request signal owns the download lifetime, including browser cancellation.
 export const mediaResponse = Effect.fn("drive.media")(
   function* (request: Request, media: { drive_id: string; mime_type: string }) {
-    const token = yield* Effect.tryPromise(() => driveToken(request.headers))
+    const token = yield* Effect.tryPromise(() =>
+      driveReadToken(undefined, request.headers)
+    )
     const headers = new Headers({ Authorization: `Bearer ${token}` })
     const range = request.headers.get("range")
     if (range) {

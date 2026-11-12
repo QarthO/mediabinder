@@ -8,6 +8,7 @@ import { Effect } from "effect"
 import { jsonRequest } from "@/effect/http"
 import { randomUUID } from "node:crypto"
 import { auth } from "./auth.server"
+import { serviceAccountToken, sharedFolderMode } from "./drive-access.server"
 import type { PoolConnection } from "mysql2/promise"
 import type { SyncRun } from "./types"
 import {
@@ -52,6 +53,14 @@ export async function driveToken(headers?: Headers, userId?: string) {
   )
 }
 
+// Token used to read Drive content. In shared-folder mode that is MediaBinder's
+// service account (routes check ownership first); otherwise the user's token.
+export async function driveReadToken(userId?: string, headers?: Headers) {
+  return sharedFolderMode()
+    ? serviceAccountToken()
+    : driveToken(headers, userId)
+}
+
 export async function driveJson<T>(
   token: string,
   path: string,
@@ -75,6 +84,10 @@ export async function driveJson<T>(
   )
 }
 export async function listFolders(headers: Headers) {
+  // The service account can see every user's shared folders, so browsing is
+  // only offered with full-Drive user tokens. Shared-folder mode uses Google's picker.
+  if (sharedFolderMode())
+    throw new Error("Choose folders with the Google Drive picker.")
   const token = await driveToken(headers)
   const folders: { id: string; name: string }[] = []
   let pageToken = ""
@@ -104,7 +117,7 @@ type SyncOptions = {
 }
 
 export async function syncDrive(userId: string, options: SyncOptions = {}) {
-  const token = options.token ?? (await driveToken(options.headers, userId))
+  const token = options.token ?? (await driveReadToken(userId, options.headers))
   return withDriveLock(userId, async (connection) => {
     const [sources] = await connection.query<import("mysql2").RowDataPacket[]>(
       "SELECT folder_id FROM drive_folder WHERE user_id = ?",
@@ -139,7 +152,7 @@ export async function syncDrive(userId: string, options: SyncOptions = {}) {
 // progress row. Joining an in-flight run (for example a webhook sync) is not
 // an error: the caller simply watches that run instead.
 export async function startDriveSync(userId: string, headers: Headers) {
-  const token = await driveToken(headers, userId)
+  const token = await driveReadToken(userId, headers)
   return new Promise<SyncRun | null>((resolve, reject) => {
     let started = false
     syncDrive(userId, {
@@ -179,6 +192,18 @@ async function reconcileDrive(
   const found = new Set<string>()
   let foldersScanned = 0
   for (const folderId of folderIds) {
+    // Drive lists an unshared folder as empty rather than failing. In
+    // shared-folder mode, check access first so an unshared folder fails the
+    // run (preserving the catalog) instead of hiding its media.
+    if (sharedFolderMode())
+      await driveJson(token, `files/${folderId}`, {
+        fields: "id",
+        supportsAllDrives: "true",
+      }).catch(() => {
+        throw new Error(
+          "MediaBinder can't open a linked folder. Share it with MediaBinder's sync account in Google Drive, then sync again."
+        )
+      })
     const pending = [folderId],
       visited = new Set<string>(),
       files: DriveFile[] = []
