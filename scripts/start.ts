@@ -1,8 +1,11 @@
 import { spawn, type ChildProcess } from "node:child_process"
 import { validateRuntimeConfig } from "../src/lib/config"
+import { parseServiceAccount } from "../src/lib/drive-access.server"
 
 try {
   validateRuntimeConfig()
+  // Shared-folder mode is enabled by a service account key; fail fast if it's malformed.
+  parseServiceAccount()
 } catch (error) {
   console.error(
     error instanceof Error ? error.message : "Invalid runtime configuration."

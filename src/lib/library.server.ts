@@ -21,7 +21,19 @@ import {
   addMediaTags,
   removeMediaTag,
   tags,
+  linkFolder,
 } from "./validation"
+import {
+  DriveAccessError,
+  createFolder,
+  getFolder,
+  pickerConfig,
+  removeAppShare,
+  serviceAccountEmail,
+  shareFolderWithApp,
+  sharedFolderMode,
+  waitForAppAccess,
+} from "./drive-access.server"
 import {
   driveJson,
   driveToken,
@@ -68,7 +80,7 @@ export async function library(
       [user.id, user.id, user.id]
     ),
     rows<DriveSource>(
-      "SELECT folder_id,folder_name,last_synced_at FROM drive_folder WHERE user_id=? ORDER BY folder_name",
+      "SELECT folder_id,folder_name,last_synced_at,share_permission_id IS NOT NULL AS shared_by_app FROM drive_folder WHERE user_id=? ORDER BY folder_name",
       [user.id]
     ),
     rows<{ set_id: string; catalog_id: string }>(
@@ -158,6 +170,13 @@ export async function library(
     posts,
     workspace: {
       sources,
+      drive_access: sharedFolderMode()
+        ? {
+            mode: "shared-folder",
+            service_account: serviceAccountEmail(),
+            picker: Boolean(pickerConfig()),
+          }
+        : { mode: "full-drive", service_account: null, picker: false },
       webhook: {
         configured: Boolean(driveWebhookUrl()),
         active: watches[0]?.count ?? 0,
@@ -182,7 +201,30 @@ export async function mutate(
   if (action === "sync") return startDriveSync(userId, headers)
   if (action === "sync-status") return syncStatus(userId)
   if (action === "folders") return listFolders(headers)
+  if (action === "picker-session") {
+    const picker = pickerConfig()
+    if (!sharedFolderMode() || !picker)
+      throw new Error("The Google Drive picker isn't set up.")
+    // The user's own drive.file token: it can only reach files they pick.
+    return { ...picker, token: await driveToken(undefined, userId) }
+  }
+  if (action === "create-folder") {
+    if (!sharedFolderMode())
+      throw new Error("Create folders from Google Drive instead.")
+    const { name } = z
+      .object({ name: z.string().trim().min(1).max(100) })
+      .parse(input)
+    const created = await createFolder(
+      await driveToken(undefined, userId),
+      name
+    )
+    return linkSharedFolder(userId, headers, {
+      folderId: created.id,
+      share: true,
+    })
+  }
   if (action === "source") {
+    if (sharedFolderMode()) return linkSharedFolder(userId, headers, input)
     const value = folder.parse(input),
       token = await driveToken(headers)
     const source = await driveJson<{
@@ -205,6 +247,10 @@ export async function mutate(
   }
   if (action === "remove-source") {
     const value = folder.parse(input)
+    const [linked] = await rows<{ share_permission_id: string | null }>(
+      "SELECT share_permission_id FROM drive_folder WHERE user_id=? AND folder_id=?",
+      [userId, value.folderId]
+    )
     await editSources(userId, async (connection) => {
       await connection.execute(
         "DELETE FROM drive_folder WHERE user_id=? AND folder_id=?",
@@ -215,7 +261,22 @@ export async function mutate(
         [userId]
       )
     })
-    return { ok: true }
+    if (!sharedFolderMode()) return { ok: true }
+    // Whether MediaBinder's service account lost access to the folder. Google
+    // only lets MediaBinder remove the share while it can write everything
+    // inside, so the user may need to remove it in Drive.
+    const access_removed = linked?.share_permission_id
+      ? await removeShareIfUnused(
+          userId,
+          value.folderId,
+          linked.share_permission_id
+        )
+      : false
+    return {
+      ok: true,
+      access_removed,
+      service_account: serviceAccountEmail(),
+    }
   }
   return catalogTransaction(async (connection) => {
     if (action === "tag-color") {
@@ -459,6 +520,132 @@ export async function mutate(
 }
 
 // Source edits share the sync lock, so an in-flight scan cannot restore an unlinked folder.
+export type LinkResult =
+  | { ok: true; status: "linked"; folder_name: string; shared: boolean }
+  | {
+      ok: false
+      status: "needs-share"
+      folder_id: string
+      folder_name: string | null
+      service_account: string
+      reason: string
+    }
+
+// Shared-folder linking. The service account can read every folder any user
+// shared with it, so a user may only link a folder they can prove they reach:
+// either their drive.file token sees it (they chose it in Google's picker) or
+// Google lists them as its owner.
+async function linkSharedFolder(
+  userId: string,
+  headers: Headers,
+  input: unknown
+): Promise<LinkResult> {
+  const value = linkFolder.parse(input)
+  const serviceAccount = serviceAccountEmail()!
+  const [user] = await rows<{ email: string }>(
+    "SELECT email FROM user WHERE id=?",
+    [userId]
+  )
+  let picked: { name: string } | null = null
+  try {
+    picked = await getFolder(
+      await driveToken(undefined, userId),
+      value.folderId
+    )
+  } catch (error) {
+    if (!(error instanceof DriveAccessError)) throw error
+  }
+  let permissionId: string | null = null
+  if (value.share) {
+    if (!picked)
+      throw new Error(
+        "Choose the folder with the Google Drive picker so MediaBinder can share it."
+      )
+    try {
+      permissionId = await shareFolderWithApp(
+        await driveToken(undefined, userId),
+        value.folderId
+      )
+    } catch (error) {
+      if (!(error instanceof DriveAccessError)) throw error
+      if (error.code === "scope") throw error
+      return {
+        ok: false,
+        status: "needs-share",
+        folder_id: value.folderId,
+        folder_name: picked.name,
+        service_account: serviceAccount,
+        reason: error.message,
+      }
+    }
+  }
+  let source
+  try {
+    source = await waitForAppAccess(value.folderId, value.share ? 6 : 2)
+  } catch (error) {
+    if (!(error instanceof DriveAccessError) || error.code === "unavailable")
+      throw error
+    return {
+      ok: false,
+      status: "needs-share",
+      folder_id: value.folderId,
+      folder_name: picked?.name ?? null,
+      service_account: serviceAccount,
+      reason: "MediaBinder can't see this folder yet.",
+    }
+  }
+  const owner = source.owners?.some(
+    (owner) => owner.emailAddress?.toLowerCase() === user?.email.toLowerCase()
+  )
+  if (!picked && !owner)
+    throw new Error(
+      "Choose this folder with the Google Drive picker to confirm you have access to it."
+    )
+  await editSources(userId, async (connection) => {
+    await connection.execute(
+      `INSERT INTO drive_folder(user_id,folder_id,folder_name,share_permission_id) VALUES (?,?,?,?)
+      ON DUPLICATE KEY UPDATE folder_name=VALUES(folder_name),share_permission_id=COALESCE(VALUES(share_permission_id),share_permission_id)`,
+      [userId, source.id, source.name, permissionId]
+    )
+  })
+  return {
+    ok: true,
+    status: "linked",
+    folder_name: source.name,
+    shared: Boolean(permissionId),
+  }
+}
+
+// Remove MediaBinder's viewer access once no MediaBinder user links the folder.
+// Best effort: unlinking succeeds even if Google refuses (the user can remove
+// the share in Drive), and the service account then simply stops reading it.
+async function removeShareIfUnused(
+  userId: string,
+  folderId: string,
+  permissionId: string
+) {
+  const [others] = await rows<{ count: number }>(
+    "SELECT COUNT(*) AS count FROM drive_folder WHERE folder_id=?",
+    [folderId]
+  )
+  // Another MediaBinder user still syncs this folder; keep the share.
+  if (Number(others?.count) > 0) return false
+  try {
+    await removeAppShare(
+      await driveToken(undefined, userId),
+      folderId,
+      permissionId
+    )
+    return true
+  } catch (error) {
+    console.warn(
+      "Could not remove MediaBinder's folder share:",
+      error instanceof Error ? error.message : "Unknown error"
+    )
+    return false
+  }
+}
+
 async function editSources(
   userId: string,
   edit: (connection: import("mysql2/promise").PoolConnection) => Promise<void>

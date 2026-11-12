@@ -2,6 +2,7 @@ import { betterAuth } from "better-auth"
 import { APIError } from "better-auth/api"
 import { pool, rows } from "./database.server"
 import { appUrl } from "./config"
+import { sharedFolderMode } from "./drive-access.server"
 export const auth = betterAuth({
   appName: "MediaBinder",
   baseURL: appUrl(),
@@ -13,7 +14,12 @@ export const auth = betterAuth({
       clientSecret: process.env.GOOGLE_CLIENT_SECRET ?? "",
       accessType: "offline",
       prompt: "select_account consent",
-      scope: ["https://www.googleapis.com/auth/drive.readonly"],
+      // Shared-folder mode only needs per-file access for the picker and sharing.
+      scope: [
+        sharedFolderMode()
+          ? "https://www.googleapis.com/auth/drive.file"
+          : "https://www.googleapis.com/auth/drive.readonly",
+      ],
     },
   },
   account: { encryptOAuthTokens: true },

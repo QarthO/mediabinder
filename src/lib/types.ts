@@ -45,6 +45,8 @@ export interface DriveSource {
   folder_id: string
   folder_name: string
   last_synced_at: string | null
+  // Shared-folder mode: MediaBinder added (and will remove) its own access.
+  shared_by_app?: boolean | number
 }
 export interface Library {
   tag_colors: Record<string, string>
@@ -53,6 +55,11 @@ export interface Library {
   posts: Post[]
   workspace: {
     sources: DriveSource[]
+    drive_access: {
+      mode: "shared-folder" | "full-drive"
+      service_account: string | null
+      picker: boolean
+    }
     webhook: { configured: boolean; active: number; error: string | null }
     last_synced_at: string | null
   }

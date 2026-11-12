@@ -1,6 +1,6 @@
 import { Effect, Layer, Logger, ManagedRuntime, Schema } from "effect"
 import { tracing } from "./runtime.server"
-import { driveToken } from "@/lib/drive.server"
+import { driveReadToken } from "@/lib/drive.server"
 import {
   readThumbnail,
   ThumbnailError,
@@ -15,7 +15,7 @@ const SourceLive = Layer.succeed(ThumbnailSource, {
   load: Effect.fn("thumbnails.google")(function* (key: string) {
     const [userId, driveId] = key.split(":")
     const token = yield* Effect.tryPromise({
-      try: () => driveToken(undefined, userId),
+      try: () => driveReadToken(userId),
       catch: () =>
         new ThumbnailError({
           status: 401,

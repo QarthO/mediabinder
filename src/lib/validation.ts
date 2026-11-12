@@ -54,6 +54,7 @@ export const folder = z.object({
     .trim()
     .regex(/^[\w-]{1,255}$/, "Choose a Drive folder or paste its ID"),
 })
+export const linkFolder = folder.extend({ share: z.boolean().default(false) })
 export function folderIdFromInput(value: string) {
   return value.match(/\/folders\/([\w-]+)/)?.[1] ?? value.trim()
 }

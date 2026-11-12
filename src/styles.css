@@ -1868,6 +1868,94 @@ html {
 .unlink-confirm {
   padding: 0 18px 18px;
 }
+.settings-hint {
+  margin: 6px 0 16px;
+  font-size: 0.8125rem;
+  line-height: 1.7;
+  color: #879bb7;
+}
+.paste-folder {
+  margin-top: 22px;
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+}
+.paste-folder .field {
+  flex: 1;
+  margin: 0;
+}
+.settings-actions-start {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.share-waiting {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.share-waiting svg {
+  flex-shrink: 0;
+  animation: spin 1.2s linear infinite;
+}
+.share-panel {
+  display: flex;
+  gap: 14px;
+  margin-top: 14px;
+  padding: 18px;
+  border: 1px solid #344965;
+  background: #151d2a;
+}
+.share-panel > svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--primary);
+}
+.share-panel > div {
+  min-width: 0;
+  flex: 1;
+}
+.share-panel p,
+.share-panel li {
+  font-size: 0.8125rem;
+  line-height: 1.7;
+  color: #a5b4cc;
+}
+.share-panel p {
+  margin: 6px 0 12px;
+}
+.share-panel ol {
+  margin: 0 0 16px;
+  padding-left: 20px;
+  display: grid;
+  gap: 8px;
+}
+.share-panel a {
+  color: var(--primary);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.share-address {
+  display: inline-block;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  font: 0.75rem var(--font-mono);
+  padding: 6px 9px;
+  background: var(--background);
+  border: 1px solid var(--border);
+  color: var(--foreground);
+  margin-bottom: 14px;
+}
+.share-copy {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+.share-copy .share-address {
+  margin-bottom: 0;
+}
 .folder-options button:disabled {
   opacity: 0.5;
 }
