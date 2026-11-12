@@ -83,11 +83,14 @@ importers:
         specifier: ^2.0.8
         version: 2.0.8(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       srvx:
-        specifier: ^0.11.16
-        version: 0.11.22
+        specifier: 1.0.8
+        version: 1.0.8
       tailwind-merge:
         specifier: ^3.7.0
         version: 3.7.0
+      tsx:
+        specifier: ^4.23.15
+        version: 4.23.15
       zod:
         specifier: ^4.6.7
         version: 4.6.7
@@ -119,9 +122,6 @@ importers:
       tailwindcss:
         specifier: ^4.3.5
         version: 4.3.5
-      tsx:
-        specifier: ^4.23.15
-        version: 4.23.15
       tw-animate-css:
         specifier: ^1.4.0
         version: 1.4.0
@@ -4106,11 +4106,6 @@ packages:
     resolution: {integrity: sha512-4toX5E1fQbBrpfXidaHnF0669nkAdETeIPTs2SUjxxD7RRIs9ICG4gtpmfc68JCEKehsdwLFqBu9VlQqZ1P1gg==}
     engines: {bun: '>=1.0.0', deno: '>=2.0.0', node: '>=12.0.0'}
 
-  srvx@0.11.22:
-    resolution: {integrity: sha512-LqZxxBDMKuMAZzFzJnDCkFOrs9MZQZr0LvHiO/SuSZVdQaXD7xQ5UWTUxheJrQPve1qk9MG2B/yttUvJxw8egQ==}
-    engines: {node: '>=20.16.0'}
-    hasBin: true
-
   srvx@1.0.8:
     resolution: {integrity: sha512-ngFS/J6St4PJfHRHGjr78xkPPtbyXtdMOLNE4x/XZunEK3OhV7aGUWMHf9WTUEy6wm1U0W4okkd82ZFFWRVQTw==}
     engines: {node: '>=20.16.0'}
@@ -7976,8 +7971,6 @@ snapshots:
   source-map@0.7.6: {}
 
   sql-escaper@1.5.1: {}
-
-  srvx@0.11.22: {}
 
   srvx@1.0.8: {}
 
