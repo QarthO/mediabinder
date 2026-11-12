@@ -10,6 +10,12 @@ import { RefreshCw } from "lucide-react"
 import { toast } from "sonner"
 import { action } from "@/lib/api"
 import type { SyncRun } from "@/lib/types"
+import {
+  createSyncWatcher,
+  hideSyncRun,
+  observeSyncRun,
+  type SyncWatcher,
+} from "@/lib/sync-watch"
 import { Button } from "./ui/button"
 
 // The server records each sync's progress; only DriveSyncMonitor polls it.
@@ -28,7 +34,11 @@ function announceSync() {
   channel.close()
 }
 const isRunning = (run: SyncRun | null) => run?.status === "running"
+// A quiet webhook run can still be joined, so it leaves sync buttons enabled.
+const isWatched = (run: SyncRun | null) =>
+  run?.status === "running" && run.origin === "manual"
 
+// Any running sync holds the Drive lock, so folder edits wait for it.
 export function useDriveSyncBusy() {
   const { data: running = false } = useQuery({
     ...syncStatusQuery,
@@ -45,7 +55,11 @@ export function DriveSyncButton({
   label?: string
 }) {
   const client = useQueryClient()
-  const busy = useDriveSyncBusy()
+  const { data: watching = false } = useQuery({
+    ...syncStatusQuery,
+    select: isWatched,
+  })
+  const busy = useIsMutating({ mutationKey: startKey }) > 0 || watching
   const start = useMutation({
     mutationKey: startKey,
     mutationFn: () => action<SyncRun | null>("sync"),
@@ -120,16 +134,17 @@ export function DriveSyncMonitor() {
       void client.invalidateQueries({ queryKey: syncStatusQuery.queryKey })
     return () => channel.close()
   }, [client])
-  const watched = useRef(new Map<string, "running" | "hidden" | "done">())
+  const watcher = useRef<SyncWatcher | null>(null)
   useEffect(() => {
     if (!run) return
+    watcher.current ??= createSyncWatcher()
+    const update = observeSyncRun(watcher.current, run)
+    if (update.retire) toast.dismiss(`drive-sync-${update.retire}`)
+    if (update.refreshLibrary)
+      void client.invalidateQueries({ queryKey: ["library"] })
     const id = `drive-sync-${run.run_id}`
-    const state = watched.current.get(run.run_id)
-    if (run.status === "running") {
-      // Webhook syncs stay quiet unless someone asked to watch them.
-      if (run.origin !== "manual" || state === "hidden" || state === "done")
-        return
-      watched.current.set(run.run_id, "running")
+    if (update.toast === "progress") {
+      const current = watcher.current
       // A default toast with a spinner icon: Sonner's loading toasts cannot be
       // closed, and this one lasts as long as the sync.
       toast("Syncing Google Drive", {
@@ -138,25 +153,16 @@ export function DriveSyncMonitor() {
         description: <SyncProgress run={run} />,
         duration: Infinity,
         closeButton: true,
-        onDismiss: () => {
-          if (watched.current.get(run.run_id) === "running")
-            watched.current.set(run.run_id, "hidden")
-        },
+        onDismiss: () => hideSyncRun(current, run.run_id),
       })
-      return
-    }
-    // Only announce runs this tab watched; old results stay silent on reload.
-    if (!state || state === "done") return
-    watched.current.set(run.run_id, "done")
-    if (run.status === "succeeded") {
-      void client.invalidateQueries({ queryKey: ["library"] })
+    } else if (update.toast === "success")
       toast.success(`Synced ${items(run.item_count ?? run.files_total)}`, {
         id,
         icon: undefined,
         description: undefined,
         duration: 5000,
       })
-    } else
+    else if (update.toast === "error")
       toast.error(run.error ?? "Sync failed. Please try again.", {
         id,
         icon: undefined,
