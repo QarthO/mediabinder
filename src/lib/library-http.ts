@@ -12,6 +12,16 @@ type Dependencies = {
   ) => Promise<unknown>
 }
 
+// Only known user-facing messages leave the server; others become the fallback.
+export function publicErrorMessage(error: unknown, fallback: string) {
+  return error instanceof Error &&
+    /^(Google |Reconnect |Choose |A sync |The source |This file|Drive watch|Network request)/.test(
+      error.message
+    )
+    ? error.message
+    : fallback
+}
+
 export const libraryPost = Effect.fn("library.post")(
   function* (request: Request, dependencies: Dependencies) {
     const origin = yield* Effect.try({
@@ -61,13 +71,10 @@ export const libraryPost = Effect.fn("library.post")(
           { status: 400 }
         )
       )
-    const message =
-      error instanceof Error &&
-      /^(Google |Reconnect |Choose |A sync |The source |This file|Drive watch|Network request)/.test(
-        error.message
-      )
-        ? error.message
-        : "Could not save this change. Please try again."
+    const message = publicErrorMessage(
+      error,
+      "Could not save this change. Please try again."
+    )
     return Effect.logError("Library action failed", { message }).pipe(
       Effect.as(Response.json({ error: message }, { status: 400 }))
     )

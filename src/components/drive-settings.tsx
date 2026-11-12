@@ -15,6 +15,7 @@ import { folderIdFromInput } from "@/lib/validation"
 import { dateValue } from "@/lib/utils"
 import { Button } from "./ui/button"
 import { Input } from "./ui/input"
+import { DriveSyncButton, useDriveSyncBusy } from "./drive-sync"
 import type { Library } from "@/lib/types"
 export function DriveSettings({
   workspace,
@@ -53,14 +54,7 @@ export function DriveSettings({
     },
     onError: (e) => toast.error(e.message),
   })
-  const sync = useMutation({
-    mutationFn: () => action<{ count: number }>("sync"),
-    onSuccess: async (result) => {
-      await client.invalidateQueries({ queryKey: ["library"] })
-      toast.success(`Synced ${result.count} media items`)
-    },
-    onError: (e) => toast.error(e.message),
-  })
+  const syncing = useDriveSyncBusy()
   const alreadyLinked = workspace.sources.some(
     (source) => source.folder_id === folderIdFromInput(folder)
   )
@@ -117,10 +111,7 @@ export function DriveSettings({
                 variant="secondary"
                 type="submit"
                 disabled={
-                  !folder.trim() ||
-                  save.isPending ||
-                  alreadyLinked ||
-                  sync.isPending
+                  !folder.trim() || save.isPending || alreadyLinked || syncing
                 }
               >
                 {alreadyLinked
@@ -186,14 +177,11 @@ export function DriveSettings({
               <h3>
                 Linked folders <span>{workspace.sources.length}</span>
               </h3>
-              <Button
+              <DriveSyncButton
                 variant="outline"
-                disabled={!workspace.sources.length || sync.isPending}
-                onClick={() => sync.mutate()}
-              >
-                <RefreshCw className={sync.isPending ? "spin" : ""} />
-                {sync.isPending ? "Syncing…" : "Sync all folders"}
-              </Button>
+                label="Sync all folders"
+                disabled={!workspace.sources.length}
+              />
             </div>
             {!workspace.sources.length && <p>No folders linked yet.</p>}
             <div className="source-list">
@@ -222,7 +210,7 @@ export function DriveSettings({
                       aria-label={`Unlink ${source.folder_name}`}
                       title="Unlink folder"
                       onClick={() => setRemoving(source.folder_id)}
-                      disabled={unlink.isPending || sync.isPending}
+                      disabled={unlink.isPending || syncing}
                     >
                       <Unlink size={17} />
                     </button>
