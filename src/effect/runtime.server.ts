@@ -10,6 +10,7 @@ import {
 import type { Fiber, Tracer } from "effect"
 import { isExpectedAppError } from "@/observability/error-policy"
 import * as Telemetry from "@/telemetry"
+import { Database, DatabaseLive } from "./database"
 import { ThumbnailSourceLive } from "./thumbnail-source.server"
 import { Thumbnails } from "./thumbnails"
 
@@ -33,13 +34,16 @@ const TelemetryLive = Telemetry.layer({
 })
 
 /** What every effect run on MediaBinder's runtime may use. */
-export type AppServices = Thumbnails
+export type AppServices = Thumbnails | Database
 
 // JSON lines on stdout stay the readable `docker logs` format. Telemetry is
 // provided with this layer so its OTLP logger merges with it.
 const ConsoleLogLive = Logger.layer([Logger.consoleJson])
 const AppLive = Layer.mergeAll(
   Thumbnails.layer.pipe(Layer.provide(ThumbnailSourceLive)),
+  // Connects on first query, so a MySQL outage doesn't stop this runtime
+  // from building: thumbnails and /api/health still work.
+  DatabaseLive,
   TelemetryLive
 ).pipe(Layer.provideMerge(ConsoleLogLive))
 const runtime = ManagedRuntime.make(AppLive)

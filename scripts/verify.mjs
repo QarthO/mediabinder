@@ -12,9 +12,23 @@ const stages = {
   tests() {
     vp("test", "run")
   },
-  // TODO(database): a later layer adds a `database` stage here that runs the
-  // MySQL-backed tests against a real server. Until then it must not exist, so
-  // `pnpm verify all` never reports a skipped database run as a pass.
+  database() {
+    // The MySQL suites skip themselves without a server, so a pass is only
+    // meaningful when they ran.
+    if (process.env.MEDIABINDER_TEST_MYSQL !== "1" || !process.env.DB_HOST) {
+      console.error(
+        "Database verification requires MEDIABINDER_TEST_MYSQL=1 and DB_* " +
+          "pointing at a MySQL server whose DB_NAME ends in _test. Start one " +
+          "with: docker run -d --rm -p 127.0.0.1:3306:3306 " +
+          "-e MYSQL_ROOT_PASSWORD=root mysql:8.4, then set DB_HOST=127.0.0.1 " +
+          "DB_NAME=mediabinder_test DB_USER=root DB_PASS=root."
+      )
+      // Refuse in CI and locally alike: a skipped run must never read as a pass.
+      process.exit(1)
+    }
+    // Suites that need a server are named *.mysql.test.ts; `tests` skips them.
+    vp("test", "run", "--reporter", "verbose", ".mysql.test.ts")
+  },
   build() {
     vp("build")
     // A route added without committing the regenerated tree fails here.
@@ -22,7 +36,7 @@ const stages = {
   },
 }
 
-const usage = "Usage: pnpm verify [all|static|tests|build]"
+const usage = "Usage: pnpm verify [all|static|tests|database|build]"
 
 if (stage === "--help" || stage === "-h") {
   console.log(`${usage}

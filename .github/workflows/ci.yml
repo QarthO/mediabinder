@@ -21,12 +21,37 @@ jobs:
         include:
           - name: Static checks
             stage: static
+            env: {}
           - name: Tests
             stage: tests
-          # A `database` stage (real MySQL) is added here by a later layer.
+            env: {}
+          - name: Database tests
+            # Runs against real MySQL, which the other stages never touch.
+            stage: database
+            mysql: mysql:8.4
+            env:
+              MEDIABINDER_TEST_MYSQL: "1"
+              DB_HOST: 127.0.0.1
+              DB_PORT: "3306"
+              DB_NAME: mediabinder_test
+              DB_USER: root
+              DB_PASS: root
           - name: Build
             stage: build
+            env: {}
     steps:
+      # Backs the real-MySQL suites (src/test/database.ts). Pulled and booted
+      # in the background while the job sets up. The data is disposable, so it
+      # lives in memory without binlogs or flushes.
+      - name: Start MySQL
+        if: matrix.mysql
+        run: |
+          docker run --detach --name mysql --tmpfs /var/lib/mysql \
+            --publish 127.0.0.1:3306:3306 \
+            --env MYSQL_ROOT_PASSWORD=root --env MYSQL_DATABASE=mediabinder_test \
+            ${{ matrix.mysql }} --skip-log-bin --innodb-flush-log-at-trx-commit=0 \
+            --innodb-doublewrite=0 > "$RUNNER_TEMP/mysql.log" 2>&1 &
+
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -39,5 +64,13 @@ jobs:
             - cwd: .
               args: ["--frozen-lockfile"]
 
+      - name: Wait for MySQL
+        if: matrix.mysql
+        run: |
+          timeout 120 sh -c 'until docker exec mysql \
+            mysqladmin ping -h 127.0.0.1 -proot --silent; do sleep 1; done' ||
+            { cat "$RUNNER_TEMP/mysql.log"; docker logs mysql; exit 1; }
+
       - name: Run ${{ matrix.name }}
+        env: ${{ matrix.env }}
         run: pnpm verify ${{ matrix.stage }}

@@ -25,6 +25,9 @@ importers:
 
   .:
     dependencies:
+      '@effect/sql-mysql2':
+        specifier: 4.1.4
+        version: 4.1.4(@types/node@24.13.3)(effect@4.1.4)
       '@fontsource-variable/geist':
         specifier: ^5.3.0
         version: 5.3.0
@@ -304,6 +307,11 @@ packages:
 
   '@cacheable/utils@2.5.0':
     resolution: {integrity: sha512-buipgOVDkkPXNR5+xBpDw7Zk2n1EvU7qBJCNUcL7rhQ//kfpOXPAvQ511Os0vpLYJ1pZnvudNytkQt2hst3wqA==}
+
+  '@effect/sql-mysql2@4.1.4':
+    resolution: {integrity: sha512-RZ/j8m3d8742q80rZn5YfWwoPUos7fkRPGnJv8XapKgGhAk7O1wxH6yHoB2aR+pVaMdrzG/MN856OIF5BPxzNQ==}
+    peerDependencies:
+      effect: ^4.1.4
 
   '@effect/vitest@4.1.4':
     resolution: {integrity: sha512-AKpZ6zKihCRhY7hDbiQ2yp/krw+afIkxDRjFMwwzMiyhd0iYk0WaHa9J6GGC7TUF/C7HP2dZyMVq5xC0Qm/2/g==}
@@ -4599,6 +4607,13 @@ snapshots:
     dependencies:
       hashery: 1.5.1
       keyv: 5.6.0
+
+  '@effect/sql-mysql2@4.1.4(@types/node@24.13.3)(effect@4.1.4)':
+    dependencies:
+      effect: 4.1.4
+      mysql2: 3.24.6(@types/node@24.13.3)
+    transitivePeerDependencies:
+      - '@types/node'
 
   '@effect/vitest@4.1.4(effect@4.1.4)(vitest@5.0.1)':
     dependencies:
