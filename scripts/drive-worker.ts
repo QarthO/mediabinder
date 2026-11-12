@@ -5,6 +5,7 @@ import {
   processSyncJobs,
   processWatchRenewals,
 } from "../src/lib/drive-webhook.server"
+import { revokeLegacyDriveGrants } from "../src/lib/google-grants.server"
 const shutdown = new AbortController()
 let stopping = false
 process.on("SIGTERM", () => {
@@ -26,6 +27,16 @@ while (!stopping) {
       "SELECT GET_LOCK('mediabinder-drive-worker',0) AS acquired"
     )
     if (lock[0].acquired === 1) {
+      // Housekeeping only: never let it hold up watches or syncs.
+      const revoked = await revokeLegacyDriveGrants().catch((error) => {
+        console.warn(
+          "Old Google grant cleanup failed:",
+          error instanceof Error ? error.message : "Unknown error"
+        )
+        return 0
+      })
+      if (revoked)
+        console.log(`Revoked ${revoked} old full-Drive Google grant(s).`)
       await processWatchRenewals()
       await processSyncJobs()
     }

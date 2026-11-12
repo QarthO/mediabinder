@@ -15,11 +15,15 @@ const { pool, rows } = await import("../src/lib/database.server")
 const { auth } = await import("../src/lib/auth.server")
 const { mutate } = await import("../src/lib/library.server")
 const { syncDrive } = await import("../src/lib/drive.server")
+const { revokeLegacyDriveGrants } = await import(
+  "../src/lib/google-grants.server"
+)
 after(() => pool.end())
 
 const FOLDER = "application/vnd.google-apps.folder"
 type Call = { method: string; url: URL; token: string }
 let calls: Call[] = []
+let revocations: string[] = []
 // Per-test Drive behaviour, keyed by who asks: the user's token or the service account's.
 let drive: (call: Call) => Response
 mock.method(auth.api, "getAccessToken", async () => ({
@@ -30,6 +34,13 @@ mock.method(
   "fetch",
   async (input: string | URL, init: RequestInit = {}) => {
     const url = new URL(String(input))
+    if (
+      url.hostname === "oauth2.googleapis.com" &&
+      url.pathname === "/revoke"
+    ) {
+      revocations.push(String(init.body))
+      return new Response(null, { status: 200 })
+    }
     if (url.hostname === "oauth2.googleapis.com")
       return Response.json({ access_token: "sa-token", expires_in: 3600 })
     const token = String(
@@ -349,6 +360,54 @@ test("limited-access subfolders sync only for their owner", async () => {
         [userId]
       )
       await pool.execute("DELETE FROM media WHERE user_id=?", [userId])
+    }
+  })
+})
+
+test("old full-Drive grants are revoked once so sign-in asks only for drive.file", async () => {
+  await withUser(async (userId) => {
+    const legacy = randomUUID(),
+      current = randomUUID()
+    await pool.execute(
+      `INSERT INTO account(id,accountId,providerId,userId,accessToken,refreshToken,scope,createdAt,updatedAt)
+      VALUES (?,?,'google',?,'old-access','old-refresh',?,NOW(3),NOW(3)),(?,?,'credential',?,NULL,NULL,?,NOW(3),NOW(3))`,
+      [
+        legacy,
+        `${userId}-google`,
+        userId,
+        "https://www.googleapis.com/auth/drive.readonly,openid,https://www.googleapis.com/auth/drive.file",
+        current,
+        `${userId}-other`,
+        userId,
+        "https://www.googleapis.com/auth/drive.readonly",
+      ]
+    )
+    revocations = []
+    try {
+      assert.equal(await revokeLegacyDriveGrants(), 1)
+      // The user's token is revoked at Google, which drops the whole grant.
+      assert.deepEqual(revocations, ["token=user-token"])
+      assert.deepEqual(
+        await rows(
+          "SELECT accessToken,refreshToken,scope FROM account WHERE id=?",
+          [legacy]
+        ),
+        [{ accessToken: null, refreshToken: null, scope: null }]
+      )
+      // Only Google sign-ins are touched, and only once.
+      assert.equal(
+        (
+          await rows<{ scope: string }>(
+            "SELECT scope FROM account WHERE id=?",
+            [current]
+          )
+        )[0].scope,
+        "https://www.googleapis.com/auth/drive.readonly"
+      )
+      assert.equal(await revokeLegacyDriveGrants(), 0)
+      assert.equal(revocations.length, 1)
+    } finally {
+      await pool.execute("DELETE FROM account WHERE userId=?", [userId])
     }
   })
 })
