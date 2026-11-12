@@ -54,6 +54,14 @@ export function serviceAccount() {
 }
 export const sharedFolderMode = () => serviceAccount() !== null
 export const serviceAccountEmail = () => serviceAccount()?.client_email ?? null
+// Optional Google Group (e.g. sync@rien.cloud) whose only member is the service
+// account. Users share with this friendlier address; the account reads through
+// its group membership.
+export function shareGroup(env: Environment = process.env) {
+  return env.GOOGLE_DRIVE_SHARE_GROUP?.trim().toLowerCase() || null
+}
+// The address users share folders with.
+export const shareAddress = () => shareGroup() ?? serviceAccountEmail()
 
 export function pickerConfig(env: Environment = process.env) {
   const apiKey = env.GOOGLE_PICKER_API_KEY?.trim(),
@@ -225,7 +233,7 @@ export async function createFolder(userToken: string, name: string) {
 // Adds the service account as a viewer. Drive returns the existing permission
 // when the account already has access, so repeating this is harmless.
 export async function shareFolderWithApp(userToken: string, folderId: string) {
-  const email = serviceAccountEmail()
+  const email = shareAddress()
   if (!email)
     throw new Error("MediaBinder's Drive service account is not set up.")
   const permission = (await driveCall(
@@ -233,7 +241,11 @@ export async function shareFolderWithApp(userToken: string, folderId: string) {
     "POST",
     `files/${folderId}/permissions`,
     { sendNotificationEmail: "false", supportsAllDrives: "true", fields: "id" },
-    { type: "user", role: "reader", emailAddress: email }
+    {
+      type: shareGroup() ? "group" : "user",
+      role: "reader",
+      emailAddress: email,
+    }
   )) as { id: string }
   return permission.id
 }

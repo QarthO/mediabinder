@@ -29,7 +29,7 @@ import {
   getFolder,
   pickerConfig,
   removeAppShare,
-  serviceAccountEmail,
+  shareAddress,
   shareFolderWithApp,
   sharedFolderMode,
   waitForAppAccess,
@@ -173,10 +173,10 @@ export async function library(
       drive_access: sharedFolderMode()
         ? {
             mode: "shared-folder",
-            service_account: serviceAccountEmail(),
+            share_address: shareAddress(),
             picker: Boolean(pickerConfig()),
           }
-        : { mode: "full-drive", service_account: null, picker: false },
+        : { mode: "full-drive", share_address: null, picker: false },
       webhook: {
         configured: Boolean(driveWebhookUrl()),
         active: watches[0]?.count ?? 0,
@@ -275,7 +275,7 @@ export async function mutate(
     return {
       ok: true,
       access_removed,
-      service_account: serviceAccountEmail(),
+      share_address: shareAddress(),
     }
   }
   return catalogTransaction(async (connection) => {
@@ -527,7 +527,7 @@ export type LinkResult =
       status: "needs-share"
       folder_id: string
       folder_name: string | null
-      service_account: string
+      share_address: string
       reason: string
     }
 
@@ -541,7 +541,7 @@ async function linkSharedFolder(
   input: unknown
 ): Promise<LinkResult> {
   const value = linkFolder.parse(input)
-  const serviceAccount = serviceAccountEmail()!
+  const address = shareAddress()!
   const [user] = await rows<{ email: string }>(
     "SELECT email FROM user WHERE id=?",
     [userId]
@@ -574,7 +574,7 @@ async function linkSharedFolder(
         status: "needs-share",
         folder_id: value.folderId,
         folder_name: picked.name,
-        service_account: serviceAccount,
+        share_address: address,
         reason: error.message,
       }
     }
@@ -590,7 +590,7 @@ async function linkSharedFolder(
       status: "needs-share",
       folder_id: value.folderId,
       folder_name: picked?.name ?? null,
-      service_account: serviceAccount,
+      share_address: address,
       reason: "MediaBinder can't see this folder yet.",
     }
   }

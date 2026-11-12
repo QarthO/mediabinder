@@ -37,9 +37,10 @@ export function SharedFolderLink({
   disabled: boolean
 }) {
   const access = workspace.drive_access
-  const serviceAccount = access.service_account ?? ""
+  const shareAddress = access.share_address ?? ""
   const [step, setStep] = useState<Step>({ kind: "idle" })
   const [paste, setPaste] = useState("")
+  const [copied, setCopied] = useState(false)
   const client = useQueryClient()
   const polling = useRef<AbortController | null>(null)
   useEffect(() => () => polling.current?.abort(), [])
@@ -80,6 +81,7 @@ export function SharedFolderLink({
     })()
   }
   const needsShare = (folder: Folder, reason: string) => {
+    setCopied(false)
     setStep({ kind: "share", folder, reason })
     waitForShare(folder)
   }
@@ -131,9 +133,26 @@ export function SharedFolderLink({
   })
   const copy = () =>
     navigator.clipboard
-      .writeText(serviceAccount)
-      .then(() => toast.success("Address copied"))
-      .catch(() => toast.error("Couldn't copy. Select the address instead."))
+      .writeText(shareAddress)
+      .then(() => {
+        setCopied(true)
+        return true
+      })
+      .catch(() => {
+        toast.error("Couldn't copy. Select the address instead.")
+        return false
+      })
+  // One click: copy the address, then open the folder in Drive. The copy
+  // starts first, while this page still has focus; opening a tab is still
+  // part of the same click, so browsers don't treat it as a popup.
+  const copyAndOpen = (folder: Folder) => {
+    void copy()
+    window.open(
+      `https://drive.google.com/drive/folders/${folder.id}`,
+      "_blank",
+      "noopener,noreferrer"
+    )
+  }
   const busy =
     disabled || choose.isPending || link.isPending || create.isPending
 
@@ -167,33 +186,27 @@ export function SharedFolderLink({
         <FolderPlus size={20} />
         <div>
           <h3>Share “{step.folder.name ?? "this folder"}” with MediaBinder</h3>
-          <p>{step.reason} It only takes a moment:</p>
-          <ol>
-            <li>
-              <a
-                href={`https://drive.google.com/drive/folders/${step.folder.id}`}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                Open the folder in Drive <ExternalLink size={13} />
-              </a>{" "}
-              and choose <strong>Share</strong>.
-            </li>
-            <li>
-              Add this address as a <strong>Viewer</strong>:
-              <span className="share-copy">
-                <code className="share-address">{serviceAccount}</code>
-                <button
-                  className="icon-button"
-                  aria-label="Copy MediaBinder's sync address"
-                  onClick={copy}
-                >
-                  <Copy size={15} />
-                </button>
-              </span>
-            </li>
-            <li>Turn off “Notify people”, then select Share.</li>
-          </ol>
+          <p>{step.reason} Share it with MediaBinder in Google Drive:</p>
+          <Button onClick={() => copyAndOpen(step.folder)}>
+            <Copy />
+            Copy address &amp; open in Drive
+            <ExternalLink />
+          </Button>
+          <p className="share-steps">
+            {copied ? "Address copied. " : ""}In Drive, select{" "}
+            <strong>Share</strong>, paste the address, set it to{" "}
+            <strong>Viewer</strong>, then send.
+          </p>
+          <span className="share-copy">
+            <code className="share-address">{shareAddress}</code>
+            <button
+              className="icon-button"
+              aria-label="Copy MediaBinder's sync address"
+              onClick={() => void copy()}
+            >
+              <Copy size={15} />
+            </button>
+          </span>
           <p className="share-waiting" role="status">
             <LoaderCircle size={14} />
             Waiting for Google… MediaBinder links the folder as soon as it's
@@ -233,11 +246,11 @@ export function SharedFolderLink({
             : "Choose a Drive folder"}
         </Button>
         <Button
-          variant="outline"
+          variant="ghost"
           disabled={busy}
           onClick={() => setStep({ kind: "create" })}
         >
-          Create a new MediaBinder folder
+          or create a new MediaBinder folder
         </Button>
       </div>
       <form

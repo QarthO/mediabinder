@@ -50,15 +50,15 @@ export function DriveSettings({
       action<{
         ok: boolean
         access_removed?: boolean
-        service_account?: string | null
+        share_address?: string | null
       }>("remove-source", { folderId }),
     onSuccess: async (result) => {
       await client.invalidateQueries({ queryKey: ["library"] })
       await router.invalidate()
       setRemoving(null)
-      if (result.service_account && !result.access_removed)
+      if (result.share_address && !result.access_removed)
         toast.info(
-          `Folder unlinked. MediaBinder no longer syncs it. To remove its access too, remove ${result.service_account} from the folder's sharing in Drive.`,
+          `Folder unlinked. MediaBinder no longer syncs it. To remove its access too, remove ${result.share_address} from the folder's sharing in Drive.`,
           { duration: 12_000 }
         )
       else toast.success("Folder unlinked. Its metadata is preserved.")

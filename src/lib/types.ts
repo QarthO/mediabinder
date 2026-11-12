@@ -57,7 +57,8 @@ export interface Library {
     sources: DriveSource[]
     drive_access: {
       mode: "shared-folder" | "full-drive"
-      service_account: string | null
+      // The address users share folders with (a Google Group or the service account).
+      share_address: string | null
       picker: boolean
     }
     webhook: { configured: boolean; active: number; error: string | null }

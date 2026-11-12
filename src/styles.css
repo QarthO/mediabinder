@@ -1889,6 +1889,9 @@ html {
   flex-wrap: wrap;
   gap: 10px;
 }
+.share-steps {
+  margin: 12px 0 8px !important;
+}
 .share-waiting {
   display: flex;
   align-items: center;

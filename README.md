@@ -108,9 +108,11 @@ Setup, in the same Google Cloud project:
 2. Set `GOOGLE_SERVICE_ACCOUNT_KEY_FILE` to that file (mounted read-only into the containers), or `GOOGLE_SERVICE_ACCOUNT_KEY` to its JSON, raw or base64.
 3. Enable the **Google Picker API**. Create a browser API key restricted to that API and to your app's origins, and set it as `GOOGLE_PICKER_API_KEY`. Set `GOOGLE_CLOUD_PROJECT_NUMBER` to the project number.
 
+4. Optional: give users a friendlier address. Create a Google Group (for example `sync@rien.cloud`, with Cloud Identity Free on your domain), allow members outside the organization, add the service account as its only member, and set `GOOGLE_DRIVE_SHARE_GROUP` to the group's address. MediaBinder then shows and shares with the group; the service account reads through its membership.
+
 Linking works three ways in **Settings → Link folder**:
 
-- **Choose a Drive folder** opens Google's picker. Google only lets an app share a folder when it may write every file inside (`appNotAuthorizedToChild`), so existing folders are shared by the user in Drive. MediaBinder shows the steps and links the folder automatically once the share arrives.
+- **Choose a Drive folder** opens Google's picker. Google only lets an app share a folder when it may write every file inside (`appNotAuthorizedToChild`), so existing folders are shared by the user in Drive. One button copies MediaBinder's address and opens the folder in Drive; MediaBinder links the folder automatically once the share arrives.
 - **Create a new MediaBinder folder** creates an empty folder and shares it with the service account in one step; anything added to it later syncs.
 - A pasted link works for folders already shared with the service account and owned by the signed-in user.
 

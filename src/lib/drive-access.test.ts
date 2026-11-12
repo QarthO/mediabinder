@@ -7,6 +7,7 @@ import {
   pickerConfig,
   resetServiceAccountCache,
   serviceAccountToken,
+  shareAddress,
   shareFolderWithApp,
   signAssertion,
   waitForAppAccess,
@@ -26,6 +27,7 @@ const json = JSON.stringify(key)
 afterEach(() => {
   mock.restoreAll()
   delete process.env.GOOGLE_SERVICE_ACCOUNT_KEY
+  delete process.env.GOOGLE_DRIVE_SHARE_GROUP
   resetServiceAccountCache()
 })
 
@@ -114,6 +116,24 @@ test("sharing adds the service account as a silent viewer", async () => {
     (init.headers as Record<string, string>).Authorization,
     "Bearer user-token"
   )
+})
+
+test("a configured Google Group becomes the share address", async () => {
+  process.env.GOOGLE_SERVICE_ACCOUNT_KEY = json
+  process.env.GOOGLE_DRIVE_SHARE_GROUP = " Sync@Rien.Cloud "
+  assert.equal(shareAddress(), "sync@rien.cloud")
+  const fetch = mock.method(globalThis, "fetch", async () =>
+    Response.json({ id: "perm-2" })
+  )
+  await shareFolderWithApp("user-token", "folder-1")
+  const init = fetch.mock.calls[0].arguments[1] as RequestInit
+  assert.deepEqual(JSON.parse(String(init.body)), {
+    type: "group",
+    role: "reader",
+    emailAddress: "sync@rien.cloud",
+  })
+  delete process.env.GOOGLE_DRIVE_SHARE_GROUP
+  assert.equal(shareAddress(), key.client_email)
 })
 
 test("Drive errors map to actionable codes", async () => {
