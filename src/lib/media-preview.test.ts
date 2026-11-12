@@ -10,20 +10,30 @@ import {
   previewQuery,
 } from "./media-preview"
 
-const photo = (id: string): Media => ({
-  id, drive_id: id, mime_type: "image/jpeg", available: true, size: 3,
-  sha256: null, uploaded_at: "2026-09-06T00:00:00Z",
-} as Media)
+const photo = (id: string): Media =>
+  ({
+    id,
+    drive_id: id,
+    mime_type: "image/jpeg",
+    available: true,
+    size: 3,
+    sha256: null,
+    uploaded_at: "2026-09-06T00:00:00Z",
+  }) as Media
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
-const imageResponse = () => new Response(new Uint8Array([1, 2, 3]), {
-  headers: { "content-type": "image/jpeg" },
-})
+const imageResponse = () =>
+  new Response(new Uint8Array([1, 2, 3]), {
+    headers: { "content-type": "image/jpeg" },
+  })
 
 test("canceling before the preview runtime loads never starts a download", async (t) => {
   const client = new QueryClient()
   t.after(() => client.clear())
   let calls = 0
-  t.mock.method(globalThis, "fetch", async () => { calls++; return imageResponse() })
+  t.mock.method(globalThis, "fetch", async () => {
+    calls++
+    return imageResponse()
+  })
   const options = previewQuery(client, photo("canceled-before-import"))
   const rejected = assert.rejects(client.fetchQuery(options))
   await client.cancelQueries({ queryKey: options.queryKey, exact: true })
@@ -36,7 +46,9 @@ test("canceling before the preview runtime loads never starts a download", async
 test("hover and opening share one photo request; preview downloads run at concurrency two", async (t) => {
   const client = new QueryClient()
   t.after(() => client.clear())
-  let calls = 0, active = 0, peak = 0
+  let calls = 0,
+    active = 0,
+    peak = 0
   t.mock.method(globalThis, "fetch", async () => {
     calls++
     active++
@@ -62,7 +74,10 @@ test("speculative photo cache is bounded and videos/large images never prefetch"
   const client = new QueryClient()
   t.after(() => client.clear())
   let calls = 0
-  t.mock.method(globalThis, "fetch", async () => { calls++; return imageResponse() })
+  t.mock.method(globalThis, "fetch", async () => {
+    calls++
+    return imageResponse()
+  })
   for (let i = 0; i < MAX_CACHED_PREVIEWS + 3; i++) {
     const media = photo(String(i))
     prefetchMediaPreview(client, media)
@@ -103,14 +118,18 @@ test("intent waits for dwell and skips touch, canceled intent and save-data", as
   const descriptor = Object.getOwnPropertyDescriptor(globalThis, "navigator")
   const connection = { saveData: false, effectiveType: "4g" }
   Object.defineProperty(globalThis, "navigator", {
-    configurable: true, value: { connection },
+    configurable: true,
+    value: { connection },
   })
   t.after(() => {
     if (descriptor) Object.defineProperty(globalThis, "navigator", descriptor)
     else Reflect.deleteProperty(globalThis, "navigator")
   })
   let calls = 0
-  t.mock.method(globalThis, "fetch", async () => { calls++; return imageResponse() })
+  t.mock.method(globalThis, "fetch", async () => {
+    calls++
+    return imageResponse()
+  })
   const intent = createMediaPreviewIntent(client, 10)
   t.after(intent.cancel)
   const handlers = intent.handlers(photo("one"))
@@ -136,7 +155,10 @@ test("a failed prefetch is not retried by repeated hover", async (t) => {
   const client = new QueryClient()
   t.after(() => client.clear())
   let calls = 0
-  t.mock.method(globalThis, "fetch", async () => { calls++; throw new Error("offline") })
+  t.mock.method(globalThis, "fetch", async () => {
+    calls++
+    throw new Error("offline")
+  })
   prefetchMediaPreview(client, photo("one"))
   await assert.rejects(client.fetchQuery(previewQuery(client, photo("one"))))
   prefetchMediaPreview(client, photo("one"))
@@ -177,24 +199,33 @@ test("opening a queued hover cancels other speculation and starts immediately", 
   })
   const started: string[] = []
   const aborted: string[] = []
-  let active = 0, peak = 0
-  t.mock.method(globalThis, "fetch", async (url: unknown, init: RequestInit) => {
-    const id = String(url).split("/").at(-1)!
-    started.push(id)
-    active++
-    peak = Math.max(peak, active)
-    if (id === "clicked") {
-      active--
-      return imageResponse()
-    }
-    return new Promise<Response>((_resolve, reject) => {
-      init.signal!.addEventListener("abort", () => {
+  let active = 0,
+    peak = 0
+  t.mock.method(
+    globalThis,
+    "fetch",
+    async (url: unknown, init: RequestInit) => {
+      const id = String(url).split("/").at(-1)!
+      started.push(id)
+      active++
+      peak = Math.max(peak, active)
+      if (id === "clicked") {
         active--
-        aborted.push(id)
-        reject(new Error("aborted"))
-      }, { once: true })
-    })
-  })
+        return imageResponse()
+      }
+      return new Promise<Response>((_resolve, reject) => {
+        init.signal!.addEventListener(
+          "abort",
+          () => {
+            active--
+            aborted.push(id)
+            reject(new Error("aborted"))
+          },
+          { once: true }
+        )
+      })
+    }
+  )
   prefetchMediaPreview(client, photo("hover-a"))
   prefetchMediaPreview(client, photo("hover-b"))
   await delay(0)

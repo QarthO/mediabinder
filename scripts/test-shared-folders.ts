@@ -15,9 +15,8 @@ const { pool, rows } = await import("../src/lib/database.server")
 const { auth } = await import("../src/lib/auth.server")
 const { mutate } = await import("../src/lib/library.server")
 const { syncDrive } = await import("../src/lib/drive.server")
-const { revokeLegacyDriveGrants } = await import(
-  "../src/lib/google-grants.server"
-)
+const { revokeLegacyDriveGrants } =
+  await import("../src/lib/google-grants.server")
 after(() => pool.end())
 
 const FOLDER = "application/vnd.google-apps.folder"

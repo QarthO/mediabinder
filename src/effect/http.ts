@@ -1,9 +1,5 @@
 import { Effect, Schema } from "effect"
-import {
-  FetchHttpClient,
-  HttpClient,
-  HttpClientRequest,
-} from "effect/http"
+import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/http"
 
 export class NetworkError extends Schema.TaggedError<NetworkError>()(
   "NetworkError",

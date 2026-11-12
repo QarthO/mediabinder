@@ -309,9 +309,8 @@ test("shared catalog deduplicates bytes, shares curation, isolates access and pr
 })
 
 test("merging already-curated duplicates preserves tags, names, memberships and posts", async () => {
-  const { catalogTransaction, resolveCatalog } = await import(
-    "../src/lib/catalog.server"
-  )
+  const { catalogTransaction, resolveCatalog } =
+    await import("../src/lib/catalog.server")
   const owner = randomUUID(),
     first = randomUUID(),
     second = randomUUID()

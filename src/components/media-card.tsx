@@ -30,7 +30,11 @@ export const MediaCard = memo(function MediaCard({
   style?: CSSProperties
 }) {
   return (
-    <div className="media-card" style={style} data-selected={selected || undefined}>
+    <div
+      className="media-card"
+      style={style}
+      data-selected={selected || undefined}
+    >
       {!mobile && (
         <input
           className="media-card-checkbox"
