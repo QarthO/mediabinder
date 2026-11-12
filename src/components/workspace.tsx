@@ -1,3 +1,5 @@
+import { SetCard } from "./set-card"
+import { filterSets } from "@/lib/set-filters"
 import { LibraryFilters } from "./library-filters"
 import { MediaGrid } from "./media-grid"
 import { useMediaPreviewIntent } from "@/lib/media-preview"
@@ -57,7 +59,7 @@ import {
 } from "./ui/command"
 import { Brand } from "./brand"
 import { DriveSyncButton, DriveSyncMonitor } from "./drive-sync"
-import { Thumbnail, MediaCensorContext } from "./thumbnail"
+import { MediaCensorContext } from "./thumbnail"
 const Detail = lazy(() =>
   import("./detail").then((module) => ({ default: module.Detail }))
 )
@@ -302,24 +304,49 @@ function WorkspaceContent({
       : sorting[0]?.id === "display_name" && !sorting[0].desc
         ? "name"
         : "custom"
+  const visibleSets = useMemo(
+    () =>
+      filterSets(data.sets, scopedMedia, {
+        search,
+        setFilter,
+        filterByMedia:
+          mediaType !== "all" ||
+          catalogStatus !== "all" ||
+          selectedFolders.length > 0,
+        sorting,
+      }),
+    [
+      data.sets,
+      scopedMedia,
+      search,
+      setFilter,
+      mediaType,
+      catalogStatus,
+      selectedFolders,
+      sorting,
+    ]
+  )
   const currentSet = data?.sets.find((s) => s.id === setId)
   const title =
     currentSet?.display_name ??
     navItems.find((n) => n.id === page)?.label ??
     "Settings"
-  const openSet = (set: MediaSet) => {
-    setMobileSidebar(false)
-    window.scrollTo({ top: 0 })
-    void navigate({
-      to: "/sets/$setId",
-      params: { setId: set.id },
-      search: { folders: [] },
-    })
-    clearSearch()
-    setSelectedTags([])
-    setMediaType("all")
-    setCommand(false)
-  }
+  const openSet = useCallback(
+    (set: MediaSet) => {
+      setMobileSidebar(false)
+      window.scrollTo({ top: 0 })
+      void navigate({
+        to: "/sets/$setId",
+        params: { setId: set.id },
+        search: { folders: [] },
+      })
+      clearSearch()
+      setSelectedTags([])
+      setMediaType("all")
+      setCommand(false)
+    },
+    [navigate, clearSearch]
+  )
   const counts: Record<string, number> = {
     all: catalogMedia.length,
     sets: data.sets.length,
@@ -519,8 +546,51 @@ function WorkspaceContent({
           <DriveSyncMonitor />
         </header>
         <div
-          className={`workspace-content ${page === "all" ? "media-workspace" : ""}`}
+          className={`workspace-content ${page === "all" ? "media-workspace" : page === "sets" ? "sets-workspace" : ""}`}
         >
+          {page !== "settings" && (
+            <div
+              className={`library-toolbar ${mobileSearch ? "mobile-search-open" : ""}`}
+            >
+              <button
+                className="mobile-search-toggle icon-button"
+                aria-label={
+                  page === "sets" ? "Open sets search" : "Open media search"
+                }
+                onClick={() => {
+                  flushSync(() => setMobileSearch(true))
+                  searchInput.current?.focus()
+                }}
+              >
+                <Search size={18} />
+              </button>
+              <MediaSearch
+                key={searchVersion}
+                label={page === "sets" ? "Search sets" : "Search media"}
+                inputRef={searchInput}
+                mobile={mobile}
+                expanded={mobileSearch}
+                onSearch={setSearch}
+                onClose={closeSearch}
+              />
+              <LibraryFilters
+                sortLabel={page === "sets" ? "Sort sets" : "Sort media"}
+                mediaType={mediaType}
+                setMediaType={setMediaType}
+                catalogStatus={catalogStatus}
+                setCatalogStatus={setCatalogStatus}
+                setFilter={setFilter}
+                setSetFilter={setSetFilter}
+                sets={data.sets}
+                sort={sort}
+                setSorting={setSorting}
+                mediaCensored={mediaCensored}
+                onToggleCensor={onToggleCensor}
+                view={view}
+                onView={changeView}
+              />
+            </div>
+          )}
           {page === "settings" ? (
             <Suspense
               fallback={<div className="empty-state">Loading settings…</div>}
@@ -529,51 +599,25 @@ function WorkspaceContent({
             </Suspense>
           ) : page === "sets" ? (
             <>
-              {data.sets.length ? (
-                <div className="set-grid">
-                  {data.sets.map((set) => (
-                    <button
-                      className="set-card"
+              {visibleSets.length ? (
+                <div
+                  className={`set-grid ${view === "list" ? "set-list" : ""}`}
+                >
+                  {visibleSets.map((set) => (
+                    <SetCard
                       key={set.id}
-                      onClick={() => openSet(set)}
-                    >
-                      <div className="set-cover">
-                        {set.cover_id ? (
-                          <Thumbnail
-                            id={set.cover_id}
-                            name={set.display_name}
-                          />
-                        ) : (
-                          <FolderOpen size={32} />
-                        )}
-                        <span className="set-tab">
-                          <FolderOpen size={13} />
-                          SET
-                        </span>
-                      </div>
-                      <div className="set-info">
-                        <strong>{set.display_name}</strong>
-                        <span>
-                          {set.media_count} items
-                          <ChevronRight size={15} />
-                        </span>
-                      </div>
-                      {set.tags.length > 0 && (
-                        <div className="tags">
-                          {set.tags.map((t) => (
-                            <span
-                              className="tag"
-                              style={tagStyle(data.tag_colors[t])}
-                              key={t}
-                            >
-                              {t}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                    </button>
+                      set={set}
+                      colors={data.tag_colors}
+                      onOpen={openSet}
+                    />
                   ))}
                 </div>
+              ) : data.sets.length ? (
+                <Empty
+                  icon={FolderOpen}
+                  title="No sets found"
+                  description="Try a different search or filter."
+                />
               ) : (
                 <Empty
                   icon={FolderOpen}
@@ -590,43 +634,6 @@ function WorkspaceContent({
             </>
           ) : (
             <>
-              <div
-                className={`library-toolbar ${mobileSearch ? "mobile-search-open" : ""}`}
-              >
-                <button
-                  className="mobile-search-toggle icon-button"
-                  aria-label="Open media search"
-                  onClick={() => {
-                    flushSync(() => setMobileSearch(true))
-                    searchInput.current?.focus()
-                  }}
-                >
-                  <Search size={18} />
-                </button>
-                <MediaSearch
-                  key={searchVersion}
-                  inputRef={searchInput}
-                  mobile={mobile}
-                  expanded={mobileSearch}
-                  onSearch={setSearch}
-                  onClose={closeSearch}
-                />
-                <LibraryFilters
-                  mediaType={mediaType}
-                  setMediaType={setMediaType}
-                  catalogStatus={catalogStatus}
-                  setCatalogStatus={setCatalogStatus}
-                  setFilter={setFilter}
-                  setSetFilter={setSetFilter}
-                  sets={data.sets}
-                  sort={sort}
-                  setSorting={setSorting}
-                  mediaCensored={mediaCensored}
-                  onToggleCensor={onToggleCensor}
-                  view={view}
-                  onView={changeView}
-                />
-              </div>
               {selectedTags.length > 0 && (
                 <div className="active-filter">
                   {selectedTags.map((tag) => (
