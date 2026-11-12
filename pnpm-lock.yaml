@@ -12,10 +12,14 @@ catalogs:
     vite-plus:
       specifier: 1.0.0
       version: 1.0.0
+    vitest:
+      specifier: 5.0.1
+      version: 5.0.1
 
 overrides:
   '@opentelemetry/api': 1.9.1
   vite@*: npm:@voidzero-dev/vite-plus-core@1.0.0
+  vitest@*: 5.0.1
 
 importers:
 
@@ -88,6 +92,9 @@ importers:
         specifier: ^4.6.7
         version: 4.6.7
     devDependencies:
+      '@effect/vitest':
+        specifier: 4.1.4
+        version: 4.1.4(effect@4.1.4)(vitest@5.0.1)
       '@tailwindcss/vite':
         specifier: ^4.3.5
         version: 4.3.5(@voidzero-dev/vite-plus-core@1.0.0(@types/node@24.13.3)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@6.0.3)(yaml@2.9.0))
@@ -105,7 +112,7 @@ importers:
         version: 6.3.0(@voidzero-dev/vite-plus-core@1.0.0(@types/node@24.13.3)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@6.0.3)(yaml@2.9.0))
       react-scan:
         specifier: ^0.5.7
-        version: 0.5.7(@opentelemetry/core@2.11.0(@opentelemetry/api@1.9.1))(@voidzero-dev/vite-plus-core@1.0.0(@types/node@24.13.3)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@6.0.3)(yaml@2.9.0))(esbuild@0.28.2)(eslint@10.10.0(jiti@2.7.0))(oxlint-tsgolint@7.0.2003)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(rolldown@1.2.7)(vite-plus@1.0.0(@opentelemetry/api@1.9.1)(@types/node@24.13.3)(@vitest/ui@5.0.1(vitest@5.0.1))(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@6.0.3)(yaml@2.9.0))
+        version: 0.5.7(@opentelemetry/core@2.11.0(@opentelemetry/api@1.9.1))(@voidzero-dev/vite-plus-core@1.0.0(@types/node@24.13.3)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@6.0.3)(yaml@2.9.0))(esbuild@0.28.2)(eslint@10.10.0(jiti@2.7.0))(oxlint-tsgolint@7.0.2003)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(rolldown@1.2.7)(vite-plus@1.0.0(@opentelemetry/api@1.9.1)(@types/node@24.13.3)(@vitest/ui@5.0.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@6.0.3)(yaml@2.9.0))
       tailwindcss:
         specifier: ^4.3.5
         version: 4.3.5
@@ -123,7 +130,10 @@ importers:
         version: '@voidzero-dev/vite-plus-core@1.0.0(@types/node@24.13.3)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@6.0.3)(yaml@2.9.0)'
       vite-plus:
         specifier: 'catalog:'
-        version: 1.0.0(@opentelemetry/api@1.9.1)(@types/node@24.13.3)(@vitest/ui@5.0.1(vitest@5.0.1))(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@6.0.3)(yaml@2.9.0)
+        version: 1.0.0(@opentelemetry/api@1.9.1)(@types/node@24.13.3)(@vitest/ui@5.0.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@6.0.3)(yaml@2.9.0)
+      vitest:
+        specifier: 'catalog:'
+        version: 5.0.1(@opentelemetry/api@1.9.1)(@types/node@24.13.3)(@vitest/browser-preview@5.0.1)(@vitest/ui@5.0.1(vitest@5.0.1))(@voidzero-dev/vite-plus-core@1.0.0(@types/node@24.13.3)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@6.0.3)(yaml@2.9.0))
 
 packages:
 
@@ -291,6 +301,12 @@ packages:
 
   '@cacheable/utils@2.5.0':
     resolution: {integrity: sha512-buipgOVDkkPXNR5+xBpDw7Zk2n1EvU7qBJCNUcL7rhQ//kfpOXPAvQ511Os0vpLYJ1pZnvudNytkQt2hst3wqA==}
+
+  '@effect/vitest@4.1.4':
+    resolution: {integrity: sha512-AKpZ6zKihCRhY7hDbiQ2yp/krw+afIkxDRjFMwwzMiyhd0iYk0WaHa9J6GGC7TUF/C7HP2dZyMVq5xC0Qm/2/g==}
+    peerDependencies:
+      effect: ^4.1.4
+      vitest: 5.0.1
 
   '@emnapi/core@1.11.2':
     resolution: {integrity: sha512-TC8MkTuZUtcTSiFeuC0ksCh9QIJ5+F21MvZ4Wn4ORfYaFJ/0dsiudv5tVkejgwZlwQ39jL9WWDe2lz8x0WglOA==}
@@ -2999,7 +3015,7 @@ packages:
       react-dom: ^18.0.0 || ^19.0.0
       solid-js: ^1.0.0
       svelte: ^4.0.0 || ^5.0.0
-      vitest: ^2.0.0 || ^3.0.0 || ^4.0.0
+      vitest: 5.0.1
       vue: ^3.0.0
     peerDependenciesMeta:
       '@lynx-js/react':
@@ -4426,6 +4442,11 @@ snapshots:
     dependencies:
       hashery: 1.5.1
       keyv: 5.6.0
+
+  '@effect/vitest@4.1.4(effect@4.1.4)(vitest@5.0.1)':
+    dependencies:
+      effect: 4.1.4
+      vitest: 5.0.1(@opentelemetry/api@1.9.1)(@types/node@24.13.3)(@vitest/browser-preview@5.0.1)(@vitest/ui@5.0.1(vitest@5.0.1))(@voidzero-dev/vite-plus-core@1.0.0(@types/node@24.13.3)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@6.0.3)(yaml@2.9.0))
 
   '@emnapi/core@1.11.2':
     dependencies:
@@ -7251,7 +7272,7 @@ snapshots:
       '@oxc-resolver/binding-win32-arm64-msvc': 11.24.2
       '@oxc-resolver/binding-win32-x64-msvc': 11.24.2
 
-  oxfmt@0.70.0(vite-plus@1.0.0(@opentelemetry/api@1.9.1)(@types/node@24.13.3)(@vitest/ui@5.0.1(vitest@5.0.1))(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@6.0.3)(yaml@2.9.0)):
+  oxfmt@0.70.0(vite-plus@1.0.0(@opentelemetry/api@1.9.1)(@types/node@24.13.3)(@vitest/ui@5.0.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@6.0.3)(yaml@2.9.0)):
     dependencies:
       tinypool: 2.1.2
     optionalDependencies:
@@ -7274,7 +7295,7 @@ snapshots:
       '@oxfmt/binding-win32-arm64-msvc': 0.70.0
       '@oxfmt/binding-win32-ia32-msvc': 0.70.0
       '@oxfmt/binding-win32-x64-msvc': 0.70.0
-      vite-plus: 1.0.0(@opentelemetry/api@1.9.1)(@types/node@24.13.3)(@vitest/ui@5.0.1(vitest@5.0.1))(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@6.0.3)(yaml@2.9.0)
+      vite-plus: 1.0.0(@opentelemetry/api@1.9.1)(@types/node@24.13.3)(@vitest/ui@5.0.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@6.0.3)(yaml@2.9.0)
 
   oxlint-plugin-react-doctor@0.9.22:
     dependencies:
@@ -7294,7 +7315,7 @@ snapshots:
       '@oxlint-tsgolint/win32-arm64': 7.0.2003
       '@oxlint-tsgolint/win32-x64': 7.0.2003
 
-  oxlint@1.81.0(oxlint-tsgolint@7.0.2003)(vite-plus@1.0.0(@opentelemetry/api@1.9.1)(@types/node@24.13.3)(@vitest/ui@5.0.1(vitest@5.0.1))(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@6.0.3)(yaml@2.9.0)):
+  oxlint@1.81.0(oxlint-tsgolint@7.0.2003)(vite-plus@1.0.0(@opentelemetry/api@1.9.1)(@types/node@24.13.3)(@vitest/ui@5.0.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@6.0.3)(yaml@2.9.0)):
     optionalDependencies:
       '@oxlint/binding-android-arm-eabi': 1.81.0
       '@oxlint/binding-android-arm64': 1.81.0
@@ -7316,9 +7337,9 @@ snapshots:
       '@oxlint/binding-win32-ia32-msvc': 1.81.0
       '@oxlint/binding-win32-x64-msvc': 1.81.0
       oxlint-tsgolint: 7.0.2003
-      vite-plus: 1.0.0(@opentelemetry/api@1.9.1)(@types/node@24.13.3)(@vitest/ui@5.0.1(vitest@5.0.1))(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@6.0.3)(yaml@2.9.0)
+      vite-plus: 1.0.0(@opentelemetry/api@1.9.1)(@types/node@24.13.3)(@vitest/ui@5.0.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@6.0.3)(yaml@2.9.0)
 
-  oxlint@1.85.0(oxlint-tsgolint@7.0.2003)(vite-plus@1.0.0(@opentelemetry/api@1.9.1)(@types/node@24.13.3)(@vitest/ui@5.0.1(vitest@5.0.1))(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@6.0.3)(yaml@2.9.0)):
+  oxlint@1.85.0(oxlint-tsgolint@7.0.2003)(vite-plus@1.0.0(@opentelemetry/api@1.9.1)(@types/node@24.13.3)(@vitest/ui@5.0.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@6.0.3)(yaml@2.9.0)):
     optionalDependencies:
       '@oxlint/binding-android-arm-eabi': 1.85.0
       '@oxlint/binding-android-arm64': 1.85.0
@@ -7340,7 +7361,7 @@ snapshots:
       '@oxlint/binding-win32-ia32-msvc': 1.85.0
       '@oxlint/binding-win32-x64-msvc': 1.85.0
       oxlint-tsgolint: 7.0.2003
-      vite-plus: 1.0.0(@opentelemetry/api@1.9.1)(@types/node@24.13.3)(@vitest/ui@5.0.1(vitest@5.0.1))(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@6.0.3)(yaml@2.9.0)
+      vite-plus: 1.0.0(@opentelemetry/api@1.9.1)(@types/node@24.13.3)(@vitest/ui@5.0.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@6.0.3)(yaml@2.9.0)
 
   p-limit@3.1.0:
     dependencies:
@@ -7458,7 +7479,7 @@ snapshots:
       '@types/react': 19.3.0
       '@types/react-dom': 19.3.0(@types/react@19.3.0)
 
-  react-doctor@0.9.22(@opentelemetry/core@2.11.0(@opentelemetry/api@1.9.1))(eslint@10.10.0(jiti@2.7.0))(oxlint-tsgolint@7.0.2003)(react@19.3.1)(vite-plus@1.0.0(@opentelemetry/api@1.9.1)(@types/node@24.13.3)(@vitest/ui@5.0.1(vitest@5.0.1))(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@6.0.3)(yaml@2.9.0)):
+  react-doctor@0.9.22(@opentelemetry/core@2.11.0(@opentelemetry/api@1.9.1))(eslint@10.10.0(jiti@2.7.0))(oxlint-tsgolint@7.0.2003)(react@19.3.1)(vite-plus@1.0.0(@opentelemetry/api@1.9.1)(@types/node@24.13.3)(@vitest/ui@5.0.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@6.0.3)(yaml@2.9.0)):
     dependencies:
       '@astrojs/compiler': 4.0.0
       '@sentry/node': 10.73.0(@opentelemetry/core@2.11.0(@opentelemetry/api@1.9.1))
@@ -7472,7 +7493,7 @@ snapshots:
       magicast: 0.5.4
       oxc-parser: 0.148.0
       oxc-resolver: 11.24.2
-      oxlint: 1.81.0(oxlint-tsgolint@7.0.2003)(vite-plus@1.0.0(@opentelemetry/api@1.9.1)(@types/node@24.13.3)(@vitest/ui@5.0.1(vitest@5.0.1))(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@6.0.3)(yaml@2.9.0))
+      oxlint: 1.81.0(oxlint-tsgolint@7.0.2003)(vite-plus@1.0.0(@opentelemetry/api@1.9.1)(@types/node@24.13.3)(@vitest/ui@5.0.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@6.0.3)(yaml@2.9.0))
       oxlint-plugin-react-doctor: 0.9.22
       playwright-core: 1.63.0
       prompts: 2.4.2
@@ -7521,7 +7542,7 @@ snapshots:
     optionalDependencies:
       '@types/react': 19.3.0
 
-  react-scan@0.5.7(@opentelemetry/core@2.11.0(@opentelemetry/api@1.9.1))(@voidzero-dev/vite-plus-core@1.0.0(@types/node@24.13.3)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@6.0.3)(yaml@2.9.0))(esbuild@0.28.2)(eslint@10.10.0(jiti@2.7.0))(oxlint-tsgolint@7.0.2003)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(rolldown@1.2.7)(vite-plus@1.0.0(@opentelemetry/api@1.9.1)(@types/node@24.13.3)(@vitest/ui@5.0.1(vitest@5.0.1))(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@6.0.3)(yaml@2.9.0)):
+  react-scan@0.5.7(@opentelemetry/core@2.11.0(@opentelemetry/api@1.9.1))(@voidzero-dev/vite-plus-core@1.0.0(@types/node@24.13.3)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@6.0.3)(yaml@2.9.0))(esbuild@0.28.2)(eslint@10.10.0(jiti@2.7.0))(oxlint-tsgolint@7.0.2003)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(rolldown@1.2.7)(vite-plus@1.0.0(@opentelemetry/api@1.9.1)(@types/node@24.13.3)(@vitest/ui@5.0.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@6.0.3)(yaml@2.9.0)):
     dependencies:
       '@babel/core': 7.29.7
       '@babel/types': 7.29.8
@@ -7533,7 +7554,7 @@ snapshots:
       preact: 10.29.8
       prompts: 2.4.2
       react: 19.3.1
-      react-doctor: 0.9.22(@opentelemetry/core@2.11.0(@opentelemetry/api@1.9.1))(eslint@10.10.0(jiti@2.7.0))(oxlint-tsgolint@7.0.2003)(react@19.3.1)(vite-plus@1.0.0(@opentelemetry/api@1.9.1)(@types/node@24.13.3)(@vitest/ui@5.0.1(vitest@5.0.1))(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@6.0.3)(yaml@2.9.0))
+      react-doctor: 0.9.22(@opentelemetry/core@2.11.0(@opentelemetry/api@1.9.1))(eslint@10.10.0(jiti@2.7.0))(oxlint-tsgolint@7.0.2003)(react@19.3.1)(vite-plus@1.0.0(@opentelemetry/api@1.9.1)(@types/node@24.13.3)(@vitest/ui@5.0.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@6.0.3)(yaml@2.9.0))
       react-dom: 19.3.1(react@19.3.1)
       react-grab: 0.2.0(react@19.3.1)
     optionalDependencies:
@@ -7770,7 +7791,7 @@ snapshots:
     dependencies:
       react: 19.3.1
 
-  vite-plus@1.0.0(@opentelemetry/api@1.9.1)(@types/node@24.13.3)(@vitest/ui@5.0.1(vitest@5.0.1))(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@6.0.3)(yaml@2.9.0):
+  vite-plus@1.0.0(@opentelemetry/api@1.9.1)(@types/node@24.13.3)(@vitest/ui@5.0.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@6.0.3)(yaml@2.9.0):
     dependencies:
       '@oxc-project/types': 0.151.0
       '@oxlint/plugins': 1.79.0
@@ -7781,8 +7802,8 @@ snapshots:
       '@vitest/snapshot': 5.0.1
       '@vitest/spy': 5.0.1
       '@vitest/utils': 5.0.1
-      oxfmt: 0.70.0(vite-plus@1.0.0(@opentelemetry/api@1.9.1)(@types/node@24.13.3)(@vitest/ui@5.0.1(vitest@5.0.1))(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@6.0.3)(yaml@2.9.0))
-      oxlint: 1.85.0(oxlint-tsgolint@7.0.2003)(vite-plus@1.0.0(@opentelemetry/api@1.9.1)(@types/node@24.13.3)(@vitest/ui@5.0.1(vitest@5.0.1))(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@6.0.3)(yaml@2.9.0))
+      oxfmt: 0.70.0(vite-plus@1.0.0(@opentelemetry/api@1.9.1)(@types/node@24.13.3)(@vitest/ui@5.0.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@6.0.3)(yaml@2.9.0))
+      oxlint: 1.85.0(oxlint-tsgolint@7.0.2003)(vite-plus@1.0.0(@opentelemetry/api@1.9.1)(@types/node@24.13.3)(@vitest/ui@5.0.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@6.0.3)(yaml@2.9.0))
       oxlint-tsgolint: 7.0.2003
       vite: '@voidzero-dev/vite-plus-core@1.0.0(@types/node@24.13.3)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@6.0.3)(yaml@2.9.0)'
       vitest: 5.0.1(@opentelemetry/api@1.9.1)(@types/node@24.13.3)(@vitest/browser-preview@5.0.1)(@vitest/ui@5.0.1(vitest@5.0.1))(@voidzero-dev/vite-plus-core@1.0.0(@types/node@24.13.3)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@6.0.3)(yaml@2.9.0))
