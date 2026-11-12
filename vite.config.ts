@@ -17,6 +17,7 @@ export default defineConfig({
   },
   test: {
     include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
+    globalSetup: ["src/test/global-setup.ts"],
     setupFiles: ["src/test/setup.ts"],
     // Worker threads start faster than forked processes.
     pool: "threads",
