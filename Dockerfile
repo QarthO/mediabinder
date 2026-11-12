@@ -8,6 +8,8 @@ FROM base AS development
 EXPOSE 3100
 CMD ["sh", "-c", "pnpm db:migrate && pnpm dev"]
 FROM base AS build
+# Coolify passes SOURCE_COMMIT as a build argument. `/api/health` reports it.
+ARG SOURCE_COMMIT
 RUN pnpm build
 FROM base AS production
 ENV NODE_ENV=production HOST=0.0.0.0 PORT=3100

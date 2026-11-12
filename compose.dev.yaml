@@ -4,6 +4,8 @@ services:
       target: development
     environment:
       NODE_ENV: development
+      # Set VITE_REACT_SCAN=true in the shell to profile renders.
+      VITE_REACT_SCAN: ${VITE_REACT_SCAN:-}
     volumes:
       - ./src:/app/src
       - ./public:/app/public
