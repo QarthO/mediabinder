@@ -16,6 +16,7 @@ import { SearchSelect } from "./ui/search-select"
 import { Button } from "./ui/button"
 
 export const LibraryFilters = memo(function LibraryFilters({
+  sortLabel = "Sort media",
   mediaType,
   setMediaType,
   catalogStatus,
@@ -30,6 +31,7 @@ export const LibraryFilters = memo(function LibraryFilters({
   view,
   onView,
 }: {
+  sortLabel?: string
   mediaType: string
   setMediaType: (value: string) => void
   catalogStatus: string
@@ -83,7 +85,7 @@ export const LibraryFilters = memo(function LibraryFilters({
       />
       <div className="toolbar-spacer" />
       <Select
-        label="Sort media"
+        label={sortLabel}
         mobileIcon={ArrowUpDown}
         value={sort}
         onChange={(value) =>

@@ -707,6 +707,50 @@ tr:hover td {
 .set-card:hover {
   border-color: #516a8e;
 }
+.set-grid.set-list {
+  grid-template-columns: 1fr;
+}
+.set-list .set-card {
+  display: flex;
+  align-items: center;
+}
+.set-list .set-cover {
+  height: 90px;
+  width: 120px;
+  flex-shrink: 0;
+}
+.set-list .set-info {
+  flex: 1;
+  min-width: 0;
+}
+.set-list .set-card > .tags {
+  flex-wrap: wrap;
+}
+.sets-workspace {
+  padding: 20px 28px;
+}
+.sets-workspace .library-toolbar {
+  border-top: 0;
+  padding-top: 0;
+  flex-wrap: wrap;
+}
+@media (max-width: 760px) {
+  .sets-workspace {
+    padding: 12px 8px;
+  }
+  .sets-workspace .library-toolbar {
+    flex-wrap: nowrap;
+    gap: 4px;
+  }
+  .set-list .set-card {
+    flex-wrap: wrap;
+  }
+}
+@media (max-width: 360px) {
+  .sets-workspace .library-toolbar {
+    gap: 2px;
+  }
+}
 .set-cover {
   height: 170px;
   position: relative;
