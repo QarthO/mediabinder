@@ -218,13 +218,13 @@ export async function mutate(
       await driveToken(undefined, userId),
       name
     )
-    return linkSharedFolder(userId, headers, {
+    return linkSharedFolder(userId, {
       folderId: created.id,
       share: true,
     })
   }
   if (action === "source") {
-    if (sharedFolderMode()) return linkSharedFolder(userId, headers, input)
+    if (sharedFolderMode()) return linkSharedFolder(userId, input)
     const value = folder.parse(input),
       token = await driveToken(headers)
     const source = await driveJson<{
@@ -537,7 +537,6 @@ export type LinkResult =
 // Google lists them as its owner.
 async function linkSharedFolder(
   userId: string,
-  headers: Headers,
   input: unknown
 ): Promise<LinkResult> {
   const value = linkFolder.parse(input)
