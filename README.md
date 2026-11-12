@@ -118,6 +118,8 @@ Linking works three ways in **Settings → Link folder**:
 
 Because the service account can read every folder anyone shares with it, a user may only link a folder they chose in the picker (their `drive.file` token can see it) or own. Unlinking removes MediaBinder's share when Google allows it; otherwise the user is told to remove MediaBinder's address from the folder's sharing in Drive. Right after a share, Google can take a moment to extend it to files in subfolders; the next sync picks them up.
 
+A subfolder with limited access (one that doesn't inherit its parent's sharing in Drive) is synced through its parent only for the person who owns it; anyone else links it on its own. A linked folder MediaBinder can see but not list fails the sync instead of hiding its media.
+
 Each MediaBinder account still sees only the folders it linked. The service account does the reading for everyone, so access is checked when a folder is linked: the user must choose it in the picker or own it. After that, MediaBinder keeps syncing it while the folder stays shared with MediaBinder's address, even if the folder's owner later removes that user's own access in Drive. Tags, names, sets and posts on identical media are shared across accounts as described under **Shared catalog and inbox**.
 
 `scripts/test-shared-folders.ts` checks these linking rules against a disposable database with mocked Google responses. `scripts/try-shared-folder-link.ts` exercises the share, link, sync and unlink path against real Google APIs for the first signed-in user; it creates and deletes a temporary folder in that user's Drive.

@@ -32,6 +32,8 @@ export interface DriveFile {
   parents?: string[]
   sha256Checksum?: string
   thumbnailLink?: string
+  // Limited-access folder: it doesn't inherit its parent's sharing.
+  inheritedPermissionsDisabled?: boolean
 }
 export async function driveToken(headers?: Headers, userId?: string) {
   return runServer(
@@ -191,19 +193,54 @@ async function reconcileDrive(
   const sourceFiles = new Map<string, DriveFile[]>()
   const found = new Set<string>()
   let foldersScanned = 0
+  const shared = sharedFolderMode()
+  const unopenable = () =>
+    new Error(
+      "MediaBinder can't open a linked folder. Share it with MediaBinder's sync account in Google Drive, then sync again."
+    )
+  // In shared-folder mode the service account reads for every user, and a
+  // user's access was only checked on the linked folder. A limited-access
+  // subfolder (one that doesn't inherit the parent's sharing) may be readable
+  // by MediaBinder through a separate share while this user can't open it in
+  // Drive, so only its owner syncs it through the parent; anyone else links it
+  // directly.
+  let email: string | null | undefined
+  const ownsFolder = async (id: string) => {
+    if (email === undefined) {
+      const [user] = await connection.query<any[]>(
+        "SELECT email FROM user WHERE id=?",
+        [userId]
+      )
+      email = user[0]?.email?.toLowerCase() ?? null
+    }
+    if (!email) return false
+    const folder = await driveJson<{ owners?: { emailAddress?: string }[] }>(
+      token,
+      `files/${id}`,
+      { fields: "owners(emailAddress)", supportsAllDrives: "true" }
+    )
+    return Boolean(
+      folder.owners?.some(
+        (owner) => owner.emailAddress?.toLowerCase() === email
+      )
+    )
+  }
   for (const folderId of folderIds) {
-    // Drive lists an unshared folder as empty rather than failing. In
-    // shared-folder mode, check access first so an unshared folder fails the
-    // run (preserving the catalog) instead of hiding its media.
-    if (sharedFolderMode())
-      await driveJson(token, `files/${folderId}`, {
-        fields: "id",
+    // Drive lists an unshared folder as empty rather than failing, and shows a
+    // limited-access folder's metadata without its contents. In shared-folder
+    // mode, check that MediaBinder can list it first so the run fails
+    // (preserving the catalog) instead of hiding its media.
+    if (shared) {
+      const root = await driveJson<{
+        capabilities?: { canListChildren?: boolean }
+      }>(token, `files/${folderId}`, {
+        fields: "id,capabilities(canListChildren)",
         supportsAllDrives: "true",
       }).catch(() => {
-        throw new Error(
-          "MediaBinder can't open a linked folder. Share it with MediaBinder's sync account in Google Drive, then sync again."
-        )
+        throw unopenable()
       })
+      if (root.capabilities?.canListChildren !== true) throw unopenable()
+    }
     const pending = [folderId],
       visited = new Set<string>(),
       files: DriveFile[] = []
@@ -218,17 +255,21 @@ async function reconcileDrive(
           nextPageToken?: string
         }>(token, "files", {
           q: `'${parent}' in parents and trashed = false and (mimeType contains 'image/' or mimeType contains 'video/' or mimeType = 'application/vnd.google-apps.folder')`,
-          fields:
-            "nextPageToken,files(id,name,mimeType,createdTime,size,parents,sha256Checksum,imageMediaMetadata,videoMediaMetadata)",
+          fields: `nextPageToken,files(id,name,mimeType,createdTime,size,parents,sha256Checksum,imageMediaMetadata,videoMediaMetadata${shared ? ",inheritedPermissionsDisabled" : ""})`,
           pageSize: "1000",
           supportsAllDrives: "true",
           includeItemsFromAllDrives: "true",
           ...(pageToken ? { pageToken } : {}),
         })
         for (const file of page.files) {
-          if (file.mimeType === "application/vnd.google-apps.folder")
-            pending.push(file.id)
-          else {
+          if (file.mimeType === "application/vnd.google-apps.folder") {
+            if (
+              !shared ||
+              !file.inheritedPermissionsDisabled ||
+              (await ownsFolder(file.id))
+            )
+              pending.push(file.id)
+          } else {
             files.push(file)
             found.add(file.id)
           }
