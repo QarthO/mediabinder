@@ -1,6 +1,6 @@
 import { Effect, Layer, Logger, ManagedRuntime } from "effect"
-import { FetchHttpClient } from "effect/unstable/http"
-import { OtlpSerialization, OtlpTracer } from "effect/unstable/observability"
+import { FetchHttpClient } from "effect/http"
+import { OtlpSerialization, OtlpTracer } from "effect/observability"
 
 export const tracing = process.env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
   ? OtlpTracer.layer({

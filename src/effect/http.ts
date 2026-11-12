@@ -3,7 +3,7 @@ import {
   FetchHttpClient,
   HttpClient,
   HttpClientRequest,
-} from "effect/unstable/http"
+} from "effect/http"
 
 export class NetworkError extends Schema.TaggedError<NetworkError>()(
   "NetworkError",

@@ -29,7 +29,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
-    "effect": "4.0.0-beta.107",
+    "effect": "4.1.4",
     "lucide-react": "^1.72.0",
     "mysql2": "^3.24.6",
     "radix-ui": "^1.8.1",
