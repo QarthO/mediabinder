@@ -3996,8 +3996,51 @@ html {
 }
 
 @media (max-width: 760px) {
-  .media-card-checkbox { display: none; }
+  .media-card-checkbox {
+    display: none;
+  }
 }
 @media (min-width: 761px) {
-  .header-select.mobile-only-selection { display: none; }
+  .header-select.mobile-only-selection {
+    display: none;
+  }
+}
+.sync-progress {
+  display: grid;
+  gap: 7px;
+  min-width: 220px;
+  margin-top: 2px;
+  font-variant-numeric: tabular-nums;
+}
+.sync-progress-track {
+  position: relative;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--primary), transparent 82%);
+}
+.sync-progress-track > div {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--primary);
+  transition: width 400ms ease-out;
+}
+.sync-progress-track > .indeterminate {
+  width: 35%;
+  animation: sync-progress-slide 1.3s ease-in-out infinite;
+}
+@keyframes sync-progress-slide {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(290%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sync-progress-track > .indeterminate {
+    width: 100%;
+    animation: none;
+    opacity: 0.5;
+  }
 }

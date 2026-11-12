@@ -29,7 +29,6 @@ import {
   FolderOpen,
   Search,
   Settings,
-  RefreshCw,
   Plus,
   ChevronRight,
   PanelLeftClose,
@@ -57,6 +56,7 @@ import {
   CommandItem,
 } from "./ui/command"
 import { Brand } from "./brand"
+import { DriveSyncButton, DriveSyncMonitor } from "./drive-sync"
 import { Thumbnail, MediaCensorContext } from "./thumbnail"
 const Detail = lazy(() =>
   import("./detail").then((module) => ({ default: module.Detail }))
@@ -204,19 +204,6 @@ function WorkspaceContent({
     window.addEventListener("keydown", handler)
     return () => window.removeEventListener("keydown", handler)
   }, [])
-  const sync = useMutation({
-    mutationFn: (_automatic?: boolean) => action<{ count: number }>("sync"),
-    onSuccess: async (result, automatic) => {
-      await client.invalidateQueries({ queryKey: ["library"] })
-      if (!automatic)
-        toast.success(
-          `Synced ${result.count} media ${result.count === 1 ? "item" : "items"}`
-        )
-    },
-    onError: (e, automatic) => {
-      if (!automatic || !e.message.startsWith("A sync")) toast.error(e.message)
-    },
-  })
   const [previousPath, setPreviousPath] = useState(pathname)
   if (previousPath !== pathname) {
     setPreviousPath(pathname)
@@ -524,16 +511,12 @@ function WorkspaceContent({
               <span>Edit set</span>
             </Button>
           )}
-          <Button
+          <DriveSyncButton
             className="header-sync"
             variant="outline"
-            aria-label={sync.isPending ? "Syncing Drive" : "Sync Drive"}
-            disabled={sync.isPending || !data.workspace.sources.length}
-            onClick={() => sync.mutate()}
-          >
-            <RefreshCw className={sync.isPending ? "spin" : ""} />
-            <span>{sync.isPending ? "Syncing…" : "Sync Drive"}</span>
-          </Button>
+            disabled={!data.workspace.sources.length}
+          />
+          <DriveSyncMonitor />
         </header>
         <div
           className={`workspace-content ${page === "all" ? "media-workspace" : ""}`}
@@ -711,23 +694,14 @@ function WorkspaceContent({
                       !setId &&
                       mediaType === "all" &&
                       catalogStatus === "all" ? (
-                        <Button
-                          disabled={sync.isPending}
-                          onClick={() =>
-                            data.workspace.sources.length
-                              ? sync.mutate()
-                              : changePage("settings")
-                          }
-                        >
-                          {data.workspace.sources.length ? (
-                            <RefreshCw />
-                          ) : (
+                        data.workspace.sources.length ? (
+                          <DriveSyncButton />
+                        ) : (
+                          <Button onClick={() => changePage("settings")}>
                             <FolderOpen />
-                          )}
-                          {data.workspace.sources.length
-                            ? "Sync Drive"
-                            : "Choose a folder"}
-                        </Button>
+                            Choose a folder
+                          </Button>
+                        )
                       ) : undefined
                     }
                   />

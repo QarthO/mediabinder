@@ -22,7 +22,13 @@ import {
   removeMediaTag,
   tags,
 } from "./validation"
-import { driveJson, driveToken, listFolders, syncDrive } from "./drive.server"
+import {
+  driveJson,
+  driveToken,
+  listFolders,
+  startDriveSync,
+} from "./drive.server"
+import { syncStatus } from "./sync-progress.server"
 import type { RowDataPacket } from "mysql2/promise"
 
 export async function library(
@@ -173,7 +179,8 @@ export async function mutate(
   userId: string,
   headers: Headers
 ) {
-  if (action === "sync") return syncDrive(userId, headers)
+  if (action === "sync") return startDriveSync(userId, headers)
+  if (action === "sync-status") return syncStatus(userId)
   if (action === "folders") return listFolders(headers)
   if (action === "source") {
     const value = folder.parse(input),

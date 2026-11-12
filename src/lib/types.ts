@@ -58,3 +58,17 @@ export interface Library {
   }
   user: { name: string; email: string; role: string }
 }
+export interface SyncRun {
+  run_id: string
+  origin: "manual" | "automatic"
+  status: "running" | "succeeded" | "failed"
+  phase: "scanning" | "saving" | "done"
+  folders_scanned: number
+  files_found: number
+  files_saved: number
+  files_total: number
+  item_count: number | null
+  error: string | null
+  started_at: string
+  finished_at: string | null
+}
