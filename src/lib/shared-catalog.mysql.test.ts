@@ -11,7 +11,9 @@ import {
   stubAccessToken,
   stubGoogle,
 } from "@/test/fixtures"
-import { catalogTransaction, resolveCatalog } from "./catalog.server"
+import { Effect } from "effect"
+import { resolve, transaction } from "./catalog.server"
+import { runTracedAppEffect } from "@/effect/runtime.server"
 import { rows } from "./database.server"
 import { syncDrive, type DriveFile } from "./drive.server"
 import { library } from "./library.server"
@@ -312,44 +314,48 @@ describeMysql("shared catalog", () => {
     const first = randomUUID()
     const second = randomUUID()
     const bytes = hash()
-    await catalogTransaction(async (connection) => {
-      for (const [id, name, tag, date] of [
-        [first, "First curated name", "one", "2026-01-01"],
-        [second, "Second curated name", "two", "2026-02-01"],
-      ]) {
-        await connection.execute(
-          "INSERT INTO catalog(id,display_name,tags,created_at,cataloged_at) VALUES (?,?,?,NOW(3),?)",
-          [id, name, JSON.stringify([tag]), date]
-        )
-        await connection.execute(
-          "INSERT INTO media(id,user_id,drive_id,catalog_id,display_name,raw_name,mime_type,tags,created_at,uploaded_at,available,synced_at) VALUES (?,?,?,?,?,'fixture.jpg','image/jpeg','[]',NOW(3),NOW(3),TRUE,NOW(3))",
-          [id, owner.id, id, id, name]
-        )
-        const setId = randomUUID()
-        await connection.execute(
-          "INSERT INTO media_set(id,user_id,display_name,raw_name,tags,created_at) VALUES (?,?,'Set','Set','[]',NOW(3))",
-          [setId, owner.id]
-        )
-        await connection.execute(
-          "INSERT INTO catalog_set_member VALUES (?,?)",
-          [setId, id]
-        )
-        await connection.execute(
-          "INSERT INTO post(id,user_id,media_id,catalog_id,platform,url,created_at) VALUES (?,?,?,?,'Example','https://example.com/post',NOW(3))",
-          [randomUUID(), owner.id, id, id]
-        )
-      }
-      const incoming = (id: string): DriveFile => ({
-        id,
-        name: "renamed.jpg",
-        mimeType: "image/jpeg",
-        createdTime: "2026-01-01T00:00:00Z",
-        sha256Checksum: bytes,
-        size: "24",
-      })
-      expect(await resolveCatalog(connection, incoming(first))).toBe(first)
-      expect(await resolveCatalog(connection, incoming(second))).toBe(first)
-    })
+    await runTracedAppEffect(
+      transaction((session) =>
+        Effect.gen(function* () {
+          for (const [id, name, tag, date] of [
+            [first, "First curated name", "one", "2026-01-01"],
+            [second, "Second curated name", "two", "2026-02-01"],
+          ]) {
+            yield* session.execute(
+              "INSERT INTO catalog(id,display_name,tags,created_at,cataloged_at) VALUES (?,?,?,NOW(3),?)",
+              [id, name, JSON.stringify([tag]), date]
+            )
+            yield* session.execute(
+              "INSERT INTO media(id,user_id,drive_id,catalog_id,display_name,raw_name,mime_type,tags,created_at,uploaded_at,available,synced_at) VALUES (?,?,?,?,?,'fixture.jpg','image/jpeg','[]',NOW(3),NOW(3),TRUE,NOW(3))",
+              [id, owner.id, id, id, name]
+            )
+            const setId = randomUUID()
+            yield* session.execute(
+              "INSERT INTO media_set(id,user_id,display_name,raw_name,tags,created_at) VALUES (?,?,'Set','Set','[]',NOW(3))",
+              [setId, owner.id]
+            )
+            yield* session.execute(
+              "INSERT INTO catalog_set_member VALUES (?,?)",
+              [setId, id]
+            )
+            yield* session.execute(
+              "INSERT INTO post(id,user_id,media_id,catalog_id,platform,url,created_at) VALUES (?,?,?,?,'Example','https://example.com/post',NOW(3))",
+              [randomUUID(), owner.id, id, id]
+            )
+          }
+          const incoming = (id: string): DriveFile => ({
+            id,
+            name: "renamed.jpg",
+            mimeType: "image/jpeg",
+            createdTime: "2026-01-01T00:00:00Z",
+            sha256Checksum: bytes,
+            size: "24",
+          })
+          expect(yield* resolve(session, incoming(first))).toBe(first)
+          expect(yield* resolve(session, incoming(second))).toBe(first)
+        })
+      )
+    )
 
     const result = await library(owner)
     expect(result.media).toHaveLength(1)
