@@ -3,7 +3,9 @@ import { ZodError } from "zod"
 import {
   AuthenticationError,
   DatabaseError,
+  DriveAccessError,
   DriveApiError,
+  DriveReconnectError,
   LockBusyError,
   NotFoundError,
   ValidationError,
@@ -42,6 +44,49 @@ describe("error responses", () => {
     )
     expect(await response.json()).toEqual({
       error: "Reconnect Google Drive in settings.",
+    })
+  })
+
+  test("a Drive failure shows only the message its caller wrote", async () => {
+    const shown = new DriveApiError({
+      operation: "files.get",
+      status: 404,
+      userMessage:
+        "This file or folder is no longer available in Google Drive.",
+      cause: new Error("Bearer ya29.secret"),
+    })
+    expect(await errorResponse(shown, fallback).json()).toEqual({
+      error: "This file or folder is no longer available in Google Drive.",
+    })
+    // The message is what sync runs and worker logs store as well.
+    expect(shown.message).toBe(
+      "This file or folder is no longer available in Google Drive."
+    )
+  })
+
+  test("Drive refusals and reconnects keep their user-facing text", async () => {
+    for (const [error, message] of [
+      [
+        new DriveAccessError({
+          code: "scope",
+          message:
+            "Reconnect Google so MediaBinder can share the folders you choose.",
+        }),
+        "Reconnect Google so MediaBinder can share the folders you choose.",
+      ],
+      [new DriveReconnectError(), "Reconnect Google Drive in settings."],
+    ] as const) {
+      expect(await errorResponse(error, fallback).json()).toEqual({
+        error: message,
+      })
+    }
+    // Not on the public list before, so still the fallback.
+    const hidden = new DriveAccessError({
+      code: "not-allowed",
+      message: "MediaBinder can't open this folder's contents.",
+    })
+    expect(await errorResponse(hidden, fallback).json()).toEqual({
+      error: fallback,
     })
   })
 

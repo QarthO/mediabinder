@@ -61,7 +61,9 @@ describeMysql("media proxy", () => {
     const owner = newUser()
     const id = await insertMedia({ userId: owner.id })
     signIn(owner)
-    let upstream: { range: string | null; signal: unknown } | undefined
+    let upstream:
+      | { range: string | null; signal?: AbortSignal | null }
+      | undefined
     google((_url, init) => {
       upstream = {
         range: new Headers(init.headers).get("range"),
@@ -73,8 +75,10 @@ describeMysql("media proxy", () => {
       })
     })
 
-    const { request, response: pending } = get(id, {
+    const browser = new AbortController()
+    const { response: pending } = get(id, {
       headers: { range: "bytes=0-2" },
+      signal: browser.signal,
     })
     const response = await pending
 
@@ -87,8 +91,13 @@ describeMysql("media proxy", () => {
     const reader = response.body!.getReader()
     expect((await reader.read()).value).toEqual(new Uint8Array([1, 2, 3]))
     await reader.cancel()
-    // Drive saw the same range, and a browser cancelling the request cancels it.
-    expect(upstream).toEqual({ range: "bytes=0-2", signal: request.signal })
+    // Drive saw the same range, and a browser cancelling the request cancels
+    // the Drive download too, though it is still streaming after the handler
+    // returned.
+    expect(upstream?.range).toBe("bytes=0-2")
+    expect(upstream?.signal?.aborted).toBe(false)
+    browser.abort()
+    expect(upstream?.signal?.aborted).toBe(true)
   })
 
   test("a malformed or multi-range request is rejected without reaching Drive", async () => {

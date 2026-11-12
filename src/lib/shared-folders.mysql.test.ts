@@ -70,8 +70,7 @@ describeMysql("shared folders", () => {
       if (url.hostname === "oauth2.googleapis.com")
         return Response.json({ access_token: "sa-token", expires_in: 3600 })
       const token = String(
-        (init.headers as Record<string, string> | undefined)?.Authorization ??
-          ""
+        new Headers(init.headers).get("authorization") ?? ""
       ).replace("Bearer ", "")
       const call = { method: init.method ?? "GET", url, token }
       calls.push(call)

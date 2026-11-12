@@ -1,6 +1,7 @@
 import { ZodError } from "zod"
 import {
   AuthenticationError,
+  DriveApiError,
   LockBusyError,
   NotFoundError,
   ValidationError,
@@ -10,6 +11,7 @@ import {
 // so they are answered but not reported. error-policy.ts shares this list.
 export const EXPECTED_ERROR_TAGS: ReadonlySet<string> = new Set([
   "AuthenticationError",
+  "DriveReconnectError",
   "LockBusyError",
   "NotFoundError",
   "ValidationError",
@@ -23,6 +25,8 @@ export const SYNC_BUSY_MESSAGE = "A sync is already running. Try again shortly."
  * or a Google response must never reach a client.
  */
 export function publicErrorMessage(error: unknown, fallback: string) {
+  // A Drive failure is shown only when its caller wrote a message for it.
+  if (error instanceof DriveApiError) return error.userMessage ?? fallback
   return error instanceof Error &&
     /^(Google |Reconnect |Choose |A sync |The source |This file|Drive watch|Network request)/.test(
       error.message

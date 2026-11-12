@@ -1,44 +1,64 @@
 import { Effect, Layer, Schema } from "effect"
-import { driveReadToken } from "@/lib/drive.server"
+import { HttpClientRequest } from "effect/http"
+import * as Drive from "./drive-api.server"
+import { DRIVE_API, driveJsonRequest } from "./drive-http.server"
 import { readThumbnail, ThumbnailError, ThumbnailSource } from "./thumbnails"
 
 const FileThumbnail = Schema.Struct({
-  thumbnailLink: Schema.optional(Schema.String),
+  thumbnailLink: Schema.optionalKey(Schema.String),
 })
-export const ThumbnailSourceLive = Layer.succeed(ThumbnailSource, {
-  load: Effect.fn("thumbnails.google")(function* (key: string) {
-    const [userId, driveId] = key.split(":")
-    const token = yield* Effect.tryPromise({
-      try: () => driveReadToken(userId),
-      catch: () =>
+
+// Asks Drive for a file's thumbnail link. A refusal or a bad answer is the
+// thumbnail's failure alone: 404 stays 404, everything else is a bad gateway.
+const lookup = Effect.fn("Thumbnail.lookup")(function* (
+  driveId: string,
+  token: string
+) {
+  const { status, body } = yield* driveJsonRequest(
+    "files.get",
+    HttpClientRequest.get(`${DRIVE_API}/files/${encodeURIComponent(driveId)}`, {
+      urlParams: { fields: "thumbnailLink", supportsAllDrives: "true" },
+      headers: { Authorization: `Bearer ${token}` },
+    })
+  ).pipe(
+    Effect.mapError(
+      () =>
         new ThumbnailError({
-          status: 401,
-          message: "Reconnect Google Drive in settings.",
-        }),
-    }).pipe(Effect.withSpan("thumbnails.token"))
-    const file = yield* Effect.tryPromise({
-      try: async (signal) => {
-        const response = await fetch(
-          `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(driveId)}?fields=thumbnailLink&supportsAllDrives=true`,
-          { headers: { Authorization: `Bearer ${token}` }, signal }
-        )
-        if (!response.ok) {
-          await response.body?.cancel()
-          throw new ThumbnailError({
-            status: response.status === 404 ? 404 : 502,
-            message: "Google could not look up this thumbnail. Try again.",
+          status: 502,
+          message: "Thumbnail lookup failed. Try again.",
+        })
+    )
+  )
+  yield* Effect.annotateCurrentSpan({ "http.response.status_code": status })
+  if (status < 200 || status >= 300)
+    return yield* new ThumbnailError({
+      status: status === 404 ? 404 : 502,
+      message: "Google could not look up this thumbnail. Try again.",
+    })
+  return yield* Schema.decodeUnknownEffect(FileThumbnail)(body).pipe(
+    Effect.mapError(
+      () =>
+        new ThumbnailError({
+          status: 502,
+          message: "Thumbnail lookup failed. Try again.",
+        })
+    )
+  )
+})
+
+export const ThumbnailSourceLive = Layer.succeed(ThumbnailSource, {
+  load: Effect.fn("Thumbnail.load")(function* (key: string) {
+    const [userId, driveId] = key.split(":")
+    const token = yield* Drive.readToken(userId).pipe(
+      Effect.mapError(
+        () =>
+          new ThumbnailError({
+            status: 401,
+            message: "Reconnect Google Drive in settings.",
           })
-        }
-        return Schema.decodeUnknownSync(FileThumbnail)(await response.json())
-      },
-      catch: (cause) =>
-        cause instanceof ThumbnailError
-          ? cause
-          : new ThumbnailError({
-              status: 502,
-              message: "Thumbnail lookup failed. Try again.",
-            }),
-    }).pipe(Effect.withSpan("thumbnails.lookup"))
+      )
+    )
+    const file = yield* lookup(driveId, token)
     if (!file.thumbnailLink)
       return yield* new ThumbnailError({
         status: 404,

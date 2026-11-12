@@ -1,10 +1,10 @@
 import type { RowDataPacket } from "mysql2/promise"
 import { Effect, Option } from "effect"
 import { Database } from "@/effect/database"
+import * as Drive from "@/effect/drive-api.server"
 import { DriveApiError } from "@/effect/errors"
 import { runTracedAppEffect } from "@/effect/runtime.server"
 import { sharedFolderMode } from "./drive-access.server"
-import { driveToken } from "./drive.server"
 
 const LEGACY_SCOPE = "https://www.googleapis.com/auth/drive.readonly"
 
@@ -64,9 +64,7 @@ export const revokeLegacy = Effect.fn("GoogleGrants.revokeLegacy")(
 const revokeGrant = Effect.fn("GoogleGrants.revokeGrant")(function* (
   userId: string
 ) {
-  const token = yield* Effect.tryPromise(() =>
-    driveToken(undefined, userId)
-  ).pipe(Effect.option)
+  const token = yield* Drive.token(undefined, userId).pipe(Effect.option)
   // No usable token: Google already dropped the grant (revoked, expired or
   // the user removed MediaBinder), so there is nothing left to revoke.
   if (Option.isNone(token)) return

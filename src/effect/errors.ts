@@ -65,21 +65,55 @@ export class ValidationError extends Schema.TaggedError<ValidationError>()(
 ) {}
 
 /**
- * A call to Google's APIs failed. `status` is Google's HTTP status, absent
- * when no response arrived. Never shown to users as it is: the message
- * deliberately doesn't match the prefixes `publicErrorMessage` lets through.
+ * A call to Google's APIs failed. `operation` names the Google method
+ * (`files.get`, never an ID) and `status` is Google's HTTP status, absent when
+ * no response arrived.
+ *
+ * Without `userMessage` the error is internal: the message deliberately
+ * doesn't match the prefixes `publicErrorMessage` lets through. A caller that
+ * wants the person to read why sets `userMessage` to a constant sentence;
+ * never Google's own text.
  */
 export class DriveApiError extends Schema.TaggedError<DriveApiError>()(
   "DriveApiError",
   {
     operation: Schema.String,
     status: Schema.optional(Schema.Int),
+    userMessage: Schema.optional(Schema.String),
     cause: Schema.optional(Schema.Defect()),
   }
 ) {
   override get message() {
+    if (this.userMessage !== undefined) return this.userMessage
     return this.status === undefined
       ? `Drive API ${this.operation} failed`
       : `Drive API ${this.operation} failed (${this.status})`
+  }
+}
+
+/**
+ * Google refused to share, read or create a folder for a reason the person can
+ * act on. `code` says which: `scope` (reconnect Google), `not-allowed`,
+ * `not-found`, or `unavailable` (Google answered with something else). The
+ * message is a constant sentence written for the user.
+ */
+export class DriveAccessError extends Schema.TaggedError<DriveAccessError>()(
+  "DriveAccessError",
+  {
+    code: Schema.Literals(["scope", "not-allowed", "not-found", "unavailable"]),
+    message: Schema.String,
+  }
+) {}
+
+/**
+ * The person's Google token is missing or unusable, so they have to reconnect
+ * Google Drive in settings. Answered with the message below.
+ */
+export class DriveReconnectError extends Schema.TaggedError<DriveReconnectError>()(
+  "DriveReconnectError",
+  { cause: Schema.optional(Schema.Defect()) }
+) {
+  override get message() {
+    return "Reconnect Google Drive in settings."
   }
 }
