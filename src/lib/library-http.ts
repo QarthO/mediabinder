@@ -1,9 +1,12 @@
 import { Effect, Option, Schema } from "effect"
-import { ZodError } from "zod"
+import type { AuthenticationError } from "@/effect/errors"
 import { appUrl } from "./config"
+import { errorResponse, isHandledError } from "./http-errors"
 
 type Dependencies = {
-  session: (headers: Headers) => Promise<{ user: { id: string } }>
+  session: (
+    headers: Headers
+  ) => Effect.Effect<{ user: { id: string } }, AuthenticationError>
   mutate: (
     action: string,
     data: unknown,
@@ -14,16 +17,6 @@ type Dependencies = {
   report: (cause: unknown, context: { operation: string }) => void
 }
 
-// Only known user-facing messages leave the server; others become the fallback.
-export function publicErrorMessage(error: unknown, fallback: string) {
-  return error instanceof Error &&
-    /^(Google |Reconnect |Choose |A sync |The source |This file|Drive watch|Network request)/.test(
-      error.message
-    )
-    ? error.message
-    : fallback
-}
-
 export const libraryPost = Effect.fnUntraced(
   function* (request: Request, dependencies: Dependencies) {
     const origin = yield* Effect.try({
@@ -32,35 +25,31 @@ export const libraryPost = Effect.fnUntraced(
     })
     if (request.headers.get("origin") !== origin)
       return new Response("Invalid origin.", { status: 403 })
-    const session = yield* Effect.tryPromise({
-      try: () => dependencies.session(request.headers),
-      catch: (error) => error,
-    })
+    const session = yield* dependencies.session(request.headers)
     if (Number(request.headers.get("content-length")) > 65536)
       return new Response("Request too large.", { status: 413 })
-    const payload = yield* Effect.tryPromise({
-      try: () => request.json(),
-      catch: () => new Response("Invalid JSON.", { status: 400 }),
-    })
+    const payload = yield* Effect.tryPromise(() => request.json()).pipe(
+      Effect.option
+    )
+    if (Option.isNone(payload))
+      return new Response("Invalid JSON.", { status: 400 })
     const input = yield* Schema.decodeUnknownEffect(
       Schema.Struct({
         action: Schema.String,
         data: Schema.optional(Schema.Unknown),
       })
-    )(payload).pipe(
-      Effect.mapError(
-        () => new Response("Invalid action payload.", { status: 400 })
-      )
-    )
+    )(payload.value).pipe(Effect.option)
+    if (Option.isNone(input))
+      return new Response("Invalid action payload.", { status: 400 })
     // Only the action name, never its data: the request span is shared by
     // every library action.
-    yield* Effect.annotateCurrentSpan("mediabinder.action", input.action)
+    yield* Effect.annotateCurrentSpan("mediabinder.action", input.value.action)
     yield* Effect.currentSpan.pipe(
       Effect.tap((span) => {
         const parent = Option.getOrUndefined(span.parent)
         return parent?._tag === "Span"
           ? Effect.sync(() =>
-              parent.attribute("mediabinder.action", input.action)
+              parent.attribute("mediabinder.action", input.value.action)
             )
           : Effect.void
       }),
@@ -69,8 +58,8 @@ export const libraryPost = Effect.fnUntraced(
     const result = yield* Effect.tryPromise({
       try: () =>
         dependencies.mutate(
-          input.action,
-          input.data,
+          input.value.action,
+          input.value.data,
           session.user.id,
           request.headers
         ),
@@ -78,23 +67,18 @@ export const libraryPost = Effect.fnUntraced(
     })
     return Response.json(result, { headers: { "Cache-Control": "no-store" } })
   },
-  (self, _request, dependencies) =>
-    Effect.catch(self, (error) => {
-      if (error instanceof Response) return Effect.succeed(error)
-      if (error instanceof ZodError)
-        return Effect.succeed(
-          Response.json(
-            { error: error.issues[0]?.message ?? "Check the entered values." },
-            { status: 400 }
-          )
+  (self, _request, dependencies) => {
+    const respond = (error: unknown) =>
+      Effect.sync(() => {
+        // Only the mapped response goes to the client; the cause is reported.
+        if (!isHandledError(error))
+          dependencies.report(error, { operation: "Library.post" })
+        return errorResponse(
+          error,
+          "Could not save this change. Please try again."
         )
-      const message = publicErrorMessage(
-        error,
-        "Could not save this change. Please try again."
-      )
-      // Only the sanitized message goes in the response; the cause is logged.
-      return Effect.sync(() =>
-        dependencies.report(error, { operation: "Library.post" })
-      ).pipe(Effect.as(Response.json({ error: message }, { status: 400 })))
-    })
+      })
+    // Defects too: `mutate` still throws whatever its callees throw.
+    return self.pipe(Effect.catch(respond), Effect.catchDefect(respond))
+  }
 )

@@ -48,13 +48,12 @@ const AppLive = Layer.mergeAll(
 ).pipe(Layer.provideMerge(ConsoleLogLive))
 const runtime = ManagedRuntime.make(AppLive)
 
-export async function runAppEffect<TResult, TError>(
-  name: string,
+async function runInActiveTrace<TResult, TError>(
   effect: Effect.Effect<TResult, TError, AppServices>,
   options?: { signal?: AbortSignal }
 ): Promise<TResult> {
   const exit = await runtime.runPromiseExit(
-    Telemetry.withActiveParent(Effect.withSpan(effect, name)),
+    Telemetry.withActiveParent(effect),
     options
   )
   if (Exit.isSuccess(exit)) return exit.value
@@ -65,6 +64,26 @@ export async function runAppEffect<TResult, TError>(
     throw new DOMException("The request was aborted", "AbortError")
   }
   throw Cause.squash(exit.cause)
+}
+
+export function runAppEffect<TResult, TError>(
+  name: string,
+  effect: Effect.Effect<TResult, TError, AppServices>,
+  options?: { signal?: AbortSignal }
+): Promise<TResult> {
+  return runInActiveTrace(Effect.withSpan(effect, name), options)
+}
+
+/**
+ * Runs an effect that opens its own span, an `Effect.fn("Area.operation")`,
+ * under the span active in the caller's trace. For facades over converted
+ * modules: `runAppEffect` would add a second span with the same name.
+ */
+export function runTracedAppEffect<TResult, TError>(
+  effect: Effect.Effect<TResult, TError, AppServices>,
+  options?: { signal?: AbortSignal }
+): Promise<TResult> {
+  return runInActiveTrace(effect, options)
 }
 
 /**

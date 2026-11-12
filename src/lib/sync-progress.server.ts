@@ -1,7 +1,15 @@
 import { randomUUID } from "node:crypto"
 import type { PoolConnection, RowDataPacket } from "mysql2/promise"
-import { pool, rows } from "./database.server"
-import { publicErrorMessage } from "./library-http"
+import { Effect, Fiber, Semaphore } from "effect"
+import { Database } from "@/effect/database"
+import type { DatabaseSession } from "@/effect/database"
+import type { DatabaseError } from "@/effect/errors"
+import {
+  runTracedAppEffect,
+  runAppEffectUntraced,
+} from "@/effect/runtime.server"
+import { legacySession } from "./database.server"
+import { publicErrorMessage } from "./http-errors"
 import type { SyncRun } from "./types"
 
 export type SyncProgress = Pick<
@@ -14,49 +22,74 @@ const columns =
 
 // The newest run per user. The Drive lock is held for the whole run, so a
 // "running" row without that lock means the process stopped mid-sync.
-export async function syncStatus(userId: string): Promise<SyncRun | null> {
-  const [run] = await rows<SyncRun & { held: number }>(
+// IS_USED_LOCK answers for the whole server, whichever connection asks.
+export const status = Effect.fn("SyncProgress.status")(function* (
+  userId: string
+): Effect.fn.Return<SyncRun | null, DatabaseError, Database> {
+  yield* Effect.annotateCurrentSpan("mediabinder.user_id", userId)
+  const database = yield* Database
+  const [run] = yield* database.queryRows<
+    SyncRun & { held: number } & RowDataPacket
+  >(
+    "syncProgress.status",
     `SELECT ${columns},IS_USED_LOCK(?) IS NOT NULL AS held FROM drive_sync_run WHERE user_id=?`,
     [`drive:${userId}`, userId]
   )
   if (!run) return null
-  const { held, ...status } = run
-  if (status.status === "running" && !Number(held))
+  const { held, ...current } = run
+  if (current.status === "running" && !Number(held))
     return {
-      ...status,
+      ...current,
       status: "failed",
       error: "Sync was interrupted. Run it again.",
     }
-  return status
-}
+  return current
+})
 
 // A run someone asked to watch is shown to them, even if a webhook started it.
-export async function claimSyncRun(userId: string) {
-  await pool.execute(
+export const claim = Effect.fn("SyncProgress.claim")(function* (
+  userId: string
+) {
+  yield* Effect.annotateCurrentSpan("mediabinder.user_id", userId)
+  const database = yield* Database
+  yield* database.execute(
+    "syncProgress.claim",
     "UPDATE drive_sync_run SET origin='manual' WHERE user_id=? AND status='running'",
     [userId]
   )
+})
+
+/** A started run: report progress as it comes, then succeed or fail once. */
+export interface SyncRunHandle {
+  readonly started: SyncRun
+  /** Records progress; written to the row shortly after, never awaited. */
+  readonly report: (progress: Partial<SyncProgress>) => Effect.Effect<void>
+  readonly succeed: (count: number) => Effect.Effect<void>
+  readonly fail: (error: unknown) => Effect.Effect<void>
 }
 
 // Progress rows are written outside the catalog transaction so that other
-// requests can read them while the sync is still uncommitted. Progress updates
-// are best effort and never awaited: a sync already holds a pool connection,
-// so waiting for another one could deadlock when the pool is exhausted. The
-// final status uses the sync's own connection once its transaction has ended,
-// and late progress updates cannot overwrite a finished run.
-export async function startSyncRun(
-  connection: PoolConnection,
+// requests can read them while the sync is still uncommitted: through the
+// `Database` service's own pool, not `connection`. Progress updates are best
+// effort and never awaited: a sync already holds a connection, so waiting for
+// another one could deadlock when the pool is exhausted. The final status
+// uses the sync's own `connection` once its transaction has ended, and late
+// progress updates cannot overwrite a finished run.
+export const start = Effect.fn("SyncProgress.start")(function* (
+  connection: DatabaseSession,
   userId: string,
   origin: SyncRun["origin"]
-) {
+): Effect.fn.Return<SyncRunHandle, DatabaseError, Database> {
+  yield* Effect.annotateCurrentSpan("mediabinder.user_id", userId)
+  const database = yield* Database
   const runId = randomUUID()
-  await connection.execute<RowDataPacket[]>(
+  yield* connection.execute(
     `INSERT INTO drive_sync_run(user_id,run_id,origin,status,phase,folders_scanned,files_found,files_saved,files_total,item_count,error,started_at,updated_at,finished_at)
     VALUES (?,?,?,'running','scanning',0,0,0,0,NULL,NULL,NOW(3),NOW(3),NULL)
     ON DUPLICATE KEY UPDATE run_id=VALUES(run_id),origin=VALUES(origin),status='running',phase='scanning',folders_scanned=0,files_found=0,files_saved=0,files_total=0,item_count=NULL,error=NULL,started_at=NOW(3),updated_at=NOW(3),finished_at=NULL`,
     [userId, runId, origin]
   )
-  const [[started]] = await connection.query<(SyncRun & RowDataPacket)[]>(
+  const [started] = yield* connection.queryRows<SyncRun & RowDataPacket>(
     `SELECT ${columns} FROM drive_sync_run WHERE user_id=?`,
     [userId]
   )
@@ -68,62 +101,104 @@ export async function startSyncRun(
     files_total: 0,
   }
   let written = latest
-  let writing: Promise<unknown> = Promise.resolve()
-  let timer: ReturnType<typeof setTimeout> | undefined
-  // Write at most a few times per second; the browser polls once a second.
-  const flush = () => {
+  let timer: Fiber.Fiber<void> | undefined
+  // One write at a time, in order, so an older snapshot never lands last.
+  const writing = Semaphore.makeUnsafe(1)
+  const flush = Effect.suspend(() => {
     timer = undefined
-    if (written === latest) return
+    if (written === latest) return Effect.void
     const next = (written = latest)
-    writing = writing
-      .then(() =>
-        pool.execute(
-          "UPDATE drive_sync_run SET phase=?,folders_scanned=?,files_found=?,files_saved=?,files_total=?,updated_at=NOW(3) WHERE user_id=? AND run_id=? AND status='running'",
-          [
-            next.phase,
-            next.folders_scanned,
-            next.files_found,
-            next.files_saved,
-            next.files_total,
-            userId,
-            runId,
-          ]
-        )
-      )
-      .catch(() => undefined)
-    return writing
-  }
-  const finish = async (
-    status: "succeeded" | "failed",
-    detail: { count?: number; error?: unknown }
-  ) => {
-    clearTimeout(timer)
-    await connection
+    return database
       .execute(
-        "UPDATE drive_sync_run SET status=?,phase='done',folders_scanned=?,files_found=?,files_saved=?,files_total=?,item_count=?,error=?,updated_at=NOW(3),finished_at=NOW(3) WHERE user_id=? AND run_id=?",
+        "syncProgress.report",
+        "UPDATE drive_sync_run SET phase=?,folders_scanned=?,files_found=?,files_saved=?,files_total=?,updated_at=NOW(3) WHERE user_id=? AND run_id=? AND status='running'",
         [
-          status,
-          latest.folders_scanned,
-          latest.files_found,
-          latest.files_saved,
-          latest.files_total,
-          detail.count ?? null,
-          status === "failed"
-            ? publicErrorMessage(detail.error, "Sync failed. Please try again.")
-            : null,
+          next.phase,
+          next.folders_scanned,
+          next.files_found,
+          next.files_saved,
+          next.files_total,
           userId,
           runId,
         ]
       )
-      .catch(() => undefined)
-  }
+      .pipe(Effect.ignore, writing.withPermits(1))
+  })
+  // Write at most a few times per second; the browser polls once a second.
+  const report = (progress: Partial<SyncProgress>) =>
+    Effect.suspend(() => {
+      latest = { ...latest, ...progress }
+      if (timer) return Effect.void
+      return Effect.sleep("250 millis").pipe(
+        Effect.andThen(flush),
+        Effect.forkDetach,
+        Effect.map((fiber) => {
+          timer = fiber
+        })
+      )
+    })
+  const finish = (
+    runStatus: "succeeded" | "failed",
+    detail: { count?: number; error?: unknown }
+  ) =>
+    Effect.suspend(() => {
+      const pending = timer
+      timer = undefined
+      return (pending ? Fiber.interrupt(pending) : Effect.void).pipe(
+        Effect.andThen(
+          connection.execute(
+            "UPDATE drive_sync_run SET status=?,phase='done',folders_scanned=?,files_found=?,files_saved=?,files_total=?,item_count=?,error=?,updated_at=NOW(3),finished_at=NOW(3) WHERE user_id=? AND run_id=?",
+            [
+              runStatus,
+              latest.folders_scanned,
+              latest.files_found,
+              latest.files_saved,
+              latest.files_total,
+              detail.count ?? null,
+              runStatus === "failed"
+                ? publicErrorMessage(
+                    detail.error,
+                    "Sync failed. Please try again."
+                  )
+                : null,
+              userId,
+              runId,
+            ]
+          )
+        ),
+        Effect.ignore
+      )
+    })
   return {
     started: { ...started } as SyncRun,
+    report,
+    succeed: (count) => finish("succeeded", { count }),
+    fail: (error) => finish("failed", { error }),
+  }
+})
+
+// For the Drive sync, which holds a legacy mysql2 connection and still
+// reports progress with plain calls.
+export const syncStatus = (userId: string) => runTracedAppEffect(status(userId))
+
+export const claimSyncRun = (userId: string) =>
+  runTracedAppEffect(claim(userId))
+
+export async function startSyncRun(
+  connection: PoolConnection,
+  userId: string,
+  origin: SyncRun["origin"]
+) {
+  const run = await runTracedAppEffect(
+    start(legacySession("syncProgress.start", connection), userId, origin)
+  )
+  return {
+    started: run.started,
+    // Untraced: a report is a hot path, and it only records and schedules.
     report(progress: Partial<SyncProgress>) {
-      latest = { ...latest, ...progress }
-      timer ??= setTimeout(flush, 250)
+      void runAppEffectUntraced(run.report(progress))
     },
-    succeed: (count: number) => finish("succeeded", { count }),
-    fail: (error: unknown) => finish("failed", { error }),
+    succeed: (count: number) => runAppEffectUntraced(run.succeed(count)),
+    fail: (error: unknown) => runAppEffectUntraced(run.fail(error)),
   }
 }

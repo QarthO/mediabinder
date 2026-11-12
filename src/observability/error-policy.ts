@@ -1,6 +1,7 @@
 import { APIError } from "better-auth/api"
 import { Predicate } from "effect"
 import { ZodError } from "zod"
+import { EXPECTED_ERROR_TAGS } from "@/lib/http-errors"
 
 // Tagged errors that carry an HTTP status. Below 500 they describe a request
 // the app refused or couldn't satisfy, such as a missing thumbnail.
@@ -14,6 +15,7 @@ export function isExpectedAppError(value: unknown): boolean {
   if (!Predicate.isObject(value)) return false
   if ("name" in value && value.name === "AbortError") return true
   if (!("_tag" in value) || !Predicate.isString(value._tag)) return false
+  if (EXPECTED_ERROR_TAGS.has(value._tag)) return true
   // A preview too large to buffer has no status: its caller falls back to
   // streaming the original.
   if (value._tag === "PreviewError") {
