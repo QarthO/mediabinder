@@ -14,6 +14,7 @@
     "format": "vp fmt",
     "check": "vp check",
     "typecheck": "tsc --noEmit",
+    "verify": "node scripts/verify.mjs",
     "test": "vp test run",
     "db:migrate": "tsx scripts/migrate.ts",
     "dev:docker": "docker compose -f compose.yaml -f compose.dev.yaml up -d --build",

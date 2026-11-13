@@ -1,0 +1,43 @@
+name: Code checks
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: checks-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  code:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Static checks
+            stage: static
+          - name: Tests
+            stage: tests
+          # A `database` stage (real MySQL) is added here by a later layer.
+          - name: Build
+            stage: build
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Vite+
+        uses: voidzero-dev/setup-vp@3754dd7dbdb32bd8f6d28b6043de13ad3a75f21f # v1.21.1
+        with:
+          cache: true
+          node-version-file: .node-version
+          run-install: |
+            - cwd: .
+              args: ["--frozen-lockfile"]
+
+      - name: Run ${{ matrix.name }}
+        run: pnpm verify ${{ matrix.stage }}
