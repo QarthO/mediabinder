@@ -14,15 +14,21 @@
   margin-top: 16px;
   padding-top: 12px;
   border-top: 1px solid var(--border);
-  min-height: 0;
+  flex: 1 1 auto;
+  min-height: 160px;
   display: flex;
   flex-direction: column;
+}
+.sidebar-collapsed .sidebar-tags {
+  flex: 0 0 auto;
+  min-height: 0;
 }
 .sidebar-tags-heading {
   cursor: default;
   flex-shrink: 0;
 }
 .sidebar-tag-content {
+  flex: 1 1 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -49,7 +55,7 @@
 }
 .sidebar-tag-options {
   overflow-y: auto;
-  max-height: min(38dvh, 420px);
+  flex: 1 1 0;
   min-height: 0;
   padding: 0 4px 8px;
 }
