@@ -1,5 +1,7 @@
 import { SetCard } from "./set-card"
 import { filterSets } from "@/lib/set-filters"
+import { hasDuplicates, reclaimableBytes } from "@/lib/duplicates"
+import { bytes } from "@/lib/utils"
 import { LibraryFilters } from "./library-filters"
 import { MediaGrid } from "./media-grid"
 import { useMediaPreviewIntent } from "@/lib/media-preview"
@@ -18,6 +20,7 @@ import {
 } from "@tanstack/react-router"
 import {
   lazy,
+  memo,
   Suspense,
   useCallback,
   useEffect,
@@ -203,6 +206,7 @@ function WorkspaceContent({
     [selectedTags, setSelectedTags] = useState<string[]>([]),
     [mediaType, setMediaType] = useState("all"),
     [catalogStatus, setCatalogStatus] = useState("all"),
+    [duplicatesOnly, setDuplicatesOnly] = useState(false),
     [setFilter, setSetFilter] = useState(""),
     [command, setCommand] = useState(false),
     [newSet, setNewSet] = useState(false),
@@ -307,6 +311,7 @@ function WorkspaceContent({
         (m) =>
           (catalogStatus === "all" ||
             (catalogStatus === "cataloged" ? m.cataloged : !m.cataloged)) &&
+          (!duplicatesOnly || hasDuplicates(m)) &&
           (mediaType !== "images" || m.mime_type.startsWith("image/")) &&
           (mediaType !== "videos" || m.mime_type.startsWith("video/")) &&
           (!setId || m.set_ids.includes(setId)) &&
@@ -320,6 +325,7 @@ function WorkspaceContent({
       catalogMedia,
       mediaType,
       catalogStatus,
+      duplicatesOnly,
       setId,
       selectedTags,
       setFilter,
@@ -391,7 +397,9 @@ function WorkspaceContent({
         : "oldest"
       : sorting[0]?.id === "display_name" && !sorting[0].desc
         ? "name"
-        : "custom"
+        : sorting[0]?.id === "size" && sorting[0].desc
+          ? "largest"
+          : "custom"
   const visibleSets = useMemo(
     () =>
       filterSets(data.sets, scopedMedia, {
@@ -400,6 +408,7 @@ function WorkspaceContent({
         filterByMedia:
           mediaType !== "all" ||
           catalogStatus !== "all" ||
+          duplicatesOnly ||
           selectedFolders.length > 0,
         sorting,
       }),
@@ -410,6 +419,7 @@ function WorkspaceContent({
       setFilter,
       mediaType,
       catalogStatus,
+      duplicatesOnly,
       selectedFolders,
       sorting,
     ]
@@ -656,6 +666,8 @@ function WorkspaceContent({
                 setMediaType={setMediaType}
                 catalogStatus={catalogStatus}
                 setCatalogStatus={setCatalogStatus}
+                duplicatesOnly={duplicatesOnly}
+                setDuplicatesOnly={setDuplicatesOnly}
                 setFilter={setFilter}
                 setSetFilter={setSetFilter}
                 sets={data.sets}
@@ -737,6 +749,9 @@ function WorkspaceContent({
                   ))}
                 </div>
               )}
+              {duplicatesOnly && items.length > 0 && (
+                <DuplicatesSummary items={items} />
+              )}
               <MediaStage table={table} selectionMode={selectionMode}>
                 {!items.length ? (
                   <Empty
@@ -746,8 +761,11 @@ function WorkspaceContent({
                       selectedTags.length ||
                       setFilter ||
                       mediaType !== "all" ||
-                      catalogStatus !== "all"
-                        ? "No media found"
+                      catalogStatus !== "all" ||
+                      duplicatesOnly
+                        ? duplicatesOnly && !search
+                          ? "No duplicates"
+                          : "No media found"
                         : setId
                           ? "This set is a blank canvas"
                           : data.workspace.sources.length
@@ -759,8 +777,11 @@ function WorkspaceContent({
                       selectedTags.length ||
                       setFilter ||
                       mediaType !== "all" ||
-                      catalogStatus !== "all"
-                        ? "Try a different name, tag, or set."
+                      catalogStatus !== "all" ||
+                      duplicatesOnly
+                        ? duplicatesOnly && !search
+                          ? "Nothing in this view has an identical copy in Drive."
+                          : "Try a different name, tag, or set."
                         : setId
                           ? "Open media from your library and add it to this set."
                           : data.workspace.sources.length
@@ -773,7 +794,8 @@ function WorkspaceContent({
                       !setFilter &&
                       !setId &&
                       mediaType === "all" &&
-                      catalogStatus === "all" ? (
+                      catalogStatus === "all" &&
+                      !duplicatesOnly ? (
                         data.workspace.sources.length ? (
                           <DriveSyncButton />
                         ) : (
@@ -789,7 +811,7 @@ function WorkspaceContent({
                   <Subscribe source={table.atoms.rowSelection}>
                     {(selection) => (
                       <MediaGrid
-                        key={`${page}:${setId}:${selectedTags.join(",")}:${setFilter}:${mediaType}:${catalogStatus}:${search}`}
+                        key={`${page}:${setId}:${selectedTags.join(",")}:${setFilter}:${mediaType}:${catalogStatus}:${duplicatesOnly}:${search}`}
                         items={items}
                         selection={selection}
                         previewIntent={previewIntent}
@@ -805,7 +827,7 @@ function WorkspaceContent({
                 ) : (
                   <DataTable
                     table={table}
-                    resetKey={`${page}:${setId}:${selectedTags.join(",")}:${setFilter}:${mediaType}:${catalogStatus}:${search}`}
+                    resetKey={`${page}:${setId}:${selectedTags.join(",")}:${setFilter}:${mediaType}:${catalogStatus}:${duplicatesOnly}:${search}`}
                   />
                 )}
                 <MediaSelectionActions table={table} allTags={allTags} />
@@ -966,6 +988,18 @@ function WorkspaceContent({
     </div>
   )
 }
+const DuplicatesSummary = memo(function DuplicatesSummary({
+  items,
+}: {
+  items: Media[]
+}) {
+  return (
+    <p className="duplicates-summary">
+      {items.length} {items.length === 1 ? "item" : "items"} with duplicates ·{" "}
+      {bytes(reclaimableBytes(items))} in extra copies
+    </p>
+  )
+})
 function Empty({
   icon: Icon,
   title,

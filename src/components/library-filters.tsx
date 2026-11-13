@@ -1,6 +1,7 @@
 import { memo } from "react"
 import {
   ArrowUpDown,
+  Copy,
   Inbox,
   Images,
   FolderOpen,
@@ -11,6 +12,7 @@ import type { OnChangeFn, SortingState } from "@tanstack/react-table"
 import type { MediaSet } from "@/lib/types"
 import { Select } from "./ui/select"
 import { SearchSelect } from "./ui/search-select"
+import { Button } from "./ui/button"
 import { CensorControl } from "./censor-control"
 
 export const LibraryFilters = memo(function LibraryFilters({
@@ -19,6 +21,8 @@ export const LibraryFilters = memo(function LibraryFilters({
   setMediaType,
   catalogStatus,
   setCatalogStatus,
+  duplicatesOnly,
+  setDuplicatesOnly,
   setFilter,
   setSetFilter,
   sets,
@@ -37,6 +41,8 @@ export const LibraryFilters = memo(function LibraryFilters({
   setMediaType: (value: string) => void
   catalogStatus: string
   setCatalogStatus: (value: string) => void
+  duplicatesOnly: boolean
+  setDuplicatesOnly: (value: boolean) => void
   setFilter: string
   setSetFilter: (value: string) => void
   sets: MediaSet[]
@@ -74,6 +80,16 @@ export const LibraryFilters = memo(function LibraryFilters({
           { value: "cataloged", label: "Cataloged" },
         ]}
       />
+      <Button
+        className="duplicates-toggle"
+        variant="outline"
+        aria-pressed={duplicatesOnly}
+        title="Only items with more than one copy in Drive"
+        onClick={() => setDuplicatesOnly(!duplicatesOnly)}
+      >
+        <Copy />
+        <span>Duplicates</span>
+      </Button>
       <SearchSelect
         label="Filter by set"
         mobileIcon={FolderOpen}
@@ -95,8 +111,13 @@ export const LibraryFilters = memo(function LibraryFilters({
         onChange={(value) =>
           setSorting([
             {
-              id: value === "name" ? "display_name" : "uploaded_at",
-              desc: value === "newest",
+              id:
+                value === "name"
+                  ? "display_name"
+                  : value === "largest"
+                    ? "size"
+                    : "uploaded_at",
+              desc: value === "newest" || value === "largest",
             },
           ])
         }
@@ -104,6 +125,7 @@ export const LibraryFilters = memo(function LibraryFilters({
           { value: "newest", label: "Newest first" },
           { value: "oldest", label: "Oldest first" },
           { value: "name", label: "Name A–Z" },
+          { value: "largest", label: "Largest first" },
           ...(sort === "custom"
             ? [{ value: "custom", label: "Custom sort" }]
             : []),
