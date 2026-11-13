@@ -130,12 +130,16 @@ export class Thumbnails extends Context.Service<
 
 export const readThumbnail = Effect.fn("Thumbnail.download")(function* (
   url: string,
-  token: string
+  token: string,
+  // Rendered previews are larger than the 640 px thumbnails, so they bring
+  // their own limit and Drive method name.
+  options: { maxBytes?: number; operation?: string } = {}
 ) {
+  const maxBytes = options.maxBytes ?? MAX_THUMBNAIL_BYTES
   const fail = (status: number, message: string) =>
     new ThumbnailError({ status, message })
   const response = yield* driveRequest(
-    "thumbnail.download",
+    options.operation ?? "thumbnail.download",
     HttpClientRequest.get(url, {
       headers: { Authorization: `Bearer ${token}` },
     })
@@ -173,7 +177,7 @@ export const readThumbnail = Effect.fn("Thumbnail.download")(function* (
         const { done, value } = await reader.read()
         if (done) break
         size += value.byteLength
-        if (size > MAX_THUMBNAIL_BYTES)
+        if (size > maxBytes)
           throw fail(502, "Thumbnail exceeds the size limit.")
         chunks.push(value)
       }
