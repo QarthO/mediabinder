@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "tw-animate-css";
+
 @import "@fontsource-variable/geist";
 @import "@fontsource-variable/jetbrains-mono";
 @import "./styles/tokens.css";
@@ -19,3 +20,6 @@
 @import "./styles/mobile.css";
 @import "./styles/pickers.css";
 @import "./styles/media-extras.css";
+
+/* A focus ring shown only under keyboard modality (src/lib/input-modality.ts). */
+@custom-variant focus-kbd (&:focus-visible:where([data-input="keyboard"] *));
