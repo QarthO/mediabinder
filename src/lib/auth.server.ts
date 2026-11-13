@@ -1,4 +1,5 @@
 import { betterAuth } from "better-auth"
+import { tanstackStartCookies } from "better-auth/tanstack-start"
 import { APIError } from "better-auth/api"
 import { Effect } from "effect"
 import { AuthenticationError } from "@/effect/errors"
@@ -53,12 +54,21 @@ export const auth = betterAuth({
     },
   },
   account: { encryptOAuthTokens: true },
+  // Every request checks the session, and a library view makes dozens of
+  // thumbnail requests at once. A signed cookie caches the session so most
+  // checks skip MySQL; it is refreshed from the database once it is older
+  // than maxAge. A session ended elsewhere (signing out on another device,
+  // a deleted account) can keep working here for up to that long.
+  session: { cookieCache: { enabled: true, maxAge: 5 * 60 } },
   user: {
     additionalFields: {
       role: { type: "string", defaultValue: "user", input: false },
     },
   },
   rateLimit: { enabled: true, window: 60, max: 60 },
+  // Lets session checks in route handlers and server functions set the
+  // refreshed cache cookie on their response. Must stay the last plugin.
+  plugins: [tanstackStartCookies()],
   databaseHooks: {
     user: {
       create: {
