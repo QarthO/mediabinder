@@ -225,6 +225,9 @@
 .linked-post button {
   color: #8b7a80;
 }
+.linked-post button:not(:last-child) {
+  color: #8da5c7;
+}
 .post-form {
   padding-top: 3px;
 }
@@ -345,5 +348,8 @@
 .confirm-dialog-error {
   margin-top: 14px;
   font-size: 0.8125rem;
+  color: var(--color-destructive);
+}
+.field .field-error {
   color: var(--color-destructive);
 }

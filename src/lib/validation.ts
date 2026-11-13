@@ -34,20 +34,25 @@ export const newSet = z.object({
   displayName: setName,
   tags: tags.default([]),
 })
-export const newPost = z.object({
-  targetId: id,
-  kind: z.enum(["media", "set"]),
+export const postFields = z.object({
   platform: z.string().trim().min(1).max(100),
   url: z
     .url()
     .max(2048)
     .refine(
-      (value) => ["http:", "https:"].includes(new URL(value).protocol),
+      (value) =>
+        !URL.canParse(value) ||
+        ["http:", "https:"].includes(new URL(value).protocol),
       "Use an http or https link"
     ),
   externalId: z.string().trim().max(255).default(""),
   createdAt: date,
 })
+export const newPost = postFields.extend({
+  targetId: id,
+  kind: z.enum(["media", "set"]),
+})
+export const updatePost = postFields.extend({ id })
 export const folder = z.object({
   folderId: z
     .string()

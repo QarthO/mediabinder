@@ -32,6 +32,7 @@ import type { Library, Media, MediaSet, Post, DriveSource } from "./types"
 import {
   metadata,
   newPost,
+  updatePost,
   newSet,
   setName,
   addMediaSets,
@@ -784,6 +785,33 @@ const editActions = {
           )
           if (value.kind === "media")
             yield* markCataloged(session, value.targetId)
+          return { ok: true }
+        })
+      ),
+  }),
+  "update-post": mutation("update-post", {
+    input: updatePost,
+    run: (value, { userId }) =>
+      transaction((session) =>
+        Effect.gen(function* () {
+          const [post] = yield* session.queryRows<
+            { catalog_id: string | null; set_id: string | null } & RowDataPacket
+          >("SELECT catalog_id,set_id FROM post WHERE id=?", [value.id])
+          if (!post) return yield* new NotFoundError({ resource: "Post" })
+          yield* post.catalog_id
+            ? requireAccessible(session, userId, "media", post.catalog_id)
+            : requireAccessible(session, userId, "set", post.set_id!)
+          // Only the post's own fields change; it never moves to another item.
+          yield* session.execute(
+            "UPDATE post SET platform=?,url=?,external_id=?,created_at=? WHERE id=?",
+            [
+              value.platform,
+              value.url,
+              value.externalId,
+              new Date(value.createdAt),
+              value.id,
+            ]
+          )
           return { ok: true }
         })
       ),

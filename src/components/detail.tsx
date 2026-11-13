@@ -9,6 +9,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Link2,
+  Pencil,
   Plus,
   Trash2,
   FolderOpen,
@@ -26,10 +27,11 @@ import {
 } from "./ui/dialog"
 import { Button } from "./ui/button"
 import { Input } from "./ui/input"
+import { PostDialog } from "./post-dialog"
 import { Thumbnail, MediaCensorContext } from "./thumbnail"
 import { action } from "@/lib/api"
 import { bytes, dateValue, isoDate } from "@/lib/utils"
-import type { Library, Media } from "@/lib/types"
+import type { Library, Media, Post } from "@/lib/types"
 import { canPreview, useMediaPreview } from "@/lib/media-preview"
 
 function PreviewImage({
@@ -110,9 +112,7 @@ export function Detail({
     [created, setCreated] = useState(
       item ? isoDate(item.created_at).slice(0, 10) : ""
     ),
-    [addPost, setAddPost] = useState(false),
-    [url, setUrl] = useState(""),
-    [postDate, setPostDate] = useState(new Date().toISOString().slice(0, 10)),
+    [dialog, setDialog] = useState<"add" | Post | null>(null),
     [failed, setFailed] = useState(false),
     [confirmDelete, setConfirmDelete] = useState(false)
   const dialogRef = useRef<HTMLDivElement>(null)
@@ -139,24 +139,6 @@ export function Detail({
     onSuccess: async () => {
       await client.invalidateQueries({ queryKey: ["library"] })
       toast.success("Changes saved")
-    },
-    onError: (e) => toast.error(e.message),
-  })
-  const createPost = useMutation({
-    mutationFn: () =>
-      action("create-post", {
-        targetId: selected.id,
-        kind: selected.kind,
-        platform: new URL(url).hostname.replace(/^www\./, ""),
-        url,
-        externalId: "",
-        createdAt: new Date(postDate).toISOString(),
-      }),
-    onSuccess: async () => {
-      await client.invalidateQueries({ queryKey: ["library"] })
-      setAddPost(false)
-      setUrl("")
-      toast.success("Post linked")
     },
     onError: (e) => toast.error(e.message),
   })
@@ -194,9 +176,8 @@ export function Detail({
           .map((tag) => tag.trim())
           .filter(Boolean)
           .join(",") !== item!.tags.join(",")) ||
-      created !== isoDate(item!.created_at).slice(0, 10) ||
-      (addPost && Boolean(url))
-    if (dirty || save.isPending || createPost.isPending) {
+      created !== isoDate(item!.created_at).slice(0, 10)
+    if (dirty || save.isPending) {
       toast.info("Save your changes before moving to another item", {
         id: "media-navigation-draft",
       })
@@ -227,7 +208,6 @@ export function Detail({
         }}
         onKeyDown={(event) => {
           if (
-            addPost ||
             !navigation ||
             event.defaultPrevented ||
             event.altKey ||
@@ -497,99 +477,59 @@ export function Detail({
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => setAddPost((v) => !v)}
+                    onClick={() => setDialog("add")}
                   >
                     <Plus />
                     Link post
                   </Button>
                 </div>
-                {posts.length
-                  ? posts.map((post) => (
-                      <div key={post.id} className="linked-post">
-                        <Link2 size={15} />
-                        <div>
-                          <a
-                            href={post.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                          >
-                            {post.platform}
-                            <ArrowUpRight size={12} />
-                          </a>
-                          <small>
-                            {dateValue(post.created_at)}
-                            {post.external_id && ` · ${post.external_id}`}
-                          </small>
-                        </div>
-                        <button
-                          aria-label={`Remove ${post.platform} post link`}
-                          title="Remove post link"
-                          disabled={remove.isPending}
-                          onClick={() => remove.mutate(post.id)}
+                {posts.length ? (
+                  posts.map((post) => (
+                    <div key={post.id} className="linked-post">
+                      <Link2 size={15} />
+                      <div>
+                        <a
+                          href={post.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
                         >
-                          <Trash2 size={14} />
-                        </button>
+                          {post.platform}
+                          <ArrowUpRight size={12} />
+                        </a>
+                        <small>
+                          {dateValue(post.created_at)}
+                          {post.external_id && ` · ${post.external_id}`}
+                        </small>
                       </div>
-                    ))
-                  : !addPost && (
-                      <p className="muted">
-                        No posts linked yet. Add a link from any platform.
-                      </p>
-                    )}
-                <Dialog open={addPost} onOpenChange={setAddPost}>
-                  <DialogContent
-                    className="post-link-dialog"
-                    overlayClassName="post-link-overlay"
-                    onKeyDown={(event) => event.stopPropagation()}
-                  >
-                    <DialogHeader>
-                      <DialogTitle>Link a post</DialogTitle>
-                      <DialogDescription>
-                        Paste a post URL from any platform.
-                      </DialogDescription>
-                    </DialogHeader>
-                    <form
-                      className="post-form"
-                      onSubmit={(e) => {
-                        e.preventDefault()
-                        createPost.mutate()
-                      }}
-                    >
-                      <label className="field">
-                        Post link
-                        <Input
-                          type="url"
-                          required
-                          maxLength={2048}
-                          placeholder="https://…"
-                          value={url}
-                          onChange={(e) => setUrl(e.target.value)}
-                        />
-                      </label>
-                      <label className="field">
-                        Date posted
-                        <Input
-                          required
-                          type="date"
-                          value={postDate}
-                          onChange={(e) => setPostDate(e.target.value)}
-                        />
-                      </label>
-                      <div className="dialog-footer">
-                        <Button
-                          variant="ghost"
-                          type="button"
-                          onClick={() => setAddPost(false)}
-                        >
-                          Cancel
-                        </Button>
-                        <Button type="submit" disabled={createPost.isPending}>
-                          Link post
-                        </Button>
-                      </div>
-                    </form>
-                  </DialogContent>
-                </Dialog>
+                      <button
+                        aria-label={`Edit ${post.platform} post`}
+                        title="Edit post"
+                        onClick={() => setDialog(post)}
+                      >
+                        <Pencil size={14} />
+                      </button>
+                      <button
+                        aria-label={`Remove ${post.platform} post link`}
+                        title="Remove post link"
+                        disabled={remove.isPending}
+                        onClick={() => remove.mutate(post.id)}
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  ))
+                ) : (
+                  <p className="muted">
+                    No posts linked yet. Add a link from any platform.
+                  </p>
+                )}
+                {dialog ? (
+                  <PostDialog
+                    target={selected}
+                    post={dialog === "add" ? undefined : dialog}
+                    onOpenChange={(open) => !open && setDialog(null)}
+                  />
+                ) : null}
               </section>
               {selected.kind === "set" && (
                 <div className="delete-set">
