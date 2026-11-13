@@ -31,10 +31,13 @@ describe("requestSpanName", () => {
 })
 
 describe("isUntracedRequest", () => {
-  it("skips only the health probe and built assets", () => {
-    expect(isUntracedRequest("/api/health")).toBe(true)
-    expect(isUntracedRequest("/assets/index-abc.js")).toBe(true)
-    expect(isUntracedRequest("/api/library")).toBe(false)
-    expect(isUntracedRequest("/media")).toBe(false)
+  const url = (path: string) => new URL(path, "http://localhost")
+  it("skips the health probe, built assets and thumbnails, not pages or originals", () => {
+    expect(isUntracedRequest(url("/api/health"))).toBe(true)
+    expect(isUntracedRequest(url("/assets/index-abc.js"))).toBe(true)
+    expect(isUntracedRequest(url("/api/library"))).toBe(false)
+    expect(isUntracedRequest(url("/media"))).toBe(false)
+    expect(isUntracedRequest(url("/api/media/abc?thumbnail"))).toBe(true)
+    expect(isUntracedRequest(url("/api/media/abc"))).toBe(false)
   })
 })

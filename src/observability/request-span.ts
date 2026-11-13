@@ -20,14 +20,17 @@ export function requestSpanName(
 
 /**
  * Requests that get no trace: Docker's health probe runs every 30 seconds
- * and would bury real requests, built assets carry nothing worth timing, and
- * the browser telemetry proxy would otherwise trace every batch it forwards.
+ * and would bury real requests, built assets carry nothing worth timing, the
+ * browser telemetry proxy would otherwise trace every batch it forwards, and
+ * thumbnails, dozens per library view, are metrics instead.
  */
-export function isUntracedRequest(pathname: string): boolean {
+export function isUntracedRequest(url: URL): boolean {
+  const { pathname } = url
   return (
     pathname === "/api/health" ||
     pathname.startsWith("/assets/") ||
-    pathname.startsWith("/api/telemetry/")
+    pathname.startsWith("/api/telemetry/") ||
+    (pathname.startsWith("/api/media/") && url.searchParams.has("thumbnail"))
   )
 }
 
