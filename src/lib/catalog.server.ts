@@ -180,8 +180,12 @@ const merge = Effect.fnUntraced(function* (
   return winner.id as string
 })
 
-/** Finds or creates the catalog entry for a Drive file, merging duplicates. */
-export const resolve = Effect.fn("Catalog.resolve")(function* (
+/**
+ * Finds or creates the catalog entry for a Drive file, merging duplicates.
+ * Not a span: a sync resolves every file it saves, so the sync's own
+ * `Drive.reconcile` span owns this work.
+ */
+export const resolve = Effect.fnUntraced(function* (
   session: DatabaseSession,
   file: DriveFile
 ) {
@@ -242,8 +246,7 @@ export const resolve = Effect.fn("Catalog.resolve")(function* (
 })
 
 // Facades for callers that still hold a mysql2 connection: library.server.ts
-// mutations, drive.server.ts sync and reconcile, and the shared-catalog test.
-// Remove each with its last caller (layers 16 and 18-19).
+// mutations and source edits. Remove each with its last caller (layers 18-19).
 
 const promiseWork = <TResult>(work: () => Promise<TResult>) =>
   Effect.tryPromise({ try: work, catch: (error) => error }).pipe(
@@ -289,14 +292,7 @@ export function markCataloged(connection: LegacyConnection, target: string) {
   )
 }
 
-export function resolveCatalog(connection: LegacyConnection, file: DriveFile) {
-  return runTracedAppEffect(
-    resolve(legacySession("catalog.resolve", connection), file)
-  )
-}
-
-// A busy lock keeps today's message for callers that match on it: the manual
-// sync (which joins the running one) and the worker's recorded error.
+// A busy lock keeps today's message for the unconverted callers that record it.
 export function withDriveLock<A>(
   userId: string,
   work: (connection: SessionConnection<LockedSession>) => Promise<A>

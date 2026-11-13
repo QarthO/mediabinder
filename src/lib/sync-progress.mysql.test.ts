@@ -10,7 +10,8 @@ import {
   stubGoogle,
 } from "@/test/fixtures"
 import { pool } from "./database.server"
-import { startDriveSync, syncDrive } from "./drive.server"
+import { runTracedAppEffect } from "@/effect/runtime.server"
+import { startDriveSync, sync, syncDrive } from "./drive.server"
 import { syncStatus } from "./sync-progress.server"
 
 const FOLDER = "application/vnd.google-apps.folder"
@@ -99,6 +100,50 @@ describeMysql("sync progress", () => {
     const interrupted = await syncStatus(user.id)
     expect(interrupted?.status).toBe("failed")
     expect(interrupted?.error).toMatch(/interrupted/)
+  })
+
+  test("a sync that is stopped mid-scan frees its lock and reads as interrupted", async () => {
+    // What a web process shutting down does to a running sync: the fiber is
+    // interrupted. The run row still says "running", and only the Drive lock
+    // tells that nobody is running it any more.
+    const user = newUser()
+    google(async () => {
+      await sleep(30_000, undefined, { ref: false })
+      return Response.json({ files: [] })
+    })
+    await insertFolder(user.id, `${user.id}-root`, "Slow")
+
+    const stop = new AbortController()
+    const stopped = runTracedAppEffect(sync(user.id), {
+      signal: stop.signal,
+    })
+    stopped.catch(() => undefined)
+    const lockName = `drive:${user.id}`
+    // While it scans, the lock is held and the run is running.
+    for (let waited = 0; ; waited += 25) {
+      const [[lock]] = await pool.query<any[]>(
+        "SELECT IS_FREE_LOCK(?) AS free",
+        [lockName]
+      )
+      if (!Number(lock.free)) break
+      expect(waited).toBeLessThan(10_000)
+      await sleep(25)
+    }
+    expect((await syncStatus(user.id))?.status).toBe("running")
+
+    stop.abort()
+    await expect(stopped).rejects.toMatchObject({ name: "AbortError" })
+    // The lock is released by the interrupt, so the run no longer counts as live.
+    const [[lock]] = await pool.query<any[]>("SELECT IS_FREE_LOCK(?) AS free", [
+      lockName,
+    ])
+    expect(Number(lock.free)).toBe(1)
+    const interrupted = await syncStatus(user.id)
+    expect(interrupted).toMatchObject({ status: "failed" })
+    expect(interrupted?.error).toMatch(/interrupted/)
+    // And the user can sync again.
+    google(async () => Response.json({ files: files(`${user.id}-root`, 3) }))
+    await expect(syncDrive(user.id)).resolves.toEqual({ count: 3 })
   })
 
   test("concurrent syncs finish even when they hold every pool connection", async () => {

@@ -4,12 +4,7 @@ import { Effect, Fiber, Semaphore } from "effect"
 import { Database } from "@/effect/database"
 import type { DatabaseSession } from "@/effect/database"
 import type { DatabaseError } from "@/effect/errors"
-import {
-  runTracedAppEffect,
-  runAppEffectUntraced,
-} from "@/effect/runtime.server"
-import { legacySession } from "./database.server"
-import type { LegacyConnection } from "./database.server"
+import { runTracedAppEffect } from "@/effect/runtime.server"
 import { publicErrorMessage } from "./http-errors"
 import type { SyncRun } from "./types"
 
@@ -63,7 +58,7 @@ export const claim = Effect.fn("SyncProgress.claim")(function* (
 /** A started run: report progress as it comes, then succeed or fail once. */
 export interface SyncRunHandle {
   readonly started: SyncRun
-  /** Records progress; written to the row shortly after, never awaited. */
+  /** Records progress; written to the row shortly after, never waited for. */
   readonly report: (progress: Partial<SyncProgress>) => Effect.Effect<void>
   readonly succeed: (count: number) => Effect.Effect<void>
   readonly fail: (error: unknown) => Effect.Effect<void>
@@ -178,28 +173,5 @@ export const start = Effect.fn("SyncProgress.start")(function* (
   }
 })
 
-// For the Drive sync, which holds a legacy mysql2 connection and still
-// reports progress with plain calls.
+// For library.server.ts, which isn't converted yet.
 export const syncStatus = (userId: string) => runTracedAppEffect(status(userId))
-
-export const claimSyncRun = (userId: string) =>
-  runTracedAppEffect(claim(userId))
-
-export async function startSyncRun(
-  connection: LegacyConnection,
-  userId: string,
-  origin: SyncRun["origin"]
-) {
-  const run = await runTracedAppEffect(
-    start(legacySession("syncProgress.start", connection), userId, origin)
-  )
-  return {
-    started: run.started,
-    // Untraced: a report is a hot path, and it only records and schedules.
-    report(progress: Partial<SyncProgress>) {
-      void runAppEffectUntraced(run.report(progress))
-    },
-    succeed: (count: number) => runAppEffectUntraced(run.succeed(count)),
-    fail: (error: unknown) => runAppEffectUntraced(run.fail(error)),
-  }
-}
