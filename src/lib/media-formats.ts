@@ -11,3 +11,13 @@ export const MP4_RELABEL_TYPES: readonly string[] = [
 
 export const canRelabelAsMp4 = (mimeType: string) =>
   MP4_RELABEL_TYPES.includes(mimeType)
+
+// Video types whose files are ISO base media (an MP4-style box tree), so their
+// codec can be read from the `moov` box. WebM and others are not looked at.
+export const ISO_BMFF_VIDEO_TYPES: readonly string[] = [
+  "video/mp4",
+  ...MP4_RELABEL_TYPES,
+]
+
+export const isIsoBmffVideo = (mimeType: string) =>
+  ISO_BMFF_VIDEO_TYPES.includes(mimeType)

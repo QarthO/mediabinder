@@ -19,6 +19,7 @@ describe("MediaGrid", () => {
       width: 640,
       height: 480,
       duration_ms: null,
+      video_codec: null,
       available: true,
       cataloged: true,
       cataloged_at: "2026-09-06T00:00:00Z",

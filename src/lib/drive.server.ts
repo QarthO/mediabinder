@@ -23,6 +23,11 @@ import {
   type SyncProgress,
 } from "./sync-progress.server"
 import type { SyncRun } from "./types"
+import {
+  detectCodecs,
+  saveCodecs,
+  type CodecUpdates,
+} from "./video-codecs.server"
 
 export interface DriveFile {
   id: string
@@ -143,11 +148,19 @@ export const sync = Effect.fn("Drive.sync")(function* (
             folderIds,
             run.report
           )
+          // Video codecs are read from Drive here, before the catalog
+          // transaction opens, so it never waits on Google.
+          const codecs = yield* detectCodecs(session, userId, token, [
+            ...new Map(
+              [...scan.sourceFiles.values()].flat().map((f) => [f.id, f])
+            ).values(),
+          ])
           const result = yield* reconcile(
             session,
             userId,
             folderIds,
             scan,
+            codecs,
             run.report
           )
           yield* run.succeed(result.count)
@@ -420,6 +433,7 @@ const reconcile = Effect.fn("Drive.reconcile")(function* (
   userId: string,
   folderIds: string[],
   { sourceFiles, placements, nodes }: Scan,
+  codecs: CodecUpdates,
   report: (progress: Partial<SyncProgress>) => Effect.Effect<void>
 ) {
   yield* Effect.annotateCurrentSpan("mediabinder.user_id", userId)
@@ -482,6 +496,7 @@ const reconcile = Effect.fn("Drive.reconcile")(function* (
           )
           yield* report({ files_saved: ++saved })
         }
+        yield* saveCodecs(tx, userId, codecs)
         // Locations and folder membership are written in batches rather than one
         // statement per file.
         const owned = yield* tx.queryRows<RowDataPacket>(
