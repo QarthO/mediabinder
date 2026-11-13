@@ -1,0 +1,19 @@
+# Added by scripts/dev-docker.mjs when GOOGLE_SERVICE_ACCOUNT_KEY_HOST_FILE is
+# set: mounts the key read-only at a fixed path and points the app at it.
+x-service-account: &service-account
+  GOOGLE_SERVICE_ACCOUNT_KEY_FILE: /run/secrets/mediabinder-drive-sync.json
+services:
+  web:
+    environment: *service-account
+    volumes:
+      - type: bind
+        source: ${GOOGLE_SERVICE_ACCOUNT_KEY_HOST_FILE:?}
+        target: /run/secrets/mediabinder-drive-sync.json
+        read_only: true
+  worker:
+    environment: *service-account
+    volumes:
+      - type: bind
+        source: ${GOOGLE_SERVICE_ACCOUNT_KEY_HOST_FILE:?}
+        target: /run/secrets/mediabinder-drive-sync.json
+        read_only: true

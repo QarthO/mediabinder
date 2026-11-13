@@ -90,6 +90,11 @@ Before editing files for a substantial task:
     outcomes and counts. Error messages are exported as written, so don't
     interpolate names into them. Browser telemetry carries only route
     templates such as `/sets/:id`. If unsure, leave it out.
+- To see the real app, run `pnpm dev:docker` (after `pnpm dev:setup` once) and
+  use "Skip login for development" in the T3 preview; see
+  [Development](docs/development.md#dev-stack). Never touch Docker containers,
+  volumes or compose projects you didn't create; the script only manages
+  `mediabinder-dev-*`.
 - Avoid patching framework/library internals unless explicitly given permission.
 - Use Sonner for transient feedback (`toast.*`), and the shared tooltip
   primitives in `src/components/ui`.

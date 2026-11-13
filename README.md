@@ -8,12 +8,12 @@ Original images and videos stay in Drive. MediaBinder stores display names, raw 
 
 1. Copy `.env.example` to `.env`. Set independent random database passwords and a random `BETTER_AUTH_SECRET` of at least 32 characters (`openssl rand -hex 32`). Use the same application database password in `MYSQL_PASSWORD` and `DATABASE_URL`.
 2. Configure Google OAuth as described below.
-3. Run `docker compose up -d --build` for production, or `pnpm dev:docker` for development with hot reload.
+3. Run `docker compose up -d --build` for production, or `pnpm dev:setup` then `pnpm dev:docker` for development with hot reload (see [Development](docs/development.md#dev-stack)).
 4. Open **http://localhost:3100**. The root is the login page; signed-in users go to `/media`. Link one or more folders in Settings. The app syncs on fresh page loads and supports manual sync.
 
 The first verified Google account becomes the superuser. Further sign-ups are rejected unless `ALLOW_SIGNUPS=true` is explicitly configured. Existing accounts can still sign in. Drive connections are scoped to each user; identical media shares catalog metadata across the instance. There is no public registration or landing page. Claim the first account before exposing a fresh instance to the internet.
 
-MySQL data persists in the `mysql-data` volume. `pnpm dev:docker:down` stops development without deleting the database. For a deployment behind a reverse proxy, set `MEDIABINDER_URL` to the public HTTPS origin and add its exact callback URL in Google Cloud. Keep the app and database on the private Docker network; the default host binding is loopback only.
+MySQL data persists in the `mysql-data` volume. `pnpm dev:docker:down` stops a development stack without deleting its database. For a deployment behind a reverse proxy, set `MEDIABINDER_URL` to the public HTTPS origin and add its exact callback URL in Google Cloud. Keep the app and database on the private Docker network; the default host binding is loopback only.
 
 ## Coolify: Dockerfile with separate MySQL
 
@@ -153,7 +153,7 @@ When an OTLP endpoint is configured, signed-in browsers also report, as service 
 
 See [docs/development.md](docs/development.md) for commands, the development Docker stack, React Scan, running the MySQL tests and running a local OTLP receiver, and [CONTRIBUTING.md](CONTRIBUTING.md) for pull requests. `pnpm verify` runs the checks CI runs (`static`, `tests`, `database`, `build`).
 
-Use T3 Code's browser preview at http://localhost:3100 to check the real Google login and Drive flows. No development authentication bypass is included. `/api/health` checks the database connection. Back up MySQL before upgrading; versioned application migrations are in `migrations/`, and Better Auth manages its own tables during startup. The multiple-folder migration preserves your existing source and catalog.
+Development stacks (`MEDIABINDER_ENVIRONMENT=dev`) offer a "Skip login for development" button; production images never honour it. Use T3 Code's browser preview at the URL `pnpm dev:docker` prints. `/api/health` checks the database connection. Back up MySQL before upgrading; versioned application migrations are in `migrations/`, and Better Auth manages its own tables during startup. The multiple-folder migration preserves your existing source and catalog.
 
 ## Preview fixtures
 

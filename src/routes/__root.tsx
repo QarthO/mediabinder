@@ -26,8 +26,8 @@ const browserTelemetryConfig = createServerFn({ method: "GET" }).handler(
     const { browserTraceSampleRatio } =
       await import("@/lib/browser-telemetry.server")
     const cookie = getRequestHeaders().get("cookie") ?? ""
-    if (!cookie.includes("better-auth.session_token"))
-      return { browserTraceSampleRatio: null }
+    const { mayHaveSession } = await import("@/lib/development-bypass")
+    if (!mayHaveSession(cookie)) return { browserTraceSampleRatio: null }
     const ratio = await runTracedAppEffect(browserTraceSampleRatio())
     return { browserTraceSampleRatio: Option.getOrNull(ratio) }
   }

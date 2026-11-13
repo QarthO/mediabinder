@@ -212,6 +212,29 @@
   opacity: 0.5;
   cursor: wait;
 }
+.dev-login-button {
+  margin: 14px auto 0;
+  display: block;
+  padding: 10px 20px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--foreground);
+  font: inherit;
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+.dev-login-button:hover:not(:disabled) {
+  background: var(--accent);
+}
+.dev-login-button:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 4px;
+}
+.dev-login-button:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
 .login-privacy {
   display: inline-block;
   margin-top: 20px;

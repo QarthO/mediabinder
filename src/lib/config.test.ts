@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vite-plus/test"
 import {
+  appEnvironment,
   appUrl,
+  developmentBypassEnabled,
   databaseOptions,
   driveWebhookUrl,
   validateRuntimeConfig,
@@ -89,5 +91,27 @@ describe("runtime configuration", () => {
       expect(() =>
         validateRuntimeConfig({ ...env, DRIVE_WEBHOOK_URL: callback })
       ).toThrow(/DRIVE_WEBHOOK_URL/)
+  })
+
+  it("takes MEDIABINDER_ENVIRONMENT as dev or prod, and prod by default", () => {
+    expect(appEnvironment(env)).toBe("prod")
+    expect(appEnvironment({ ...env, MEDIABINDER_ENVIRONMENT: "dev" })).toBe(
+      "dev"
+    )
+    for (const value of ["development", "production", "DEV"])
+      expect(() =>
+        validateRuntimeConfig({ ...env, MEDIABINDER_ENVIRONMENT: value })
+      ).toThrow("MEDIABINDER_ENVIRONMENT must be dev or prod")
+  })
+
+  it("enables the development bypass only for dev outside production", () => {
+    const dev = { ...env, MEDIABINDER_ENVIRONMENT: "dev" }
+    expect(developmentBypassEnabled(env)).toBe(false)
+    expect(developmentBypassEnabled({ ...dev, NODE_ENV: "development" })).toBe(
+      true
+    )
+    expect(developmentBypassEnabled({ ...dev, NODE_ENV: "production" })).toBe(
+      false
+    )
   })
 })

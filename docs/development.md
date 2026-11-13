@@ -5,53 +5,93 @@ Use the Node version in `.node-version`, pnpm 11 (pinned by `packageManager`;
 
 ```sh
 pnpm install --frozen-lockfile
-cp .env.example .env   # then fill it in, see the README
-pnpm dev:docker
+pnpm dev:setup    # once, from any worktree
+pnpm dev:docker   # in any worktree
 ```
 
-Open http://localhost:3100. Google sign-in needs real OAuth credentials, see
-the README's Google OAuth section. There is no development authentication
-bypass.
+`pnpm dev:docker` prints the stack's URL. Click "Skip login for development"
+to use the app as the developer; see [Dev stack](#dev-stack).
 
 ## Commands
 
-| Command                | Purpose                                                                                             |
-| ---------------------- | --------------------------------------------------------------------------------------------------- |
-| `pnpm dev`             | Vite+ dev server on port 3100. Needs a reachable MySQL and the environment from `.env`              |
-| `pnpm build`           | Production build into `dist/` (`vp build`)                                                          |
-| `pnpm start`           | Serve `dist/` (`scripts/serve.mjs`); the container runs `scripts/start.ts` instead                  |
-| `pnpm typecheck`       | `tsc --noEmit`                                                                                      |
-| `pnpm lint`            | `vp lint`: type-aware oxlint and the `mediabinder/effect-recovery` rule                             |
-| `pnpm format`          | `vp fmt` (oxfmt) rewrites files                                                                     |
-| `pnpm check`           | `vp check`: lint, format check and types                                                            |
-| `pnpm test`            | `vp test run`: unit tests; the MySQL suites skip themselves                                         |
-| `pnpm verify [stage]`  | `static`, `tests`, `database`, `build`, or all of them; the stages CI runs                          |
-| `pnpm db:migrate`      | Apply pending migrations (`scripts/migrate.ts`)                                                     |
-| `pnpm dev:docker`      | Build and start MySQL, the web container in hot-reload mode and the Drive worker, in the background |
-| `pnpm dev:docker:down` | Stop the stack and keep the `mysql-data` volume                                                     |
+| Command                         | Purpose                                                                                         |
+| ------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `pnpm dev`                      | Vite+ dev server on port 3100. Needs a reachable MySQL and the environment from `.env`          |
+| `pnpm build`                    | Production build into `dist/` (`vp build`)                                                      |
+| `pnpm start`                    | Serve `dist/` (`scripts/serve.mjs`); the container runs `scripts/start.ts` instead              |
+| `pnpm typecheck`                | `tsc --noEmit`                                                                                  |
+| `pnpm lint`                     | `vp lint`: type-aware oxlint and the `mediabinder/effect-recovery` rule                         |
+| `pnpm format`                   | `vp fmt` (oxfmt) rewrites files                                                                 |
+| `pnpm check`                    | `vp check`: lint, format check and types                                                        |
+| `pnpm test`                     | `vp test run`: unit tests; the MySQL suites skip themselves                                     |
+| `pnpm verify [stage]`           | `static`, `tests`, `database`, `build`, or all of them; the stages CI runs                      |
+| `pnpm db:migrate`               | Apply pending migrations (`scripts/migrate.ts`)                                                 |
+| `pnpm dev:setup`                | Create the shared dev env file, or add its missing keys (never changes a value)                 |
+| `pnpm dev:docker`               | Build and start this worktree's stack: MySQL, the hot-reload web container and the Drive worker |
+| `pnpm dev:docker:down`          | Stop the stack and keep its MySQL volume                                                        |
+| `pnpm dev:docker:destroy --yes` | Remove the stack and its MySQL volume                                                           |
+| `pnpm dev:docker:url`           | Print the stack's URL                                                                           |
+| `pnpm dev:docker:logs`          | Follow the web and worker logs                                                                  |
 
 Run `pnpm format` before committing; `pnpm check` and CI fail on unformatted
 files, including Markdown.
 
-## Docker development
+## Dev stack
 
-`pnpm dev:docker` runs `docker compose -f compose.yaml -f compose.dev.yaml up -d --build`.
+Each worktree gets its own Docker Compose project, `mediabinder-dev-<branch>`,
+with its own MySQL volume and a free host port from 3101-3199 (kept while the
+stack exists). The name is saved in the worktree's git directory
+(`mediabinder-dev-project`), so `down` and `destroy` still find the stack after
+a branch switch. The script only ever runs compose for that project; it never
+touches `mediabinder`, `mediabinder-sharing` or any container it didn't create.
 
-- `mysql` is MySQL 8.4 with a persistent `mysql-data` volume. It is not
-  published to the host.
-- `web` builds the `development` Dockerfile target, binds `src`, `public`,
-  `scripts`, `migrations` and `vite.config.ts` from the checkout, applies
-  migrations, then runs `pnpm dev`. It listens on `127.0.0.1:3100`. Edits to
-  those paths hot reload; a dependency change needs `pnpm dev:docker` again.
-- `worker` runs the Drive worker from the `production` image, so it does not
-  hot reload. Rebuild it with `pnpm dev:docker` after changing server modules it
-  uses. The web container has `DRIVE_WORKER_ENABLED=false`.
-- Logs: `docker compose logs -f web` (or `worker`). They are JSON.
+**Setup, once.** `pnpm dev:setup` writes the shared env file: the primary
+checkout's `.env` (found through `git rev-parse --git-common-dir`). Every
+worktree's stack reads it, so a new worktree needs no setup. A missing file is
+created; an existing one only gains the keys it lacks, with values left alone.
+It generates `BETTER_AUTH_SECRET` and the MySQL passwords, sets
+`MEDIABINDER_ENVIRONMENT=dev`, and adds commented placeholders for what it
+can't know. [`.env.dev.example`](../.env.dev.example) lists them all. Set
+`MEDIABINDER_DEV_ENV_FILE=<path>` to use another file.
 
-Use the T3 preview browser at http://localhost:3100 to check UI changes.
+**Start.** `pnpm dev:docker` builds and starts MySQL, the web app (the
+`development` target with hot reload, as `compose.dev.yaml` binds `src`,
+`public`, `scripts`, `migrations` and `vite.config.ts`) and the Drive worker
+(the same target, restarted on each `pnpm dev:docker` to pick up server
+changes). It waits until the app is healthy and prints the URL. The stack sets
+`MEDIABINDER_URL` and `BETTER_AUTH_URL` to `http://localhost:<port>` itself.
 
-To build and run the production image the way a deployment does, use
-`docker compose up -d --build` (see the README). Pass
+**Skip login.** With `MEDIABINDER_ENVIRONMENT=dev` the login page shows
+"Skip login for development". It sets the `mediabinder-dev-auth-bypass` cookie
+(httpOnly, 12 hours), and every session check then resolves to the developer:
+id `mediabinder-dev-user`, "MediaBinder Developer", `developer@mediabinder.local`.
+The bypass needs `MEDIABINDER_ENVIRONMENT=dev` and a `NODE_ENV` other than
+`production`, so the production image ignores it even if the variable is set.
+The developer has a real `user` row, made when the stack starts. It is the
+workspace owner and superuser when nobody owns the workspace yet. The stack
+sets `ALLOW_SIGNUPS=true`, so a real Google account can still sign in as a
+regular user. Signing out clears the cookie. The developer has no Google OAuth
+token: in shared-folder mode Drive reads use the service account, but the
+Google Picker, creating a folder and sharing need a real Google sign-in and
+fail with a reconnect message for the developer.
+
+**Prelinked folder.** Put the service account's key path in
+`GOOGLE_SERVICE_ACCOUNT_KEY_HOST_FILE` (a path on your machine; quote it if it
+has spaces). The stack mounts it read-only at
+`/run/secrets/mediabinder-drive-sync.json` and points
+`GOOGLE_SERVICE_ACCOUNT_KEY_FILE` there. With `MEDIABINDER_DEV_FOLDER_ID` also
+set (a folder shared with that service account), startup links the folder for
+the developer, named from Drive or "Development folder" if Drive can't be
+reached, and queues one initial sync for the worker. Restarting neither
+duplicates the link nor queues another sync.
+
+**Reset.** `pnpm dev:docker:down` stops the stack and keeps the database.
+`pnpm dev:docker:destroy --yes` also deletes its MySQL volume; the next
+`pnpm dev:docker` starts from scratch.
+
+Logs are JSON: `pnpm dev:docker:logs`. Use the T3 preview browser at the
+printed URL to check UI changes. To build and run the production image the way
+a deployment does, use `docker compose up -d --build` (see the README). Pass
 `--build-arg SOURCE_COMMIT=$(git rev-parse HEAD)` to `docker build` to have
 `/api/health` report the commit.
 

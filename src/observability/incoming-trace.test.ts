@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vite-plus/test"
 
 const getSession = vi.fn()
 vi.mock("@/lib/auth.server", () => ({
-  auth: { api: { getSession: (...args: unknown[]) => getSession(...args) } },
+  getSession: (...args: unknown[]) => getSession(...args),
 }))
 
 const { incomingTraceParent } = await import("./incoming-trace.server")

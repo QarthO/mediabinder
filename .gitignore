@@ -3,6 +3,7 @@ dist/
 .env
 .env.*
 !.env.example
+!.env.dev.example
 .tanstack/
 *.log
 .DS_Store

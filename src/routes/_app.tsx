@@ -8,12 +8,12 @@ import { Workspace } from "@/components/workspace"
 import { libraryQuery } from "@/lib/api"
 const sessionCheck = createServerFn({ method: "GET" }).handler(async () => {
   const { getRequestHeaders } = await import("@tanstack/react-start/server")
-  const { auth } = await import("@/lib/auth.server")
+  const { getSession } = await import("@/lib/auth.server")
   const { readWorkspacePreferences } =
     await import("@/lib/workspace-preferences.server")
   const headers = getRequestHeaders()
   return {
-    signedIn: !!(await auth.api.getSession({ headers })),
+    signedIn: !!(await getSession(headers)),
     preferences: readWorkspacePreferences(headers.get("cookie")),
     view: /(?:^|;\s*)mediabinder_view=list(?:;|$)/.test(
       headers.get("cookie") ?? ""

@@ -78,7 +78,29 @@ export function databaseOptions(env: Environment = process.env) {
   return { uri: env.DATABASE_URL }
 }
 
+/**
+ * `MEDIABINDER_ENVIRONMENT`: `prod` (the default) or `dev`. Anything else is
+ * a configuration error, so a typo can never leave a stack half in dev mode.
+ */
+export function appEnvironment(env: Environment = process.env): "dev" | "prod" {
+  const value = env.MEDIABINDER_ENVIRONMENT?.trim() || "prod"
+  if (value !== "dev" && value !== "prod")
+    throw new Error("MEDIABINDER_ENVIRONMENT must be dev or prod.")
+  return value
+}
+
+/**
+ * Whether development-only behaviour (skip login, the prelinked folder) is
+ * on. It needs `MEDIABINDER_ENVIRONMENT=dev` AND a `NODE_ENV` other than
+ * `production`, so the production image can't honour it even when the
+ * variable is set.
+ */
+export function developmentBypassEnabled(env: Environment = process.env) {
+  return appEnvironment(env) === "dev" && env.NODE_ENV !== "production"
+}
+
 export function validateRuntimeConfig(env: Environment = process.env) {
+  appEnvironment(env)
   appUrl(env)
   driveWebhookUrl(env)
   databaseOptions(env)

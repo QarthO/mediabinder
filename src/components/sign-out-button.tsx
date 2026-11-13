@@ -3,6 +3,7 @@ import { LogOut } from "lucide-react"
 
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { authClient } from "@/lib/auth-client"
+import { clearDevelopmentLogin } from "@/lib/development-auth"
 
 // Owns the dialog state so opening it never re-renders the workspace.
 export const SignOutButton = memo(function SignOutButton() {
@@ -27,8 +28,11 @@ export const SignOutButton = memo(function SignOutButton() {
       variant="destructive"
       keepOpenOnSuccess
       onConfirm={async () => {
+        // The development bypass has no Better Auth session to end.
+        const { cleared } = await clearDevelopmentLogin()
         const result = await authClient.signOut()
-        if (result.error) throw new Error("Could not sign out. Try again.")
+        if (result.error && !cleared)
+          throw new Error("Could not sign out. Try again.")
         window.location.assign("/")
       }}
     />

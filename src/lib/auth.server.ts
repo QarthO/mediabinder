@@ -5,7 +5,9 @@ import { Effect } from "effect"
 import { AuthenticationError } from "@/effect/errors"
 import mysql from "mysql2/promise"
 import type { RowDataPacket } from "mysql2/promise"
-import { appUrl, databaseOptions } from "./config"
+import { appEnvironment, appUrl, databaseOptions } from "./config"
+import { developmentBypassEnabled } from "./config"
+import { developmentUser, hasBypassCookie } from "./development-bypass"
 import { sharedFolderMode } from "./drive-access.server"
 /**
  * Better Auth's connections, and nothing else's: it takes a mysql2 pool, so
@@ -16,6 +18,8 @@ import { sharedFolderMode } from "./drive-access.server"
  * per-process connection total.
  */
 export const AUTH_POOL_SIZE = 4
+// A bad MEDIABINDER_ENVIRONMENT fails here, at startup, with a clear error.
+appEnvironment()
 const pool = mysql.createPool({
   ...databaseOptions(),
   connectionLimit: AUTH_POOL_SIZE,
@@ -110,6 +114,46 @@ export const auth = betterAuth({
   },
 })
 
+type Session = NonNullable<Awaited<ReturnType<typeof auth.api.getSession>>>
+
+// The developer the bypass cookie stands for. Their `user` row is made when a
+// dev stack starts (src/lib/development.server.ts).
+function developmentSession(): Session {
+  const now = new Date()
+  return {
+    session: {
+      id: `development:${developmentUser.id}`,
+      userId: developmentUser.id,
+      token: "",
+      expiresAt: new Date(now.getTime() + 60 * 60 * 1000),
+      createdAt: now,
+      updatedAt: now,
+      ipAddress: null,
+      userAgent: null,
+    },
+    user: {
+      ...developmentUser,
+      emailVerified: true,
+      createdAt: now,
+      updatedAt: now,
+      role: "superuser",
+    },
+  } as unknown as Session
+}
+
+/**
+ * The one session lookup. Everything that asks who is signed in goes through
+ * this, never `auth.api.getSession` directly, so the development bypass
+ * cookie resolves to the developer identity everywhere. The cookie counts only
+ * when `developmentBypassEnabled()`: `MEDIABINDER_ENVIRONMENT=dev` and a
+ * `NODE_ENV` other than production.
+ */
+export async function getSession(headers: Headers): Promise<Session | null> {
+  if (developmentBypassEnabled() && hasBypassCookie(headers.get("cookie")))
+    return developmentSession()
+  return auth.api.getSession({ headers })
+}
+
 /**
  * The signed-in session for a request, or an `AuthenticationError` (401).
  * Better Auth rejecting the lookup itself, for instance because MySQL is
@@ -119,7 +163,7 @@ export const auth = betterAuth({
 export const requireSession = Effect.fn("Auth.requireSession")(function* (
   headers: Headers
 ) {
-  const session = yield* Effect.promise(() => auth.api.getSession({ headers }))
+  const session = yield* Effect.promise(() => getSession(headers))
   if (!session) return yield* new AuthenticationError()
   return session
 })
