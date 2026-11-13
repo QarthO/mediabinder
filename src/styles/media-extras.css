@@ -1,5 +1,5 @@
 /* Thumbnail blur, the bounded virtual media grid, and sync progress. */
-:is(img, video)[data-blurred] {
+:is(img, video, iframe)[data-blurred] {
   filter: blur(calc(28px * var(--censor-strength, 1)));
   clip-path: inset(0);
 }

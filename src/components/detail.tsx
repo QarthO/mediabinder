@@ -39,6 +39,8 @@ import { bytes, dateValue, isoDate } from "@/lib/utils"
 import type { Library, Media, Post } from "@/lib/types"
 import { canPreview, useMediaPreview } from "@/lib/media-preview"
 import { canRelabelAsMp4 } from "@/lib/media-formats"
+import { canDecodeVideoCodec, formatLabel } from "@/lib/video-codec"
+import { drivePreviewUrl, driveViewUrl } from "@/lib/drive-links"
 
 function PreviewImage({
   media,
@@ -87,6 +89,32 @@ function PreviewImage({
         />
       )}
     </>
+  )
+}
+
+// Google Drive's own player: the last resort for a video this browser can't
+// decode, because Google transcodes it. It needs the browser to be signed in to
+// Google; `authuser` picks the account when there are several. The blur and
+// the pointer block are the video's, and `inert` keeps keyboards out too.
+function DrivePlayer({
+  media,
+  email,
+  censored,
+}: {
+  media: Media
+  email: string
+  censored: boolean
+}) {
+  return (
+    <iframe
+      data-blurred={censored || undefined}
+      inert={censored}
+      src={drivePreviewUrl(media.drive_id, email)}
+      title={`${media.display_name}, in Google Drive's player`}
+      allow="autoplay; fullscreen"
+      allowFullScreen
+      referrerPolicy="strict-origin-when-cross-origin"
+    />
   )
 }
 
@@ -181,6 +209,14 @@ export function Detail({
     [dialog, setDialog] = useState<"add" | Post | null>(null),
     [failed, setFailed] = useState(false),
     [rendered, setRendered] = useState(false),
+    // Play through Google Drive: from the start when the sync saw a codec this
+    // browser can't decode, otherwise once the original and its MP4 relabel
+    // both failed.
+    [viaDrive, setViaDrive] = useState(
+      () =>
+        Boolean(media?.mime_type.startsWith("video/")) &&
+        canDecodeVideoCodec(media?.video_codec ?? null) === false
+    ),
     [confirmDelete, setConfirmDelete] = useState(false)
   const dialogRef = useRef<HTMLDivElement>(null)
   const copiesRef = useRef<HTMLElement>(null)
@@ -259,6 +295,8 @@ export function Detail({
       : p.set_id === selected.id
   )
   const members = data.media.filter((m) => m.set_ids.includes(selected.id))
+  const drivePlaying = Boolean(media?.available && viaDrive && !failed)
+  const throughGoogle = drivePlaying || Boolean(media && !failed && rendered)
   return (
     <Dialog
       open
@@ -288,7 +326,7 @@ export function Detail({
           const target = event.target as HTMLElement
           if (
             target.closest(
-              'input, textarea, select, [contenteditable="true"], video, audio, [role="slider"], [role="combobox"], [role="menu"], [role="listbox"]'
+              'input, textarea, select, [contenteditable="true"], video, audio, iframe, [role="slider"], [role="combobox"], [role="menu"], [role="listbox"]'
             ) ||
             !event.currentTarget.contains(target)
           )
@@ -362,7 +400,7 @@ export function Detail({
         <div className="detail-body">
           <div
             className="detail-preview"
-            data-rendered={(media && rendered && !failed) || undefined}
+            data-rendered={throughGoogle || undefined}
           >
             {media ? (
               failed || !media.available ? (
@@ -385,11 +423,19 @@ export function Detail({
                   </a>
                 </div>
               ) : media.mime_type.startsWith("video/") ? (
-                <PreviewVideo
-                  media={media}
-                  censored={censored}
-                  onError={() => setFailed(true)}
-                />
+                viaDrive ? (
+                  <DrivePlayer
+                    media={media}
+                    email={data.user.email}
+                    censored={censored}
+                  />
+                ) : (
+                  <PreviewVideo
+                    media={media}
+                    censored={censored}
+                    onError={() => setViaDrive(true)}
+                  />
+                )
               ) : canPreview(media) ? (
                 <CachedPreviewImage
                   media={media}
@@ -439,14 +485,28 @@ export function Detail({
               )}
             <div
               className="preview-caption"
-              data-rendered={(media && rendered && !failed) || undefined}
+              data-rendered={throughGoogle || undefined}
             >
               <span>
                 {media
                   ? `${media.width && media.height ? `${media.width} × ${media.height} · ` : ""}${bytes(media.size)}`
                   : `${members.length} items`}
               </span>
-              {rendered && !failed && media ? (
+              {drivePlaying && media ? (
+                <>
+                  <span className="preview-notice">
+                    Playing through Google Drive, which needs you signed in to
+                    Google in this browser
+                  </span>
+                  <a
+                    href={driveViewUrl(media.drive_id, data.user.email)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    Not loading? Open in Drive
+                  </a>
+                </>
+              ) : rendered && !failed && media ? (
                 <>
                   <span className="preview-notice">
                     Preview from Google Drive, not the original file
@@ -557,7 +617,9 @@ export function Detail({
                       )}
                       <div>
                         <dt>Format</dt>
-                        <dd>{media.mime_type}</dd>
+                        <dd>
+                          {formatLabel(media.mime_type, media.video_codec)}
+                        </dd>
                       </div>
                     </>
                   )}
