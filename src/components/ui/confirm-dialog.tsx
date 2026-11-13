@@ -27,6 +27,9 @@ type ConfirmDialogProps = {
   /** Keep the dialog open (and pending) after `onConfirm` resolves, for
    * actions that navigate away. */
   keepOpenOnSuccess?: boolean
+  /** Where focus goes on close when there is no `trigger`. Call
+   * `event.preventDefault()` and focus the element yourself. */
+  onCloseAutoFocus?: (event: Event) => void
   /** A rejection keeps the dialog open and shows the error message. */
   onConfirm: () => Promise<void> | void
 }
@@ -47,6 +50,7 @@ export function ConfirmDialog({
   cancelLabel = "Cancel",
   variant = "default",
   keepOpenOnSuccess = false,
+  onCloseAutoFocus,
   onConfirm,
 }: ConfirmDialogProps) {
   return (
@@ -61,6 +65,7 @@ export function ConfirmDialog({
           cancelLabel={cancelLabel}
           variant={variant}
           keepOpenOnSuccess={keepOpenOnSuccess}
+          onCloseAutoFocus={onCloseAutoFocus}
           onConfirm={onConfirm}
           onOpenChange={onOpenChange}
         />
@@ -77,6 +82,7 @@ function ConfirmDialogBody({
   cancelLabel,
   variant,
   keepOpenOnSuccess,
+  onCloseAutoFocus,
   onConfirm,
   onOpenChange,
 }: Required<
@@ -120,6 +126,7 @@ function ConfirmDialogBody({
         event.preventDefault()
         ;(destructive ? cancelRef : confirmRef).current?.focus()
       }}
+      onCloseAutoFocus={onCloseAutoFocus}
       onEscapeKeyDown={keepOpen}
       onPointerDownOutside={keepOpen}
       onInteractOutside={keepOpen}

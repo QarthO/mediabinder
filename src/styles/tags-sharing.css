@@ -74,9 +74,6 @@
 .current-folder button {
   flex-shrink: 0;
 }
-.unlink-confirm {
-  padding: 0 18px 18px;
-}
 .settings-hint {
   margin: 6px 0 16px;
   font-size: 0.8125rem;

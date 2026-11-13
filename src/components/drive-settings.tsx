@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { memo, useRef, useState } from "react"
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query"
 import { useRouter } from "@tanstack/react-router"
 import {
@@ -14,6 +14,7 @@ import { authClient } from "@/lib/auth-client"
 import { folderIdFromInput } from "@/lib/validation"
 import { dateValue } from "@/lib/utils"
 import { Button } from "./ui/button"
+import { ConfirmDialog } from "./ui/confirm-dialog"
 import { Input } from "./ui/input"
 import { DriveSyncButton, useDriveSyncBusy } from "./drive-sync"
 import { SharedFolderLink } from "./shared-folder-link"
@@ -24,11 +25,9 @@ export function DriveSettings({
   workspace: Library["workspace"]
 }) {
   const [folder, setFolder] = useState(""),
-    [removing, setRemoving] = useState<string | null>(null),
     [browse, setBrowse] = useState(false),
     [search, setSearch] = useState("")
   const client = useQueryClient()
-  const router = useRouter()
   const folders = useQuery({
     queryKey: ["drive-folders"],
     queryFn: () => action<{ id: string; name: string }[]>("folders"),
@@ -42,26 +41,6 @@ export function DriveSettings({
       setBrowse(false)
       setFolder("")
       toast.success("Folder linked. Sync Drive to add its media.")
-    },
-    onError: (e) => toast.error(e.message),
-  })
-  const unlink = useMutation({
-    mutationFn: (folderId: string) =>
-      action<{
-        ok: boolean
-        access_removed?: boolean
-        share_address?: string | null
-      }>("remove-source", { folderId }),
-    onSuccess: async (result) => {
-      await client.invalidateQueries({ queryKey: ["library"] })
-      await router.invalidate()
-      setRemoving(null)
-      if (result.share_address && !result.access_removed)
-        toast.info(
-          `Folder unlinked. MediaBinder no longer syncs it. To remove its access too, remove ${result.share_address} from the folder's sharing in Drive.`,
-          { duration: 12_000 }
-        )
-      else toast.success("Folder unlinked. Its metadata is preserved.")
     },
     onError: (e) => toast.error(e.message),
   })
@@ -210,70 +189,122 @@ export function DriveSettings({
               />
             </div>
             {!workspace.sources.length && <p>No folders linked yet.</p>}
-            <div className="source-list">
-              {workspace.sources.map((source) => (
-                <div className="source-entry" key={source.folder_id}>
-                  <div className="current-folder">
-                    <FolderOpen size={20} />
-                    <div>
-                      <strong>{source.folder_name}</strong>
-                      <small>
-                        {source.last_synced_at
-                          ? `Last synced ${dateValue(source.last_synced_at)}`
-                          : "Not synced yet"}
-                      </small>
-                    </div>
-                    <a
-                      href={`https://drive.google.com/drive/folders/${source.folder_id}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      aria-label={`Open ${source.folder_name} in Drive`}
-                    >
-                      <ArrowUpRight size={17} />
-                    </a>
-                    <button
-                      className="icon-button"
-                      aria-label={`Unlink ${source.folder_name}`}
-                      title="Unlink folder"
-                      onClick={() => setRemoving(source.folder_id)}
-                      disabled={unlink.isPending || syncing}
-                    >
-                      <Unlink size={17} />
-                    </button>
-                  </div>
-                  {removing === source.folder_id && (
-                    <div className="unlink-confirm" role="alert">
-                      <p>
-                        Unlink this folder? Media unique to it will be hidden.
-                        Your edits are kept if you link it again.
-                        {sharedMode &&
-                          (source.shared_by_app
-                            ? " MediaBinder also tries to remove its access to the folder."
-                            : " MediaBinder stops syncing it; you can remove its access from the folder's sharing in Drive.")}
-                      </p>
-                      <div className="settings-actions">
-                        <Button
-                          variant="ghost"
-                          onClick={() => setRemoving(null)}
-                        >
-                          Cancel
-                        </Button>
-                        <Button
-                          variant="destructive"
-                          disabled={unlink.isPending}
-                          onClick={() => unlink.mutate(source.folder_id)}
-                        >
-                          {unlink.isPending ? "Unlinking…" : "Unlink folder"}
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
+            <LinkedFolders
+              sources={workspace.sources}
+              sharedMode={sharedMode}
+              syncing={syncing}
+            />
           </div>
         </div>
       </section>
     </div>
   )
 }
+
+type Source = Library["workspace"]["sources"][number]
+
+// Owns the folder being unlinked, so opening the dialog re-renders only this
+// list and not the rest of the settings.
+const LinkedFolders = memo(function LinkedFolders({
+  sources,
+  sharedMode,
+  syncing,
+}: {
+  sources: Source[]
+  sharedMode: boolean
+  syncing: boolean
+}) {
+  const [target, setTarget] = useState<Source | null>(null)
+  const opener = useRef<HTMLElement | null>(null)
+  const client = useQueryClient()
+  const router = useRouter()
+  const unlink = useMutation({
+    mutationFn: (folderId: string) =>
+      action<{
+        ok: boolean
+        access_removed?: boolean
+        share_address?: string | null
+      }>("remove-source", { folderId }),
+  })
+  return (
+    <>
+      <div className="source-list">
+        {sources.map((source) => (
+          <div className="source-entry" key={source.folder_id}>
+            <div className="current-folder">
+              <FolderOpen size={20} />
+              <div>
+                <strong>{source.folder_name}</strong>
+                <small>
+                  {source.last_synced_at
+                    ? `Last synced ${dateValue(source.last_synced_at)}`
+                    : "Not synced yet"}
+                </small>
+              </div>
+              <a
+                href={`https://drive.google.com/drive/folders/${source.folder_id}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label={`Open ${source.folder_name} in Drive`}
+              >
+                <ArrowUpRight size={17} />
+              </a>
+              <button
+                className="icon-button"
+                aria-label={`Unlink ${source.folder_name}`}
+                title="Unlink folder"
+                onClick={(event) => {
+                  opener.current = event.currentTarget
+                  setTarget(source)
+                }}
+                disabled={unlink.isPending || syncing}
+              >
+                <Unlink size={17} />
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+      <ConfirmDialog
+        open={target !== null}
+        onOpenChange={(open) => {
+          if (!open) setTarget(null)
+        }}
+        title={target ? `Unlink ${target.folder_name}?` : "Unlink folder?"}
+        description={
+          target
+            ? `Media unique to this folder will be hidden. Your edits are kept if you link it again.${
+                sharedMode
+                  ? target.shared_by_app
+                    ? " MediaBinder also tries to remove its access to the folder."
+                    : " MediaBinder stops syncing it; you can remove its access from the folder's sharing in Drive."
+                  : ""
+              }`
+            : undefined
+        }
+        onCloseAutoFocus={(event) => {
+          // The opener is gone once the folder is unlinked.
+          if (opener.current?.isConnected) {
+            event.preventDefault()
+            opener.current.focus()
+          }
+        }}
+        confirmLabel="Unlink folder"
+        pendingLabel="Unlinking…"
+        variant="destructive"
+        onConfirm={async () => {
+          if (!target) return
+          const result = await unlink.mutateAsync(target.folder_id)
+          await client.invalidateQueries({ queryKey: ["library"] })
+          await router.invalidate()
+          if (result.share_address && !result.access_removed)
+            toast.info(
+              `Folder unlinked. MediaBinder no longer syncs it. To remove its access too, remove ${result.share_address} from the folder's sharing in Drive.`,
+              { duration: 12_000 }
+            )
+          else toast.success("Folder unlinked. Its metadata is preserved.")
+        }}
+      />
+    </>
+  )
+})
