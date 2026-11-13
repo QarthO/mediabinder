@@ -79,7 +79,8 @@ Before editing files for a substantial task:
     spans, for hot paths: per Drive page, per file, per thumbnail, and the
     worker's idle checks. Existing metrics are named `mediabinder.*`
     (`mediabinder.drive.api.requests`, `mediabinder.sync.files`,
-    `mediabinder.worker.passes`, `mediabinder.mutation.duration`).
+    `mediabinder.worker.passes`, `mediabinder.mutation.duration`,
+    `mediabinder.thumbnail.requests`).
   - **Never put user data in telemetry.** No media contents, file names,
     display names, tags, set names, folder names, emails, search text, tokens
     or signed URLs in span names, span or metric attributes, log messages or

@@ -1,5 +1,5 @@
 import { Effect } from "effect"
-import { reportAppError, runAppEffect } from "./runtime.server"
+import { reportAppError, runAppEffectUntraced } from "./runtime.server"
 import { Thumbnails } from "./thumbnails"
 
 // The route authenticates and checks ownership/availability before calling this cache.
@@ -8,8 +8,8 @@ export function thumbnailResponse(
   driveId: string,
   request: Request
 ) {
-  return runAppEffect(
-    "Thumbnail.get",
+  // Untraced: thumbnails are counted and timed as metrics in the cache.
+  return runAppEffectUntraced(
     Thumbnails.use((service) => service.get(`${userId}:${driveId}`)).pipe(
       Effect.map((thumbnail) => {
         const headers = new Headers({

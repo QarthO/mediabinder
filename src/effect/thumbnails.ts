@@ -1,11 +1,13 @@
 import { createHash } from "node:crypto"
 import {
   Cache,
+  Cause,
   Context,
   Duration,
   Effect,
   Exit,
   Layer,
+  Metric,
   Option,
   Schema,
   Semaphore,
@@ -37,6 +39,22 @@ export class ThumbnailSource extends Context.Service<
 // worst case at 128 MiB. A library view asks for 20-30 thumbnails at once,
 // and each load takes about a third of a second, so 16 run concurrently.
 export const MAX_THUMBNAIL_BYTES = 512 * 1024
+// Thumbnails are the hottest path, a few dozen per library view: they are
+// counted and timed here instead of traced or logged one by one.
+const requests = Metric.counter("mediabinder.thumbnail.requests", {
+  description:
+    "Thumbnail requests, by whether the server's cache held (or was already loading) the thumbnail, and outcome",
+  attributes: { unit: "{request}" },
+  incremental: true,
+})
+
+const serveDuration = Metric.histogram("mediabinder.thumbnail.duration", {
+  description:
+    "Time to answer from the server's thumbnail cache, including waiting for a load slot and loading from Google on a miss",
+  attributes: { unit: "s" },
+  boundaries: [0.005, 0.025, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 25],
+})
+
 export const makeThumbnailCache = Effect.fn("makeThumbnailCache")(function* (
   load: (key: string) => Effect.Effect<ThumbnailData, ThumbnailError>,
   options = {
@@ -67,18 +85,33 @@ export const makeThumbnailCache = Effect.fn("makeThumbnailCache")(function* (
   )
   return {
     get: Effect.fn("Thumbnail.cacheGet")(function* (key: string) {
-      const reused = yield* Cache.has(cache, key)
-      const [duration, thumbnail] = yield* Cache.get(cache, key).pipe(
+      // A hit includes joining a load another request already started.
+      const state = (yield* Cache.has(cache, key)) ? "hit" : "miss"
+      const [duration, exit] = yield* Cache.get(cache, key).pipe(
+        Effect.exit,
         Effect.timed
       )
-      const ms = Duration.toMillis(duration)
-      yield* Effect.logInfo("thumbnail served", {
-        cache: reused ? "hit-or-shared" : "miss",
-        durationMs: Math.round(ms),
-        bytes: thumbnail.bytes.byteLength,
-      })
-      return { ...thumbnail, ms, cache: reused ? "hit-or-shared" : "miss" }
-    }, Effect.withLogSpan("thumbnail")),
+      const attributes = {
+        cache: state,
+        outcome: Exit.isSuccess(exit)
+          ? "served"
+          : Cause.hasInterruptsOnly(exit.cause)
+            ? "cancelled"
+            : "failed",
+      }
+      yield* Effect.all(
+        [
+          Metric.update(Metric.withAttributes(requests, attributes), 1),
+          Metric.update(
+            Metric.withAttributes(serveDuration, attributes),
+            Duration.toSeconds(duration)
+          ),
+        ],
+        { discard: true }
+      )
+      const thumbnail = yield* exit
+      return { ...thumbnail, ms: Duration.toMillis(duration), cache: state }
+    }),
   }
 })
 

@@ -23,7 +23,7 @@ import {
 // they would without it.
 const tracingMiddleware = createMiddleware().server(
   ({ request, pathname, serverFnMeta, next }) => {
-    if (isUntracedRequest(pathname)) return next()
+    if (isUntracedRequest(new URL(request.url))) return next()
     const name = requestSpanName(request.method, pathname, serverFnMeta)
     const parentSpan = request.headers.has("traceparent")
       ? runTracedAppEffect(incomingTraceParent(request))
