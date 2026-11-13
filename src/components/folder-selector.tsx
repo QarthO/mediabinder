@@ -81,9 +81,7 @@ export function FolderSelector({
             </button>
             {sources
               .filter((source) =>
-                `${source.folder_name} ${source.folder_id}`
-                  .toLowerCase()
-                  .includes(query.toLowerCase())
+                source.folder_name.toLowerCase().includes(query.toLowerCase())
               )
               .map((source) => (
                 <button
@@ -99,10 +97,7 @@ export function FolderSelector({
                   }
                 >
                   <FolderOpen size={17} />
-                  <span>
-                    {source.folder_name}
-                    <small>{source.folder_id}</small>
-                  </span>
+                  <span>{source.folder_name}</span>
                   {selected.includes(source.folder_id) && <Check size={16} />}
                 </button>
               ))}
