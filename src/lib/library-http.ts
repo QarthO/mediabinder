@@ -1,4 +1,4 @@
-import { Effect, Schema } from "effect"
+import { Effect, Option, Schema } from "effect"
 import { ZodError } from "zod"
 import { appUrl } from "./config"
 
@@ -51,6 +51,20 @@ export const libraryPost = Effect.fnUntraced(
       Effect.mapError(
         () => new Response("Invalid action payload.", { status: 400 })
       )
+    )
+    // Only the action name, never its data: the request span is shared by
+    // every library action.
+    yield* Effect.annotateCurrentSpan("mediabinder.action", input.action)
+    yield* Effect.currentSpan.pipe(
+      Effect.tap((span) => {
+        const parent = Option.getOrUndefined(span.parent)
+        return parent?._tag === "Span"
+          ? Effect.sync(() =>
+              parent.attribute("mediabinder.action", input.action)
+            )
+          : Effect.void
+      }),
+      Effect.ignore
     )
     const result = yield* Effect.tryPromise({
       try: () =>

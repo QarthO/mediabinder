@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, vi } from "vite-plus/test"
 import { it } from "@effect/vitest"
-import { Effect } from "effect"
+import { Effect, Tracer } from "effect"
 import { libraryPost } from "./library-http"
 
 afterEach(() => {
@@ -73,5 +73,41 @@ describe("library POST", () => {
         })
         expect(reported).toEqual([cause])
       })
+  )
+
+  it.effect("tags the request span with the action name only", () =>
+    Effect.gen(function* () {
+      vi.stubEnv("MEDIABINDER_URL", "https://rien.cloud/")
+      const spans: Array<Tracer.NativeSpan> = []
+      const tracer = Tracer.make({
+        span: (options) => {
+          const span = new Tracer.NativeSpan(options)
+          spans.push(span)
+          return span
+        },
+      })
+      const request = new Request("http://container:3100/api/library", {
+        method: "POST",
+        headers: {
+          origin: "https://rien.cloud",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ action: "tags", data: { name: "secret tag" } }),
+      })
+      yield* libraryPost(request, {
+        session: async () => ({ user: { id: "owner" } }),
+        mutate: async () => [],
+        report: () => undefined,
+      }).pipe(
+        Effect.withSpan("Library.post"),
+        Effect.withSpan("POST /api/library"),
+        Effect.withTracer(tracer)
+      )
+      for (const name of ["POST /api/library", "Library.post"]) {
+        const span = spans.find((candidate) => candidate.name === name)
+        expect(span?.attributes.get("mediabinder.action")).toBe("tags")
+        expect(JSON.stringify([...span!.attributes])).not.toContain("secret")
+      }
+    })
   )
 })
