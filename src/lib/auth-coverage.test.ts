@@ -22,6 +22,10 @@ const publicServerFunctions: Record<string, string> = {
     "Tells the login page whether to redirect; returns only a signed-in flag",
   "_app.tsx:sessionCheck":
     "The shell's redirect check; returns the visitor's own view cookies and a signed-in flag, never library data",
+  "development-auth.ts:enableDevelopmentLogin":
+    "Skip login for development: sets the bypass cookie, and only when the stack is in dev mode and NODE_ENV is not production",
+  "development-auth.ts:clearDevelopmentLogin":
+    "Signing out of the bypass: clears the visitor's own cookie and returns whether it was set",
   "__root.tsx:browserTelemetryConfig":
     "Tells the page whether to send browser telemetry; returns only the trace sample ratio, or null",
 }

@@ -1,6 +1,6 @@
 import { Effect, Option, Tracer } from "effect"
 import { Headers, HttpTraceContext } from "effect/http"
-import { auth } from "@/lib/auth.server"
+import { getSession } from "@/lib/auth.server"
 import { keepBrowserTrace } from "@/lib/browser-trace-sampling"
 import { appUrl } from "@/lib/config"
 import { sampleRatio } from "@/telemetry"
@@ -38,7 +38,7 @@ export const incomingTraceParent = Effect.fnUntraced(function* (
   )
   if (Option.isNone(parent)) return undefined
   const session = yield* Effect.tryPromise(() =>
-    auth.api.getSession({ headers: request.headers })
+    getSession(request.headers)
   ).pipe(Effect.option)
   if (Option.isNone(session) || !session.value) return undefined
   const ratio = yield* sampleRatio

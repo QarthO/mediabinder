@@ -1,14 +1,63 @@
+# Development overlay, used by `pnpm dev:docker` (scripts/dev-docker.mjs), which
+# supplies MEDIABINDER_DEV_ENV_FILE, MEDIABINDER_DEV_PORT and a per-worktree
+# project name. Production runs compose.yaml alone and never reads this file.
+x-dev-environment: &dev-environment
+  NODE_ENV: development
+  MEDIABINDER_ENVIRONMENT: dev
+  # The developer owns the workspace, so a real Google account needs this to
+  # sign in on a dev stack too.
+  ALLOW_SIGNUPS: "true"
+  MEDIABINDER_URL: http://localhost:${MEDIABINDER_DEV_PORT:?Run pnpm dev:docker}
+  BETTER_AUTH_URL: http://localhost:${MEDIABINDER_DEV_PORT:?Run pnpm dev:docker}
+  DB_HOST: mysql
+  DB_PORT: "3306"
+  DB_NAME: mediabinder
+  DB_USER: mediabinder
+  DB_PASS: ${MYSQL_PASSWORD:?Run pnpm dev:setup}
+x-dev-source: &dev-source
+  - ./src:/app/src
+  - ./public:/app/public
+  - ./scripts:/app/scripts
+  - ./migrations:/app/migrations
+  - ./vite.config.ts:/app/vite.config.ts
+x-dev-env-file: &dev-env-file !override
+  - ${MEDIABINDER_DEV_ENV_FILE:?Run pnpm dev:docker}
+
 services:
   web:
     build:
       target: development
+    env_file: *dev-env-file
     environment:
-      NODE_ENV: development
+      <<: *dev-environment
       # Set VITE_REACT_SCAN=true in the shell to profile renders.
       VITE_REACT_SCAN: ${VITE_REACT_SCAN:-}
-    volumes:
-      - ./src:/app/src
-      - ./public:/app/public
-      - ./scripts:/app/scripts
-      - ./migrations:/app/migrations
-      - ./vite.config.ts:/app/vite.config.ts
+    ports: !override
+      - "127.0.0.1:${MEDIABINDER_DEV_PORT:?Run pnpm dev:docker}:3100"
+    volumes: *dev-source
+    # Healthy once the migrations and the dev setup ran and Vite is serving.
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3100/api/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
+      interval: 3s
+      timeout: 5s
+      retries: 100
+    restart: "no"
+  worker:
+    build:
+      target: development
+    env_file: *dev-env-file
+    environment: *dev-environment
+    volumes: *dev-source
+    command: !override ["pnpm", "exec", "tsx", "scripts/drive-worker.ts"]
+    depends_on:
+      web:
+        condition: service_healthy
+    restart: "no"
+  mysql:
+    restart: "no"

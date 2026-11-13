@@ -4,11 +4,17 @@ import { useState } from "react"
 import { authClient } from "@/lib/auth-client"
 import { Brand } from "@/components/brand"
 import { Effect } from "effect"
+import { enableDevelopmentLogin } from "@/lib/development-auth"
 const loginStatus = createServerFn({ method: "GET" }).handler(async () => {
   const { getRequestHeaders } = await import("@tanstack/react-start/server")
-  const { auth } = await import("@/lib/auth.server")
-  const session = await auth.api.getSession({ headers: getRequestHeaders() })
-  return { signedIn: !!session, configured: !!process.env.GOOGLE_CLIENT_ID }
+  const { getSession } = await import("@/lib/auth.server")
+  const { developmentBypassEnabled } = await import("@/lib/config")
+  const session = await getSession(getRequestHeaders())
+  return {
+    signedIn: !!session,
+    configured: !!process.env.GOOGLE_CLIENT_ID,
+    developmentLogin: developmentBypassEnabled(),
+  }
 })
 export const Route = createFileRoute("/")({
   beforeLoad: async () => {
@@ -20,7 +26,7 @@ export const Route = createFileRoute("/")({
   component: Login,
 })
 function Login() {
-  const { configured } = Route.useRouteContext(),
+  const { configured, developmentLogin } = Route.useRouteContext(),
     [busy, setBusy] = useState(false),
     [error, setError] = useState("")
   return (
@@ -65,6 +71,27 @@ function Login() {
         >
           <img src="/google-signin-dark.png" alt="" width="180" height="40" />
         </button>
+        {developmentLogin && (
+          <button
+            type="button"
+            className="dev-login-button"
+            disabled={busy}
+            onClick={async () => {
+              setBusy(true)
+              setError("")
+              try {
+                const result = await enableDevelopmentLogin()
+                if (!result.enabled) throw new Error(result.reason)
+                window.location.assign("/media")
+              } catch {
+                setError("Could not skip login. Try again.")
+                setBusy(false)
+              }
+            }}
+          >
+            Skip login for development
+          </button>
+        )}
         {busy && (
           <span className="sr-only" role="status">
             Opening Google…

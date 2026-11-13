@@ -17,8 +17,12 @@
     "verify": "node scripts/verify.mjs",
     "test": "vp test run",
     "db:migrate": "tsx scripts/migrate.ts",
-    "dev:docker": "docker compose -f compose.yaml -f compose.dev.yaml up -d --build",
-    "dev:docker:down": "docker compose -f compose.yaml -f compose.dev.yaml down"
+    "dev:setup": "node scripts/dev-docker.mjs setup",
+    "dev:docker": "node scripts/dev-docker.mjs start",
+    "dev:docker:down": "node scripts/dev-docker.mjs down",
+    "dev:docker:destroy": "node scripts/dev-docker.mjs destroy",
+    "dev:docker:url": "node scripts/dev-docker.mjs url",
+    "dev:docker:logs": "node scripts/dev-docker.mjs logs"
   },
   "dependencies": {
     "@effect/sql-mysql2": "4.1.4",
