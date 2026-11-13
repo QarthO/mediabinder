@@ -149,15 +149,23 @@ export function databaseClientConfig(
 
 /**
  * Connections: the legacy mysql2 `pool` (Better Auth and modules not yet
- * converted) allows 8. This client allows 4, which covers health checks and
- * the converted queries; its lock sessions each hold one. Each pool opens
- * connections only on demand, so the ceiling for a web process is 12 of
+ * converted) allows 8. This client has two pools of its own. Queries and
+ * transactions share 4. Lock sessions (`withNamedLock`) come from a separate
+ * pool of 8, because a session holds its connection for as long as its lock,
+ * which for a Drive sync is the whole run, and a sync waits on queries (its
+ * progress writes) before it can finish. Locks sharing the query pool would
+ * deadlock once as many syncs ran as it has connections. Each pool opens
+ * connections only on demand, so the ceiling for a web process is 20 of
  * MySQL's default 151, and the Drive worker process adds the same again.
  */
-const POOL_SIZE = 4
+const QUERY_POOL_SIZE = 4
+const LOCK_POOL_SIZE = 8
 
 const globalDatabase = globalThis as typeof globalThis & {
-  mediabinderDatabaseClient?: Effect.Effect<SqlClient.SqlClient, SqlError>
+  mediabinderDatabaseClients?: Record<
+    string,
+    Effect.Effect<SqlClient.SqlClient, SqlError>
+  >
 }
 
 // Connects on the first query, so effects that never touch MySQL (thumbnails,
@@ -179,35 +187,51 @@ const makeDatabaseClient = (maxConnections: number) =>
     return ScopedCache.get(clients, "mysql")
   })
 
-/** The process's MySQL client, connecting on first use. */
+/** The process's MySQL clients, connecting on first use. */
 export class DatabaseClient extends Context.Service<
   DatabaseClient,
-  { readonly client: Effect.Effect<SqlClient.SqlClient, SqlError> }
+  {
+    readonly client: Effect.Effect<SqlClient.SqlClient, SqlError>
+    /** For lock sessions only; see the pool sizes above. */
+    readonly lockClient: Effect.Effect<SqlClient.SqlClient, SqlError>
+  }
 >()("mediabinder/DatabaseClient") {}
 
 export const DatabaseClientLive = Layer.effect(
   DatabaseClient,
   Effect.gen(function* () {
     if (!import.meta.hot)
-      return DatabaseClient.of({ client: yield* makeDatabaseClient(POOL_SIZE) })
+      return DatabaseClient.of({
+        client: yield* makeDatabaseClient(QUERY_POOL_SIZE),
+        lockClient: yield* makeDatabaseClient(LOCK_POOL_SIZE),
+      })
     // Vite program reloads rebuild the app runtime without disposing the old
-    // one, so development keeps one pool for the process, like `pool`.
-    globalDatabase.mediabinderDatabaseClient ??= yield* makeDatabaseClient(
-      POOL_SIZE
-    ).pipe(Scope.provide(Scope.makeUnsafe()))
+    // one, so development keeps one pool of each for the process, like `pool`.
+    const clients = (globalDatabase.mediabinderDatabaseClients ??= {
+      client: yield* makeDatabaseClient(QUERY_POOL_SIZE).pipe(
+        Scope.provide(Scope.makeUnsafe())
+      ),
+      lockClient: yield* makeDatabaseClient(LOCK_POOL_SIZE).pipe(
+        Scope.provide(Scope.makeUnsafe())
+      ),
+    })
     return DatabaseClient.of({
-      client: globalDatabase.mediabinderDatabaseClient,
+      client: clients.client,
+      lockClient: clients.lockClient,
     })
   })
 ).pipe(Layer.provide(Reactivity.layer))
 
 export const DatabaseLive = Layer.effect(
   Database,
-  Effect.map(DatabaseClient, ({ client }) => makeDatabase(client))
+  Effect.map(DatabaseClient, ({ client, lockClient }) =>
+    makeDatabase(client, lockClient)
+  )
 ).pipe(Layer.provideMerge(DatabaseClientLive))
 
 export function makeDatabase(
-  client: Effect.Effect<SqlClient.SqlClient, SqlError>
+  client: Effect.Effect<SqlClient.SqlClient, SqlError>,
+  lockClient: Effect.Effect<SqlClient.SqlClient, SqlError> = client
 ) {
   const withClient = <TResult, TError, TRequirements>(
     operation: string,
@@ -324,7 +348,7 @@ export function makeDatabase(
       ).pipe(Effect.withSpan(`db.${operation}`)),
     withNamedLock: (operation, name, { timeoutSeconds }, use) =>
       Effect.gen(function* () {
-        const sql = yield* client.pipe(
+        const sql = yield* lockClient.pipe(
           Effect.mapError((cause) => DatabaseError.make({ operation, cause }))
         )
         const connection = yield* sql.reserve.pipe(

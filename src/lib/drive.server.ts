@@ -9,7 +9,8 @@ import { jsonRequest } from "@/effect/http"
 import { randomUUID } from "node:crypto"
 import { auth } from "./auth.server"
 import { serviceAccountToken, sharedFolderMode } from "./drive-access.server"
-import type { PoolConnection } from "mysql2/promise"
+import type { LockedSession } from "@/effect/database"
+import type { SessionConnection } from "./database.server"
 import type { SyncRun } from "./types"
 import {
   claimSyncRun,
@@ -186,7 +187,7 @@ export async function startDriveSync(userId: string, headers: Headers) {
 }
 
 async function reconcileDrive(
-  connection: PoolConnection,
+  connection: SessionConnection<LockedSession>,
   userId: string,
   token: string,
   folderIds: string[],

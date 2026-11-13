@@ -1,6 +1,7 @@
 import { ZodError } from "zod"
 import {
   AuthenticationError,
+  LockBusyError,
   NotFoundError,
   ValidationError,
 } from "@/effect/errors"
@@ -9,9 +10,12 @@ import {
 // so they are answered but not reported. error-policy.ts shares this list.
 export const EXPECTED_ERROR_TAGS: ReadonlySet<string> = new Set([
   "AuthenticationError",
+  "LockBusyError",
   "NotFoundError",
   "ValidationError",
 ])
+
+export const SYNC_BUSY_MESSAGE = "A sync is already running. Try again shortly."
 
 /**
  * Only known user-facing messages leave the server; others become the
@@ -33,6 +37,7 @@ export function isHandledError(error: unknown) {
     error instanceof Response ||
     error instanceof ZodError ||
     error instanceof AuthenticationError ||
+    error instanceof LockBusyError ||
     error instanceof NotFoundError ||
     error instanceof ValidationError
   )
@@ -61,6 +66,10 @@ export function errorResponse(
     return new Response(error.message, { status: 401 })
   if (error instanceof NotFoundError)
     return new Response(error.message, { status: 404 })
+  // A user's sync lock is the only busy lock with a message of its own; a
+  // busy catalog lock gets the caller's fallback, as it always has.
+  if (error instanceof LockBusyError && error.lock.startsWith("drive:"))
+    return Response.json({ error: SYNC_BUSY_MESSAGE }, { status: 400 })
   if (error instanceof ValidationError)
     return Response.json({ error: error.message }, { status: 400 })
   return Response.json(
