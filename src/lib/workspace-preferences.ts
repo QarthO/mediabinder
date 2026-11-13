@@ -3,8 +3,8 @@ import type { SortingState } from "@tanstack/react-table"
 export const preferencesCookieName = "mediabinder_preferences"
 export type WorkspacePreferences = {
   censored: boolean
-  // 0 is the lightest blur, 100 the strongest (the original blur).
-  censorStrength: number
+  // Blur strength, 1 (lightest) to `censorSteps` (the original blur).
+  censorStep: number
   sorting: SortingState
 }
 export function workspacePreferencesCookie(
@@ -15,9 +15,11 @@ export function workspacePreferencesCookie(
   return `${preferencesCookieName}=${value}; Path=/; Max-Age=31536000; SameSite=Lax${secure ? "; Secure" : ""}`
 }
 
-export const maxCensorStrength = 100
-// The smallest blur is still visible: 4% of the strongest.
-const minBlurScale = 0.04
-export function censorBlurScale(strength: number): number {
-  return minBlurScale + (1 - minBlurScale) * (strength / maxCensorStrength)
+export const censorSteps = 7
+export const defaultCensorStep = 2
+// Step 1 is a tenth of the original blur and the last step is all of it, with
+// the steps evenly spaced between.
+const minBlurScale = 0.1
+export function censorBlurScale(step: number): number {
+  return minBlurScale + ((1 - minBlurScale) * (step - 1)) / (censorSteps - 1)
 }

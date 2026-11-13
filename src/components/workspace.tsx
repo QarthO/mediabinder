@@ -122,13 +122,13 @@ export function Workspace() {
       className="censor-root"
       style={
         {
-          "--censor-strength": censorBlurScale(preferences.censorStrength),
+          "--censor-strength": censorBlurScale(preferences.censorStep),
         } as CSSProperties
       }
     >
       <MediaCensorContext value={preferences.censored}>
         <MediaCensorScaleContext
-          value={censorBlurScale(preferences.censorStrength)}
+          value={censorBlurScale(preferences.censorStep)}
         >
           <WorkspaceContent
             mediaCensored={preferences.censored}
@@ -138,15 +138,15 @@ export function Workspace() {
                 censored: !preferences.censored,
               })
             }
-            censorStrength={preferences.censorStrength}
-            onPreviewCensorStrength={(strength) =>
+            censorStep={preferences.censorStep}
+            onPreviewCensorStep={(strength) =>
               censorRoot.current?.style.setProperty(
                 "--censor-strength",
                 String(censorBlurScale(strength))
               )
             }
-            onCommitCensorStrength={(censorStrength) =>
-              savePreferences({ ...preferences, censorStrength })
+            onCommitCensorStep={(censorStep) =>
+              savePreferences({ ...preferences, censorStep })
             }
             sorting={preferences.sorting}
             setSorting={setSorting}
@@ -160,17 +160,17 @@ export function Workspace() {
 function WorkspaceContent({
   mediaCensored,
   onToggleCensor,
-  censorStrength,
-  onPreviewCensorStrength,
-  onCommitCensorStrength,
+  censorStep,
+  onPreviewCensorStep,
+  onCommitCensorStep,
   sorting,
   setSorting,
 }: {
   mediaCensored: boolean
   onToggleCensor: () => void
-  censorStrength: number
-  onPreviewCensorStrength: (strength: number) => void
-  onCommitCensorStrength: (strength: number) => void
+  censorStep: number
+  onPreviewCensorStep: (strength: number) => void
+  onCommitCensorStep: (strength: number) => void
   sorting: SortingState
   setSorting: OnChangeFn<SortingState>
 }) {
@@ -628,9 +628,9 @@ function WorkspaceContent({
                 setSorting={setSorting}
                 mediaCensored={mediaCensored}
                 onToggleCensor={onToggleCensor}
-                censorStrength={censorStrength}
-                onPreviewCensorStrength={onPreviewCensorStrength}
-                onCommitCensorStrength={onCommitCensorStrength}
+                censorStep={censorStep}
+                onPreviewCensorStep={onPreviewCensorStep}
+                onCommitCensorStep={onCommitCensorStep}
                 view={view}
                 onView={changeView}
               />

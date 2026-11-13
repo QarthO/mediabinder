@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react"
 import { Popover } from "radix-ui"
 import { ChevronDown, Eye, EyeOff } from "lucide-react"
-import { maxCensorStrength } from "@/lib/workspace-preferences"
+import { censorSteps } from "@/lib/workspace-preferences"
 import { Button } from "./ui/button"
 
 // The censor toggle with a caret that opens the blur-strength slider. Dragging
@@ -21,7 +21,7 @@ export function CensorControl({
   onCommit: (strength: number) => void
 }) {
   return (
-    <div className="censor-control">
+    <div className="censor-control" data-censored={censored || undefined}>
       <Button
         className="thumbnail-blur-toggle"
         variant="outline"
@@ -52,7 +52,6 @@ export function CensorControl({
             collisionPadding={12}
           >
             <StrengthSlider
-              censored={censored}
               strength={strength}
               onPreview={onPreview}
               onCommit={onCommit}
@@ -65,12 +64,10 @@ export function CensorControl({
 }
 
 function StrengthSlider({
-  censored,
   strength,
   onPreview,
   onCommit,
 }: {
-  censored: boolean
   strength: number
   onPreview: (strength: number) => void
   onCommit: (strength: number) => void
@@ -89,27 +86,16 @@ function StrengthSlider({
     return () => element?.removeEventListener("change", onChange)
   }, [])
   return (
-    <label className="censor-slider">
-      <span>Blur strength</span>
-      <input
-        ref={input}
-        type="range"
-        min={0}
-        max={maxCensorStrength}
-        step={1}
-        defaultValue={strength}
-        aria-label="Blur strength"
-        onInput={(event) => onPreview(Number(event.currentTarget.value))}
-      />
-      <span className="censor-slider-ends">
-        <span>Light</span>
-        <span>Strong</span>
-      </span>
-      {!censored && (
-        <span className="tag-popover-hint">
-          Censoring is off. This applies when you turn it on.
-        </span>
-      )}
-    </label>
+    <input
+      ref={input}
+      className="censor-slider"
+      type="range"
+      min={1}
+      max={censorSteps}
+      step={1}
+      defaultValue={strength}
+      aria-label="Blur strength"
+      onInput={(event) => onPreview(Number(event.currentTarget.value))}
+    />
   )
 }

@@ -1,7 +1,8 @@
 import { Result } from "effect"
 import { z } from "zod"
 import {
-  maxCensorStrength,
+  censorSteps,
+  defaultCensorStep,
   preferencesCookieName,
   type WorkspacePreferences,
 } from "./workspace-preferences"
@@ -27,7 +28,7 @@ const sortingSchema = z
 // What a cookie may hold; each field is checked on its own below.
 const storedSchema = z.object({
   censored: z.unknown().optional(),
-  censorStrength: z.unknown().optional(),
+  censorStep: z.unknown().optional(),
   sorting: z.unknown().optional(),
 })
 
@@ -52,13 +53,10 @@ export function readWorkspacePreferences(
   const sorting = sortingSchema.safeParse(input.sorting)
   return {
     censored: input.censored === true,
-    censorStrength:
-      typeof input.censorStrength === "number" &&
-      Number.isFinite(input.censorStrength)
-        ? Math.round(
-            Math.min(maxCensorStrength, Math.max(0, input.censorStrength))
-          )
-        : maxCensorStrength,
+    censorStep:
+      typeof input.censorStep === "number" && Number.isFinite(input.censorStep)
+        ? Math.round(Math.min(censorSteps, Math.max(1, input.censorStep)))
+        : defaultCensorStep,
     sorting: sorting.success ? sorting.data : defaultSorting,
   }
 }

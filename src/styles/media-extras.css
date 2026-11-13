@@ -17,35 +17,28 @@
 .censor-control .thumbnail-blur-toggle {
   border-right-width: 0;
 }
+/* One button: the eye and the caret share the outer border, no divider. */
 .censor-control .censor-strength-trigger {
   width: 20px;
   padding: 0;
   flex-shrink: 0;
+  border-left-width: 0;
 }
 .censor-control .censor-strength-trigger svg {
   width: 14px;
   height: 14px;
 }
 .censor-popover {
-  width: 240px;
+  width: 200px;
 }
 .censor-slider {
-  display: grid;
-  gap: 8px;
-  font-size: 0.8125rem;
-}
-.censor-slider input {
+  display: block;
   width: 100%;
   accent-color: var(--primary);
   cursor: pointer;
 }
-.censor-slider-ends {
-  display: flex;
-  justify-content: space-between;
-  color: var(--muted-foreground);
-  font-size: 0.75rem;
-}
-.thumbnail-blur-toggle[aria-pressed="true"] {
+.thumbnail-blur-toggle[aria-pressed="true"],
+.censor-control[data-censored] .censor-strength-trigger {
   color: var(--primary);
   border-color: var(--primary);
   background: var(--accent);

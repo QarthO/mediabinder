@@ -26,9 +26,9 @@ export const LibraryFilters = memo(function LibraryFilters({
   setSorting,
   mediaCensored,
   onToggleCensor,
-  censorStrength,
-  onPreviewCensorStrength,
-  onCommitCensorStrength,
+  censorStep,
+  onPreviewCensorStep,
+  onCommitCensorStep,
   view,
   onView,
 }: {
@@ -44,9 +44,9 @@ export const LibraryFilters = memo(function LibraryFilters({
   setSorting: OnChangeFn<SortingState>
   mediaCensored: boolean
   onToggleCensor: () => void
-  censorStrength: number
-  onPreviewCensorStrength: (strength: number) => void
-  onCommitCensorStrength: (strength: number) => void
+  censorStep: number
+  onPreviewCensorStep: (strength: number) => void
+  onCommitCensorStep: (strength: number) => void
   view: "grid" | "list"
   onView: (value: "grid" | "list") => void
 }) {
@@ -111,10 +111,10 @@ export const LibraryFilters = memo(function LibraryFilters({
       />
       <CensorControl
         censored={mediaCensored}
-        strength={censorStrength}
+        strength={censorStep}
         onToggle={onToggleCensor}
-        onPreview={onPreviewCensorStrength}
-        onCommit={onCommitCensorStrength}
+        onPreview={onPreviewCensorStep}
+        onCommit={onCommitCensorStep}
       />
       <div className="view-switch">
         {(["grid", "list"] as const).map((v) => (

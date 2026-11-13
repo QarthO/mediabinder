@@ -7,7 +7,7 @@ import {
 
 const defaults = {
   censored: false,
-  censorStrength: 100,
+  censorStep: 2,
   sorting: [{ id: "uploaded_at", desc: true }],
 }
 const header = (value: unknown) =>
@@ -17,7 +17,7 @@ describe("workspace preferences cookie", () => {
   it("round-trips the censor flag and multi-column sorting", () => {
     const preferences = {
       censored: true,
-      censorStrength: 35,
+      censorStep: 5,
       sorting: [
         { id: "size", desc: true },
         { id: "display_name", desc: false },
@@ -70,25 +70,25 @@ describe("workspace preferences cookie", () => {
     })
   })
 
-  it("reads a cookie from before the blur strength as full strength", () => {
+  it("reads a cookie from before the blur strength as the default step", () => {
     expect(
       readWorkspacePreferences(
         header({ censored: true, sorting: [{ id: "size", desc: false }] })
       )
     ).toEqual({
       censored: true,
-      censorStrength: 100,
+      censorStep: 2,
       sorting: [{ id: "size", desc: false }],
     })
   })
 
-  it("clamps the blur strength and falls back to full strength on garbage", () => {
-    const strength = (censorStrength: unknown) =>
-      readWorkspacePreferences(header({ censorStrength })).censorStrength
-    expect(strength(-20)).toBe(0)
-    expect(strength(250)).toBe(100)
-    expect(strength(41.6)).toBe(42)
-    for (const garbage of ["50", null, true, [], {}, Number.NaN])
-      expect(strength(garbage)).toBe(100)
+  it("clamps the blur step and falls back to the default step on garbage", () => {
+    const step = (censorStep: unknown) =>
+      readWorkspacePreferences(header({ censorStep })).censorStep
+    expect(step(-3)).toBe(1)
+    expect(step(40)).toBe(7)
+    expect(step(3.6)).toBe(4)
+    for (const garbage of ["5", null, true, [], {}, Number.NaN])
+      expect(step(garbage)).toBe(2)
   })
 })
