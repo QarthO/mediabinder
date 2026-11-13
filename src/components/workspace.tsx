@@ -20,6 +20,8 @@ import {
   lazy,
   Suspense,
   useCallback,
+  useEffect,
+  useEffectEvent,
   useMemo,
   useState,
   useRef,
@@ -38,6 +40,7 @@ import {
 import {
   DataTable,
   MediaSelectionActions,
+  selectMedia,
   MediaStage,
   useMediaTable,
 } from "./data-table"
@@ -93,6 +96,7 @@ import {
   workspacePreferencesCookie,
   type WorkspacePreferences,
 } from "@/lib/workspace-preferences"
+import type { SelectionModifiers } from "@/lib/range-selection"
 import type { Media, MediaSet } from "@/lib/types"
 const navItems = [
   { id: "sets", label: "Sets", icon: FolderOpen },
@@ -339,9 +343,40 @@ function WorkspaceContent({
   )
   const rows = table.getRowModel().rows
   const items = useMemo(() => rows.map((row) => row.original), [rows])
-  const toggleSelection = useCallback(
-    (id: string) => table.getRow(id).toggleSelected(),
-    [table]
+  // Escape clears the selection unless something else claimed it: a Radix
+  // layer (it calls preventDefault), an open dialog, menu or popover, the
+  // command menu, the detail viewer, or a text field.
+  const clearSelectionOnEscape = useEffectEvent((event: KeyboardEvent) => {
+    if (
+      event.key !== "Escape" ||
+      event.defaultPrevented ||
+      command ||
+      selected ||
+      (event.target as HTMLElement | null)?.closest?.(
+        'input, textarea, select, [contenteditable="true"]'
+      ) ||
+      document.querySelector(
+        '[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"], [data-radix-popper-content-wrapper]'
+      ) ||
+      !Object.keys(table.atoms.rowSelection.get()).length
+    )
+      return
+    table.resetRowSelection()
+  })
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => clearSelectionOnEscape(event)
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [])
+  // Cards memoise on this, so it must keep one identity across renders.
+  const latestTable = useRef(table)
+  useEffect(() => {
+    latestTable.current = table
+  })
+  const selectItem = useCallback(
+    (id: string, modifiers: SelectionModifiers) =>
+      selectMedia(latestTable.current, id, modifiers),
+    []
   )
   const tagCounts = useMemo(() => {
     const counts: Record<string, number> = {}
@@ -761,7 +796,7 @@ function WorkspaceContent({
                         mobile={mobile}
                         selectionMode={selectionMode}
                         onOpen={openMedia}
-                        onToggleSelection={toggleSelection}
+                        onSelect={selectItem}
                         allTags={allTags}
                         colors={data.tag_colors}
                       />
