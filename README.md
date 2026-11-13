@@ -17,7 +17,7 @@ MySQL data persists in the `mysql-data` volume. `pnpm dev:docker:down` stops dev
 
 ## Coolify: Dockerfile with separate MySQL
 
-Choose the **Dockerfile** build pack, base directory `/`, Dockerfile `/Dockerfile`, and **Ports Exposes `3100`**. Leave the build target at its default (the final `production` stage), and leave the start command and pre/post-deploy commands empty. Set the application's domain to your public HTTPS URL. If configuring Coolify's health check, use HTTP `GET /api/health` on port `3100`. The image also supplies its own Docker health check.
+Choose the **Dockerfile** build pack, base directory `/`, Dockerfile `/Dockerfile`, and **Ports Exposes `3100`**. Leave the build target at its default (the final `production` stage), and leave the start command and pre/post-deploy commands empty. Set the application's domain to your public HTTPS URL. If configuring Coolify's health check, use HTTP `GET /api/health` on port `3100`. The image also supplies its own Docker health check. Coolify passes `SOURCE_COMMIT` as a build argument; the Dockerfile uses it so `/api/health` reports the deployed `commit`. Outside Coolify, pass `--build-arg SOURCE_COMMIT=$(git rev-parse HEAD)`.
 
 Create a MySQL 8 service/database with a persistent volume, and make it reachable from the app's Docker network. `DB_HOST` is its internal hostname, not `localhost` and not a `mysql://` URL. The database must exist and its user needs permissions to create/alter tables, indexes and constraints as well as read/write data; the app creates its schema automatically.
 
@@ -170,8 +170,10 @@ Run `scripts/test-shared-catalog.ts` only against a disposable test database. It
 
 ### Checking UI responsiveness
 
-Development starts React Scan automatically (local package, no CDN). Use its
-on-page toolbar or `window.__mediaBinderRenderAudit.reset()` and
+React Scan loads only when the dev server starts with `VITE_REACT_SCAN=true`
+(local package, no CDN); without it the toolbar never instruments React. Use
+`VITE_REACT_SCAN=true pnpm dev`, or `VITE_REACT_SCAN=true pnpm dev:docker`
+(`compose.dev.yaml` passes it to the container). Use the on-page toolbar or `window.__mediaBinderRenderAudit.reset()` and
 `window.__mediaBinderRenderAudit.snapshot()` around a single interaction in T3
 Preview. The UI commit checklist is in `AGENTS.md`.
 
