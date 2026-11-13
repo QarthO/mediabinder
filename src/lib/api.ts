@@ -1,4 +1,4 @@
-import { queryOptions } from "@tanstack/react-query"
+import { environmentManager, queryOptions } from "@tanstack/react-query"
 import { createServerFn } from "@tanstack/react-start"
 import type { Library } from "./types"
 
@@ -27,7 +27,7 @@ const loadLibrary = createServerFn({ method: "GET" }).handler(async () => {
 export const libraryQuery = queryOptions({
   queryKey: ["library"],
   queryFn: ({ signal }): Promise<Library> =>
-    typeof window === "undefined"
+    environmentManager.isServer()
       ? loadLibrary({ signal })
       : import("./api-request").then(({ requestLibrary }) =>
           requestLibrary<Library>({ signal })

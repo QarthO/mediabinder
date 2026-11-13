@@ -1,34 +1,29 @@
 import { createRouter } from "@tanstack/react-router"
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { libraryQuery } from "./lib/api"
+import { setupRouterSsrQueryIntegration } from "@tanstack/react-router-ssr-query"
+import {
+  AppNotFoundPage,
+  AppRouterErrorBoundary,
+} from "./components/app-error-page"
+import { createAppQueryClient } from "./lib/query-client"
 import { routeTree } from "./routeTree.gen"
 export function getRouter() {
-  const queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: false } },
-  })
-  return createRouter({
+  const queryClient = createAppQueryClient()
+  const router = createRouter({
     routeTree,
     context: { queryClient },
+    scrollRestoration: true,
     defaultPreload: "intent",
     defaultPreloadStaleTime: 0,
-    scrollRestoration: true,
-    dehydrate: () => {
-      const state = queryClient.getQueryState(libraryQuery.queryKey)
-      return {
-        library: state?.data,
-        libraryUpdatedAt: state?.dataUpdatedAt,
-      }
-    },
-    hydrate: (dehydrated) => {
-      if (dehydrated.library)
-        queryClient.setQueryData(libraryQuery.queryKey, dehydrated.library, {
-          updatedAt: dehydrated.libraryUpdatedAt,
-        })
-    },
-    Wrap: ({ children }) => (
-      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-    ),
+    defaultStructuralSharing: true,
+    defaultNotFoundComponent: AppNotFoundPage,
+    // AppRouterErrorBoundary is the single catch outside route matches.
+    disableGlobalCatchBoundary: true,
+    InnerWrap: AppRouterErrorBoundary,
   })
+  // Provides the QueryClientProvider and carries every query the server
+  // fetched, with its dataUpdatedAt, to the browser.
+  setupRouterSsrQueryIntegration({ queryClient, router })
+  return router
 }
 declare module "@tanstack/react-router" {
   interface Register {
