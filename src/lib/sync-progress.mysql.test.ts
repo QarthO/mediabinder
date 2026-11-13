@@ -4,14 +4,16 @@ import { expect, test } from "vite-plus/test"
 
 import { describeMysql, useTestDatabase } from "@/test/database"
 import {
+  execute,
   insertFolder,
   newUser,
+  rows,
   stubAccessToken,
   stubGoogle,
+  syncDrive,
 } from "@/test/fixtures"
-import { pool } from "./database.server"
 import { runTracedAppEffect } from "@/effect/runtime.server"
-import { startSync, sync, syncDrive } from "./drive.server"
+import { startSync, sync } from "./drive.server"
 import { status } from "./sync-progress.server"
 
 const startDriveSync = (userId: string, headers: Headers) =>
@@ -82,7 +84,7 @@ describeMysql("sync progress", () => {
       folders_scanned: 5,
       files_saved: 500,
     })
-    const [[counts]] = await pool.query<any[]>(
+    const [counts] = await rows<any>(
       `SELECT COUNT(*) AS media,SUM(m.available) AS available,
       (SELECT COUNT(*) FROM media_source s WHERE s.user_id=?) AS sources,
       (SELECT COUNT(*) FROM media_location l JOIN media x ON x.id=l.media_id WHERE x.user_id=?) AS locations
@@ -97,7 +99,7 @@ describeMysql("sync progress", () => {
     ]).toEqual([500, 500, 500, 500])
 
     // A "running" row whose process released the Drive lock was interrupted.
-    await pool.execute(
+    await execute(
       "UPDATE drive_sync_run SET status='running',phase='saving' WHERE user_id=?",
       [user.id]
     )
@@ -125,22 +127,24 @@ describeMysql("sync progress", () => {
     const lockName = `drive:${user.id}`
     // While it scans, the lock is held and the run is running.
     for (let waited = 0; ; waited += 25) {
-      const [[lock]] = await pool.query<any[]>(
-        "SELECT IS_FREE_LOCK(?) AS free",
-        [lockName]
-      )
+      const [lock] = await rows<any>("SELECT IS_FREE_LOCK(?) AS free", [
+        lockName,
+      ])
       if (!Number(lock.free)) break
       expect(waited).toBeLessThan(10_000)
       await sleep(25)
     }
-    expect((await syncStatus(user.id))?.status).toBe("running")
+    // The run row is written just after the lock is taken.
+    for (let waited = 0; ; waited += 25) {
+      if ((await syncStatus(user.id))?.status === "running") break
+      expect(waited).toBeLessThan(10_000)
+      await sleep(25)
+    }
 
     stop.abort()
     await expect(stopped).rejects.toMatchObject({ name: "AbortError" })
     // The lock is released by the interrupt, so the run no longer counts as live.
-    const [[lock]] = await pool.query<any[]>("SELECT IS_FREE_LOCK(?) AS free", [
-      lockName,
-    ])
+    const [lock] = await rows<any>("SELECT IS_FREE_LOCK(?) AS free", [lockName])
     expect(Number(lock.free)).toBe(1)
     const interrupted = await syncStatus(user.id)
     expect(interrupted).toMatchObject({ status: "failed" })
@@ -151,7 +155,7 @@ describeMysql("sync progress", () => {
   })
 
   test("concurrent syncs finish even when they hold every pool connection", async () => {
-    // The main pool has eight connections, and each running sync holds one.
+    // The lock pool has eight connections, and each running sync holds one.
     const users = Array.from({ length: 10 }, () => newUser())
     google(async (url) => {
       await sleep(300)

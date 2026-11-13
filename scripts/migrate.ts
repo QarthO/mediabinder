@@ -1,6 +1,5 @@
 import { disposeAppRuntime, runAppEffect } from "../src/effect/runtime.server"
 import { migrate } from "../src/effect/migrations"
-import { pool } from "../src/lib/database.server"
 
 // Runs on the app runtime, then disposes it so telemetry flushes before exit.
 try {
@@ -10,6 +9,5 @@ try {
   process.exitCode = 1
 } finally {
   await disposeAppRuntime()
-  await pool.end()
 }
 process.exit()

@@ -61,9 +61,10 @@ export const resetDatabase = Effect.gen(function* () {
 })
 
 /**
- * For suites that call the server modules directly (they use their own
- * connection pool, not an Effect layer): migrates the worker's database once,
- * empties it before every test, and closes the pool afterwards. Call it
+ * For suites that call the server modules directly (they run on the app
+ * runtime's Database service, not an Effect layer): migrates the worker's
+ * database once, empties it before every test, and closes the migration client
+ * afterwards. Call it
  * inside `describeMysql`.
  */
 export function useTestDatabase() {
@@ -72,7 +73,5 @@ export function useTestDatabase() {
   beforeEach(() => runtime.runPromise(resetDatabase))
   afterAll(async () => {
     await runtime.dispose()
-    const { pool } = await import("@/lib/database.server")
-    await pool.end()
   })
 }

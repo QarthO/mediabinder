@@ -11,13 +11,11 @@ import {
   type DriveApiError,
   type DriveReconnectError,
 } from "@/effect/errors"
-import { runTracedAppEffect } from "@/effect/runtime.server"
 import type { AppServices } from "@/effect/runtime.server"
 import { isExpectedAppError } from "@/observability/error-policy"
 import * as Telemetry from "@/telemetry"
 import { resolve, transaction, withUserLock } from "./catalog.server"
 import { sharedFolderMode } from "./drive-access.server"
-import { SYNC_BUSY_MESSAGE } from "./http-errors"
 import {
   claim,
   start as startSyncRun,
@@ -242,20 +240,6 @@ const joinRunningSync = Effect.fnUntraced(function* (
   if (current?.status === "running") return current
   return yield* busy
 })
-
-// Facade for the webhook worker and scripts, which want a Promise. A busy
-// lock keeps today's message: the worker records it as the job's error.
-export const syncDrive = (
-  userId: string,
-  options: Omit<SyncOptions, "onStarted"> = {}
-) =>
-  runTracedAppEffect(
-    sync(userId, options).pipe(
-      Effect.mapError((error) =>
-        isUserLockBusy(error) ? new Error(SYNC_BUSY_MESSAGE) : error
-      )
-    )
-  )
 
 const unopenable = () =>
   new DriveAccessError({

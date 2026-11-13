@@ -7,13 +7,14 @@ import {
   act,
   insertFolder,
   insertMedia,
+  execute,
   insertUser,
+  rows,
   stubAccessToken,
   stubGoogle,
+  syncDrive,
 } from "@/test/fixtures"
-import { pool, rows } from "./database.server"
 import { resetServiceAccountCache } from "./drive-access.server"
-import { syncDrive } from "./drive.server"
 import { revokeLegacy } from "./google-grants.server"
 
 const FOLDER = "application/vnd.google-apps.folder"
@@ -183,7 +184,7 @@ describeMysql("shared folders", () => {
     const user = await insertUser()
     const other = await insertUser()
     const id = `${user.id}-unlink`
-    await pool.execute(
+    await execute(
       "INSERT INTO drive_folder(user_id,folder_id,folder_name,share_permission_id) VALUES (?,?,?,?),(?,?,?,?)",
       [user.id, id, "Shared", "perm-9", other.id, id, "Shared", null]
     )
@@ -195,11 +196,11 @@ describeMysql("shared folders", () => {
 
     // Now the only syncing user: the share is deleted at Google.
     await insertFolder(user.id, id, "Shared")
-    await pool.execute(
+    await execute(
       "UPDATE drive_folder SET share_permission_id='perm-9' WHERE user_id=?",
       [user.id]
     )
-    await pool.execute("DELETE FROM drive_folder WHERE user_id=?", [other.id])
+    await execute("DELETE FROM drive_folder WHERE user_id=?", [other.id])
     const removed = await act(user, "remove-source", { folderId: id })
     expect(removed).toMatchObject({ access_removed: true })
     expect(
@@ -314,7 +315,7 @@ describeMysql("shared folders", () => {
     const user = await insertUser()
     const legacy = randomUUID(),
       current = randomUUID()
-    await pool.execute(
+    await execute(
       `INSERT INTO account(id,accountId,providerId,userId,accessToken,refreshToken,scope,createdAt,updatedAt)
       VALUES (?,?,'google',?,'old-access','old-refresh',?,NOW(3),NOW(3)),(?,?,'credential',?,NULL,NULL,?,NOW(3),NOW(3))`,
       [

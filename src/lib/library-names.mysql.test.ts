@@ -7,8 +7,8 @@ import {
   insertMedia,
   newUser,
   rejectedStatus,
+  rows,
 } from "@/test/fixtures"
-import { rows } from "./database.server"
 
 // Batch tag and set names: the lists users type into the bulk editor.
 describeMysql("batch names", () => {

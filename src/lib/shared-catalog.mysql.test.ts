@@ -9,14 +9,15 @@ import {
   library,
   newUser,
   rejectedStatus,
+  rows,
   stubAccessToken,
   stubGoogle,
+  syncDrive,
 } from "@/test/fixtures"
 import { Effect } from "effect"
 import { resolve, transaction } from "./catalog.server"
 import { runTracedAppEffect } from "@/effect/runtime.server"
-import { rows } from "./database.server"
-import { syncDrive, type DriveFile } from "./drive.server"
+import type { DriveFile } from "./drive.server"
 
 const hash = () => randomBytes(32).toString("hex")
 const file = (

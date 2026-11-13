@@ -1,25 +1,32 @@
+import { Result } from "effect"
 import { z } from "zod"
 import {
   preferencesCookieName,
   type WorkspacePreferences,
 } from "./workspace-preferences"
 
-const preferenceSchema = z.object({
-  censored: z.boolean().catch(false),
-  sorting: z
-    .array(
-      z.object({
-        id: z.enum(["display_name", "uploaded_at", "size"]),
-        desc: z.boolean(),
-      })
-    )
-    .min(1)
-    .max(3)
-    .refine(
-      (sorting) =>
-        new Set(sorting.map((column) => column.id)).size === sorting.length
-    )
-    .catch([{ id: "uploaded_at", desc: true }]),
+const defaultSorting: WorkspacePreferences["sorting"] = [
+  { id: "uploaded_at", desc: true },
+]
+
+const sortingSchema = z
+  .array(
+    z.object({
+      id: z.enum(["display_name", "uploaded_at", "size"]),
+      desc: z.boolean(),
+    })
+  )
+  .min(1)
+  .max(3)
+  .refine(
+    (sorting) =>
+      new Set(sorting.map((column) => column.id)).size === sorting.length
+  )
+
+// What a cookie may hold; each field is checked on its own below.
+const storedSchema = z.object({
+  censored: z.unknown().optional(),
+  sorting: z.unknown().optional(),
 })
 
 export function readWorkspacePreferences(
@@ -30,11 +37,19 @@ export function readWorkspacePreferences(
     .map((part) => part.trim())
     .find((part) => part.startsWith(`${preferencesCookieName}=`))
     ?.slice(preferencesCookieName.length + 1)
-  try {
-    return preferenceSchema.parse(
-      value ? JSON.parse(decodeURIComponent(value)) : {}
-    )
-  } catch {
-    return preferenceSchema.parse({})
+  const stored = value
+    ? Result.getOrElse(
+        Result.try(() => JSON.parse(decodeURIComponent(value))),
+        () => ({})
+      )
+    : {}
+  // Each field falls back to its default on its own when the cookie's value
+  // for it is missing or invalid.
+  const fields = storedSchema.safeParse(stored)
+  const input = fields.success ? fields.data : {}
+  const sorting = sortingSchema.safeParse(input.sorting)
+  return {
+    censored: input.censored === true,
+    sorting: sorting.success ? sorting.data : defaultSorting,
   }
 }

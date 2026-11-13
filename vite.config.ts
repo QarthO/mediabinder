@@ -89,9 +89,20 @@ export default defineConfig(({ command, mode }) => {
       overrides: [
         {
           // Server and Effect code recovers errors through Effect/Result so
-          // failures keep their types and interruption. Warn-only for now.
-          files: ["src/**/*.server.ts", "src/effect/**", "src/lib/**"],
+          // failures keep their types and interruption. src/lib is not yet
+          // clean in its shared files, so it only warns.
+          files: ["src/lib/**"],
           rules: { "mediabinder/effect-recovery": "warn" },
+        },
+        {
+          files: ["src/**/*.server.ts", "src/effect/**"],
+          rules: { "mediabinder/effect-recovery": "error" },
+        },
+        {
+          // Browser code: it reads a fetch body with the Streams API and
+          // must release the reader however reading ends.
+          files: ["src/effect/media-preview.ts"],
+          rules: { "mediabinder/effect-recovery": "off" },
         },
         {
           files: ["**/*.test.{ts,tsx}", "scripts/**"],

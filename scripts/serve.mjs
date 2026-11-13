@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url"
 import { serve } from "srvx/node"
 import { loggerMiddleware } from "srvx/log"
 import { staticMiddleware } from "srvx/static"
-import app from "../dist/server/server.js"
+import app, { shutdown } from "../dist/server/server.js"
 
 const HEALTH_PATH = "/api/health"
 const logRequest = loggerMiddleware()
@@ -42,11 +42,16 @@ for (const signal of ["SIGTERM", "SIGINT"]) {
     stopping = true
     const deadline = setTimeout(() => process.exit(1), 10_000)
     deadline.unref()
-    // Drain HTTP requests, then exit so idle database connections cannot keep the child alive.
-    void server.close().then(
-      () => process.exit(0),
-      () => process.exit(1)
-    )
+    // Drain HTTP requests, then flush the last telemetry batch and close the
+    // database connections, and exit so nothing can keep the child alive. The
+    // deadline above bounds all of it.
+    void server
+      .close()
+      .then(() => shutdown())
+      .then(
+        () => process.exit(0),
+        () => process.exit(1)
+      )
   })
 }
 

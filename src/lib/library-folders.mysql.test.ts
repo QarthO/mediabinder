@@ -5,14 +5,15 @@ import { describeMysql, useTestDatabase } from "@/test/database"
 import {
   act,
   count,
+  execute,
   insertFolder,
   library,
   insertMedia,
   insertSet,
   newUser,
   rejectedStatus,
+  rows,
 } from "@/test/fixtures"
-import { pool, rows } from "./database.server"
 
 // Tagging, sets and folder unlinking through the library's mutate entry point.
 describeMysql("library edits", () => {
@@ -104,13 +105,13 @@ describeMysql("library edits", () => {
       tags: ["kept"],
       folder: "a",
     })
-    await pool.execute(
+    await execute(
       "INSERT INTO media_source(user_id,folder_id,media_id) VALUES (?,'b',?)",
       [user.id, id]
     )
     const setId = await insertSet(user.id, [id])
     const postId = randomUUID()
-    await pool.execute(
+    await execute(
       "INSERT INTO post(id,user_id,media_id,catalog_id,platform,url,created_at) VALUES (?,?,?,?,'Anywhere','https://example.com/post',NOW(3))",
       [postId, user.id, id, id]
     )

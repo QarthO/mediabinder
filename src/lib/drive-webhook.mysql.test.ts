@@ -4,15 +4,18 @@ import { afterEach, expect, test, vi } from "vite-plus/test"
 import { describeMysql, useTestDatabase } from "@/test/database"
 import {
   count,
+  execute,
   insertFolder,
   newUser,
   routeHandler,
+  rows,
   stubAccessToken,
   stubGoogle,
 } from "@/test/fixtures"
-import { runAppEffect } from "@/effect/runtime.server"
+import { Effect } from "effect"
+import { Database } from "@/effect/database"
+import { runAppEffect, runTracedAppEffect } from "@/effect/runtime.server"
 import { Route } from "@/routes/api.drive.webhook"
-import { pool, rows } from "./database.server"
 import * as DriveWebhook from "./drive-webhook.server"
 
 // The module is Effects; these run them on the app runtime like the worker.
@@ -222,7 +225,7 @@ describeMysql("drive webhooks", () => {
 
   test("renewal replaces an expiring channel, and the old one stops being accepted", async () => {
     const { user, state, channel } = await watched()
-    await pool.execute(
+    await execute(
       "UPDATE drive_watch SET expires_at=DATE_ADD(NOW(3),INTERVAL 1 HOUR) WHERE user_id=?",
       [user.id]
     )
@@ -243,7 +246,7 @@ describeMysql("drive webhooks", () => {
 
   test("unlinking every folder stops the channel", async () => {
     const { user, state, channel } = await watched()
-    await pool.execute("DELETE FROM drive_folder WHERE user_id=?", [user.id])
+    await execute("DELETE FROM drive_folder WHERE user_id=?", [user.id])
 
     await maintainWatches(user.id)
 
@@ -258,19 +261,21 @@ describeMysql("drive webhooks", () => {
     await receiveDriveNotification(notification(channel))
     const pass = () => runAppEffect("test", DriveWebhook.pass)
 
-    const other = await pool.getConnection()
-    try {
-      await other.query("SELECT GET_LOCK(?, 0)", [
-        DriveWebhook.DRIVE_WORKER_LOCK,
-      ])
-      expect(await pass()).toBe("idle")
-      expect(await count("media WHERE user_id=?", [user.id])).toBe(0)
-    } finally {
-      await other.query("SELECT RELEASE_LOCK(?)", [
-        DriveWebhook.DRIVE_WORKER_LOCK,
-      ])
-      other.release()
-    }
+    // Another worker holds the lock, on a connection of its own.
+    await runTracedAppEffect(
+      Database.use((database) =>
+        database.withNamedLock(
+          "test.otherWorker",
+          DriveWebhook.DRIVE_WORKER_LOCK,
+          { timeoutSeconds: 0 },
+          () =>
+            Effect.promise(async () => {
+              expect(await pass()).toBe("idle")
+              expect(await count("media WHERE user_id=?", [user.id])).toBe(0)
+            })
+        )
+      )
+    )
 
     expect(await pass()).toBe("worked")
     expect(await count("media WHERE user_id=?", [user.id])).toBe(1)

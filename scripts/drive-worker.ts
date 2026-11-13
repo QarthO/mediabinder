@@ -5,7 +5,7 @@ import {
   reportAppError,
 } from "../src/effect/runtime.server"
 import { driveWebhookUrl } from "../src/lib/config"
-import { pool } from "../src/lib/database.server"
+import { closeAuthPool } from "../src/lib/auth.server"
 import { pass } from "../src/lib/drive-webhook.server"
 
 // The worker's telemetry is its own service. The app runtime is built on
@@ -64,7 +64,7 @@ function stop() {
   setTimeout(() => process.exit(1), 20_000).unref()
   void Effect.runPromise(Fiber.interrupt(worker))
     .then(() => disposeAppRuntime())
-    .then(() => pool.end())
+    .then(() => closeAuthPool())
     .then(
       () => process.exit(0),
       () => process.exit(1)
