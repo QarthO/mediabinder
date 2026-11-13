@@ -132,6 +132,73 @@ describeMysql("shared catalog", () => {
     ).toBe(404)
   })
 
+  test("a post edit changes only its own fields, and only for users who can see the item", async () => {
+    const { a, b, outsider, drive } = await scenario()
+    const bytes = hash()
+    drive[a.id] = [file("one", "a.jpg", bytes)]
+    await syncDrive(a.id)
+    const target = (await library(a)).media[0].id
+    const set = (await act(a, "set-membership", {
+      id: target,
+      displayName: "Post set",
+    })) as { id: string }
+    const post = {
+      platform: "Example",
+      url: "https://example.com/post",
+      createdAt: "2026-09-01T00:00:00Z",
+    }
+    await act(a, "create-post", { kind: "media", targetId: target, ...post })
+    await act(a, "create-post", { kind: "set", targetId: set.id, ...post })
+    const [mediaPost, setPost] = [
+      (await library(a)).posts.find((p) => p.media_id === target)!,
+      (await library(a)).posts.find((p) => p.set_id === set.id)!,
+    ]
+    const edit = {
+      platform: "Other",
+      url: "https://other.example/p/1",
+      externalId: "p-1",
+      createdAt: "2026-10-02T00:00:00Z",
+    }
+
+    for (const id of [mediaPost.id, setPost.id])
+      expect(
+        await rejectedStatus(act(outsider, "update-post", { id, ...edit }))
+      ).toBe(404)
+    expect(
+      await rejectedStatus(act(a, "update-post", { id: randomUUID(), ...edit }))
+    ).toBe(404)
+    await expect(
+      act(a, "update-post", {
+        id: mediaPost.id,
+        ...edit,
+        url: "javascript:alert(1)",
+      })
+    ).rejects.toThrow()
+    // A half-typed link is a validation error, not a crash.
+    await expect(
+      act(a, "update-post", { id: mediaPost.id, ...edit, url: "htt" })
+    ).rejects.toMatchObject({ name: "ZodError" })
+    expect((await library(a)).posts).toEqual(
+      expect.arrayContaining([mediaPost, setPost])
+    )
+
+    await act(a, "update-post", { id: mediaPost.id, ...edit })
+    const after = (await library(a)).posts
+    expect(after.find((p) => p.id === mediaPost.id)).toEqual({
+      ...mediaPost,
+      platform: "Other",
+      url: edit.url,
+      external_id: "p-1",
+      created_at: expect.any(String),
+    })
+    expect(after.find((p) => p.id === mediaPost.id)!.created_at).not.toBe(
+      mediaPost.created_at
+    )
+    expect(after.find((p) => p.id === setPost.id)).toEqual(setPost)
+    expect(after).toHaveLength(2)
+    expect((await library(b)).posts).toHaveLength(0)
+  })
+
   test("tags and colors are shared, and concurrent edits by two users both land", async () => {
     const { a, b, drive } = await scenario()
     const bytes = hash()
