@@ -25,9 +25,15 @@ export function thumbnailResponse(
         headers.set("Content-Length", String(thumbnail.bytes.byteLength))
         return new Response(thumbnail.bytes, { headers })
       }),
+      // One log per failure: unexpected ones (Google unreachable, a bad
+      // response) are reported as errors with a fingerprint; expected ones
+      // (no thumbnail, Drive access revoked) are a warning.
       Effect.catchTag("ThumbnailError", (error) =>
-        Effect.sync(() =>
-          reportAppError(error, { operation: "Thumbnail.get" })
+        (error.status >= 500
+          ? Effect.sync(() =>
+              reportAppError(error, { operation: "Thumbnail.get" })
+            )
+          : Effect.logWarning("thumbnail failed", { status: error.status })
         ).pipe(
           Effect.as(
             new Response(error.message, {
