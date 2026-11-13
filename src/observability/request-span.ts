@@ -20,10 +20,15 @@ export function requestSpanName(
 
 /**
  * Requests that get no trace: Docker's health probe runs every 30 seconds
- * and would bury real requests, and built assets carry nothing worth timing.
+ * and would bury real requests, built assets carry nothing worth timing, and
+ * the browser telemetry proxy would otherwise trace every batch it forwards.
  */
 export function isUntracedRequest(pathname: string): boolean {
-  return pathname === "/api/health" || pathname.startsWith("/assets/")
+  return (
+    pathname === "/api/health" ||
+    pathname.startsWith("/assets/") ||
+    pathname.startsWith("/api/telemetry/")
+  )
 }
 
 // Digits, long mixed IDs (catalog and set IDs) and anything very long. Plain

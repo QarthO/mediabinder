@@ -96,13 +96,14 @@ export function runTracedAppEffect<TResult, TError>(
 }
 
 /**
- * Runs a check too frequent to trace, such as a health probe or a worker's
- * idle poll.
+ * Runs work too frequent to trace, such as a health probe, a worker's idle
+ * poll, or forwarding a batch of browser telemetry.
  */
 export function runAppEffectUntraced<TResult, TError>(
-  effect: Effect.Effect<TResult, TError, AppServices>
+  effect: Effect.Effect<TResult, TError, AppServices>,
+  options?: { signal?: AbortSignal }
 ): Promise<TResult> {
-  return runtime.runPromise(Effect.withTracerEnabled(effect, false))
+  return runtime.runPromise(Effect.withTracerEnabled(effect, false), options)
 }
 
 /**
