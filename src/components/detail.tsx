@@ -1,6 +1,6 @@
 import { MediaTags } from "./data-table"
 import { MediaSets } from "./media-sets"
-import { useContext, useRef, useState } from "react"
+import { useContext, useRef, useState, type CSSProperties } from "react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useRouter } from "@tanstack/react-router"
 import {
@@ -28,7 +28,11 @@ import {
 import { Button } from "./ui/button"
 import { Input } from "./ui/input"
 import { PostDialog } from "./post-dialog"
-import { Thumbnail, MediaCensorContext } from "./thumbnail"
+import {
+  Thumbnail,
+  MediaCensorContext,
+  MediaCensorScaleContext,
+} from "./thumbnail"
 import { action } from "@/lib/api"
 import { bytes, dateValue, isoDate } from "@/lib/utils"
 import type { Library, Media, Post } from "@/lib/types"
@@ -96,6 +100,7 @@ export function Detail({
   }
 }) {
   const censorEnabled = useContext(MediaCensorContext)
+  const censorScale = useContext(MediaCensorScaleContext)
   // Detail is keyed by item, so closing or navigating always clears this reveal.
   const [revealed, setRevealed] = useState(false)
   const censored = censorEnabled && !revealed
@@ -201,6 +206,7 @@ export function Detail({
       <DialogContent
         ref={dialogRef}
         className="detail-dialog"
+        style={{ "--censor-strength": censorScale } as CSSProperties}
         showCloseButton={false}
         onOpenAutoFocus={(event) => {
           event.preventDefault()

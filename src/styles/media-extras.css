@@ -1,11 +1,49 @@
 /* Thumbnail blur, the bounded virtual media grid, and sync progress. */
 :is(img, video)[data-blurred] {
-  filter: blur(28px);
+  filter: blur(calc(28px * var(--censor-strength, 1)));
   clip-path: inset(0);
+}
+.censor-root {
+  display: contents;
+}
+.censor-control {
+  display: flex;
+  flex-shrink: 0;
 }
 .library-toolbar .thumbnail-blur-toggle {
   width: 36px;
   flex-shrink: 0;
+}
+.censor-control .thumbnail-blur-toggle {
+  border-right-width: 0;
+}
+.censor-control .censor-strength-trigger {
+  width: 20px;
+  padding: 0;
+  flex-shrink: 0;
+}
+.censor-control .censor-strength-trigger svg {
+  width: 14px;
+  height: 14px;
+}
+.censor-popover {
+  width: 240px;
+}
+.censor-slider {
+  display: grid;
+  gap: 8px;
+  font-size: 0.8125rem;
+}
+.censor-slider input {
+  width: 100%;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+.censor-slider-ends {
+  display: flex;
+  justify-content: space-between;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
 }
 .thumbnail-blur-toggle[aria-pressed="true"] {
   color: var(--primary);
@@ -15,6 +53,9 @@
 @media (max-width: 760px) {
   .library-toolbar .thumbnail-blur-toggle {
     width: 40px;
+    height: 40px;
+  }
+  .censor-control .censor-strength-trigger {
     height: 40px;
   }
 }
@@ -38,7 +79,7 @@
 }
 
 .detail-preview > [data-blurred] {
-  filter: blur(48px);
+  filter: blur(calc(48px * var(--censor-strength, 1)));
   pointer-events: none;
 }
 .media-reveal {

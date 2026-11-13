@@ -16,7 +16,15 @@ import {
   useSearch,
   useRouteContext,
 } from "@tanstack/react-router"
-import { lazy, Suspense, useCallback, useMemo, useState, useRef } from "react"
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useMemo,
+  useState,
+  useRef,
+  type CSSProperties,
+} from "react"
 import {
   useSuspenseQuery,
   useQueryClient,
@@ -68,7 +76,7 @@ import {
 import { Brand } from "./brand"
 import { AccountAvatar } from "./account-avatar"
 import { DriveSyncButton, DriveSyncMonitor } from "./drive-sync"
-import { MediaCensorContext } from "./thumbnail"
+import { MediaCensorContext, MediaCensorScaleContext } from "./thumbnail"
 const Detail = lazy(() =>
   import("./detail").then((module) => ({ default: module.Detail }))
 )
@@ -81,6 +89,7 @@ import { endLibraryOpen } from "@/lib/browser-telemetry"
 import { libraryQuery, action } from "@/lib/api"
 import { SignOutButton } from "./sign-out-button"
 import {
+  censorBlurScale,
   workspacePreferencesCookie,
   type WorkspacePreferences,
 } from "@/lib/workspace-preferences"
@@ -93,6 +102,7 @@ export function Workspace() {
   const { preferences: initialPreferences } = useRouteContext({ from: "/_app" })
   const [preferences, setPreferences] =
     useState<WorkspacePreferences>(initialPreferences)
+  const censorRoot = useRef<HTMLDivElement>(null)
   const savePreferences = (next: WorkspacePreferences) => {
     document.cookie = workspacePreferencesCookie(
       next,
@@ -107,27 +117,60 @@ export function Workspace() {
         typeof update === "function" ? update(preferences.sorting) : update,
     })
   return (
-    <MediaCensorContext value={preferences.censored}>
-      <WorkspaceContent
-        mediaCensored={preferences.censored}
-        onToggleCensor={() =>
-          savePreferences({ ...preferences, censored: !preferences.censored })
-        }
-        sorting={preferences.sorting}
-        setSorting={setSorting}
-      />
-    </MediaCensorContext>
+    <div
+      ref={censorRoot}
+      className="censor-root"
+      style={
+        {
+          "--censor-strength": censorBlurScale(preferences.censorStrength),
+        } as CSSProperties
+      }
+    >
+      <MediaCensorContext value={preferences.censored}>
+        <MediaCensorScaleContext
+          value={censorBlurScale(preferences.censorStrength)}
+        >
+          <WorkspaceContent
+            mediaCensored={preferences.censored}
+            onToggleCensor={() =>
+              savePreferences({
+                ...preferences,
+                censored: !preferences.censored,
+              })
+            }
+            censorStrength={preferences.censorStrength}
+            onPreviewCensorStrength={(strength) =>
+              censorRoot.current?.style.setProperty(
+                "--censor-strength",
+                String(censorBlurScale(strength))
+              )
+            }
+            onCommitCensorStrength={(censorStrength) =>
+              savePreferences({ ...preferences, censorStrength })
+            }
+            sorting={preferences.sorting}
+            setSorting={setSorting}
+          />
+        </MediaCensorScaleContext>
+      </MediaCensorContext>
+    </div>
   )
 }
 
 function WorkspaceContent({
   mediaCensored,
   onToggleCensor,
+  censorStrength,
+  onPreviewCensorStrength,
+  onCommitCensorStrength,
   sorting,
   setSorting,
 }: {
   mediaCensored: boolean
   onToggleCensor: () => void
+  censorStrength: number
+  onPreviewCensorStrength: (strength: number) => void
+  onCommitCensorStrength: (strength: number) => void
   sorting: SortingState
   setSorting: OnChangeFn<SortingState>
 }) {
@@ -585,6 +628,9 @@ function WorkspaceContent({
                 setSorting={setSorting}
                 mediaCensored={mediaCensored}
                 onToggleCensor={onToggleCensor}
+                censorStrength={censorStrength}
+                onPreviewCensorStrength={onPreviewCensorStrength}
+                onCommitCensorStrength={onCommitCensorStrength}
                 view={view}
                 onView={changeView}
               />

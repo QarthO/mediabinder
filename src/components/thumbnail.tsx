@@ -1,6 +1,9 @@
 import { createContext, memo, useContext, useState } from "react"
 import { Film, ImageIcon } from "lucide-react"
 export const MediaCensorContext = createContext(false)
+// The blur scale (0.04-1) for portaled views such as the detail dialog, which
+// sit outside the workspace's `--censor-strength` container.
+export const MediaCensorScaleContext = createContext(1)
 
 type ThumbnailProps = {
   id: string
