@@ -44,6 +44,10 @@ export const auth = betterAuth({
       clientId: process.env.GOOGLE_CLIENT_ID ?? "",
       clientSecret: process.env.GOOGLE_CLIENT_SECRET ?? "",
       accessType: "offline",
+      // Refresh the name and profile picture from Google on every sign-in, so a
+      // changed Google picture shows up here. MediaBinder has no way to edit
+      // either, so nothing a user set is overwritten.
+      overrideUserInfoOnSignIn: true,
       prompt: "select_account consent",
       // Shared-folder mode only needs per-file access for the picker and sharing.
       scope: [

@@ -67,6 +67,7 @@ import {
   CommandItem,
 } from "./ui/command"
 import { Brand } from "./brand"
+import { AccountAvatar } from "./account-avatar"
 import { DriveSyncButton, DriveSyncMonitor } from "./drive-sync"
 import { MediaCensorContext } from "./thumbnail"
 const Detail = lazy(() =>
@@ -432,9 +433,7 @@ function WorkspaceContent({
         />
         <div className="sidebar-bottom">
           <div className="account">
-            <div className="avatar">
-              {data.user.name.slice(0, 2).toUpperCase()}
-            </div>
+            <AccountAvatar name={data.user.name} image={data.user.image} />
             <div>
               <strong>{data.user.name}</strong>
             </div>
