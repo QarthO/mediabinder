@@ -3,7 +3,6 @@ import { Effect, Option } from "effect"
 import { Database } from "@/effect/database"
 import * as Drive from "@/effect/drive-api.server"
 import { DriveApiError } from "@/effect/errors"
-import { runTracedAppEffect } from "@/effect/runtime.server"
 import { sharedFolderMode } from "./drive-access.server"
 
 const LEGACY_SCOPE = "https://www.googleapis.com/auth/drive.readonly"
@@ -89,6 +88,3 @@ const revokeGrant = Effect.fn("GoogleGrants.revokeGrant")(function* (
       status: response.status,
     })
 })
-
-// For the Drive worker and tests, which still call it as a Promise.
-export const revokeLegacyDriveGrants = () => runTracedAppEffect(revokeLegacy())

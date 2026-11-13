@@ -1,6 +1,7 @@
 import { generateKeyPairSync, randomUUID } from "node:crypto"
 import { afterAll, beforeAll, expect, test } from "vite-plus/test"
 
+import { runTracedAppEffect } from "@/effect/runtime.server"
 import { describeMysql, useTestDatabase } from "@/test/database"
 import {
   act,
@@ -13,7 +14,7 @@ import {
 import { pool, rows } from "./database.server"
 import { resetServiceAccountCache } from "./drive-access.server"
 import { syncDrive } from "./drive.server"
-import { revokeLegacyDriveGrants } from "./google-grants.server"
+import { revokeLegacy } from "./google-grants.server"
 
 const FOLDER = "application/vnd.google-apps.folder"
 
@@ -329,7 +330,7 @@ describeMysql("shared folders", () => {
     )
     const { revocations } = drive(() => new Response(null, { status: 500 }))
 
-    expect(await revokeLegacyDriveGrants()).toBe(1)
+    expect(await runTracedAppEffect(revokeLegacy())).toBe(1)
     // The user's token is revoked at Google, which drops the whole grant.
     expect(revocations).toEqual(["token=user-token"])
     expect(
@@ -346,7 +347,7 @@ describeMysql("shared folders", () => {
         ])
       )[0].scope
     ).toBe("https://www.googleapis.com/auth/drive.readonly")
-    expect(await revokeLegacyDriveGrants()).toBe(0)
+    expect(await runTracedAppEffect(revokeLegacy())).toBe(0)
     expect(revocations).toHaveLength(1)
   })
 })

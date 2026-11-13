@@ -10,14 +10,20 @@ import {
   stubAccessToken,
   stubGoogle,
 } from "@/test/fixtures"
+import { runAppEffect } from "@/effect/runtime.server"
 import { Route } from "@/routes/api.drive.webhook"
 import { pool, rows } from "./database.server"
-import {
-  maintainWatches,
-  processSyncJobs,
-  queueDriveSync,
-  receiveDriveNotification,
-} from "./drive-webhook.server"
+import * as DriveWebhook from "./drive-webhook.server"
+
+// The module is Effects; these run them on the app runtime like the worker.
+const receiveDriveNotification = (headers: Headers) =>
+  runAppEffect("test", DriveWebhook.receive(headers))
+const maintainWatches = (userId: string) =>
+  runAppEffect("test", DriveWebhook.maintainWatches(userId))
+const processSyncJobs = (userId?: string) =>
+  runAppEffect("test", DriveWebhook.processSyncJobs(userId))
+const queueDriveSync = (userId: string) =>
+  runAppEffect("test", DriveWebhook.queueSync(userId))
 
 type Channel = { id: string; token: string }
 
@@ -243,5 +249,31 @@ describeMysql("drive webhooks", () => {
 
     expect(state.stopped).toEqual([channel.id])
     expect(await count("drive_watch WHERE user_id=?", [user.id])).toBe(0)
+  })
+
+  // Only one worker may work at a time, across containers: a pass that can't
+  // take the lock must leave the queue alone.
+  test("a worker pass works through due syncs, and does nothing while another worker holds the lock", async () => {
+    const { user, channel } = await watched()
+    await receiveDriveNotification(notification(channel))
+    const pass = () => runAppEffect("test", DriveWebhook.pass)
+
+    const other = await pool.getConnection()
+    try {
+      await other.query("SELECT GET_LOCK(?, 0)", [
+        DriveWebhook.DRIVE_WORKER_LOCK,
+      ])
+      expect(await pass()).toBe("idle")
+      expect(await count("media WHERE user_id=?", [user.id])).toBe(0)
+    } finally {
+      await other.query("SELECT RELEASE_LOCK(?)", [
+        DriveWebhook.DRIVE_WORKER_LOCK,
+      ])
+      other.release()
+    }
+
+    expect(await pass()).toBe("worked")
+    expect(await count("media WHERE user_id=?", [user.id])).toBe(1)
+    expect(await pass()).toBe("idle")
   })
 })
