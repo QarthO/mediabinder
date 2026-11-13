@@ -64,7 +64,7 @@ export interface Library {
     webhook: { configured: boolean; active: number; error: string | null }
     last_synced_at: string | null
   }
-  user: { name: string; email: string; role: string }
+  user: { name: string; email: string; role: string; image: string | null }
 }
 export interface SyncRun {
   run_id: string

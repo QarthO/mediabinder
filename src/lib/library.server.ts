@@ -49,7 +49,7 @@ import {
  * never queues behind itself.
  */
 export const load = Effect.fn("Library.load")(function* (
-  user: Library["user"] & { id: string }
+  user: Omit<Library["user"], "image"> & { id: string; image?: string | null }
 ) {
   yield* Effect.annotateCurrentSpan("mediabinder.user_id", user.id)
   const database = yield* Database
@@ -183,7 +183,12 @@ export const load = Effect.fn("Library.load")(function* (
     if (post.set_id)
       postCounts.set(post.set_id, (postCounts.get(post.set_id) ?? 0) + 1)
   return {
-    user: { name: user.name, email: user.email, role: user.role },
+    user: {
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      image: user.image ?? null,
+    },
     media,
     tag_colors: Object.fromEntries(
       definitions
