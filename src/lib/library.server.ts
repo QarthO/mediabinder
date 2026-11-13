@@ -25,6 +25,7 @@ import {
   shareAddress,
   sharedFolderMode,
 } from "./drive-access.server"
+import { list as listCopies } from "./copies.server"
 import { startSync } from "./drive.server"
 import { status as syncStatus } from "./sync-progress.server"
 import * as Tags from "./tags.server"
@@ -395,6 +396,10 @@ const sourceActions = {
   }),
   "sync-status": mutation("sync-status", {
     run: (_, { userId }) => syncStatus(userId),
+  }),
+  copies: mutation("copies", {
+    input: z.object({ id }),
+    run: ({ id: target }, { userId }) => listCopies(userId, target),
   }),
   folders: mutation("folders", {
     run: (_, { headers }) => Drive.listFolders(headers),

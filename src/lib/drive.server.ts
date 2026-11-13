@@ -266,8 +266,13 @@ const unopenable = () =>
 // A file's outermost subfolder under one linked folder. Files directly in the
 // linked folder have none.
 type Placement = { folderId: string; folderName: string; fileId: string }
+// A subfolder seen under a linked folder, with the folder it was listed in.
+type FolderNode = { id: string; parentId: string; name: string }
 type Scan = {
   sourceFiles: Map<string, DriveFile[]>
+  // By linked folder: every subfolder the scan listed, so a file's parent
+  // folder can be shown as a path from its linked folder.
+  nodes: Map<string, FolderNode[]>
   // By linked folder. Each linked folder is computed on its own, so a subfolder
   // that is also linked, or reachable from two linked folders, pairs
   // independently under each.
@@ -294,6 +299,7 @@ const scanFolders = Effect.fn("Drive.scanFolders")(function* (
   )
   const sourceFiles = new Map<string, DriveFile[]>()
   const placements = new Map<string, Placement[]>()
+  const nodes = new Map<string, FolderNode[]>()
   const found = new Set<string>()
   let foldersScanned = 0
   const shared = sharedFolderMode()
@@ -345,7 +351,8 @@ const scanFolders = Effect.fn("Drive.scanFolders")(function* (
       ],
       visited = new Set<string>(),
       files: DriveFile[] = [],
-      placed: Placement[] = []
+      placed: Placement[] = [],
+      tree = new Map<string, FolderNode>()
     while (pending.length) {
       const { id: parent, top } = pending.shift()!
       if (visited.has(parent)) continue
@@ -367,11 +374,18 @@ const scanFolders = Effect.fn("Drive.scanFolders")(function* (
               !shared ||
               !file.inheritedPermissionsDisabled ||
               (yield* ownsFolder(file.id))
-            )
+            ) {
               pending.push({
                 id: file.id,
                 top: top ?? { id: file.id, name: file.name },
               })
+              if (!tree.has(file.id))
+                tree.set(file.id, {
+                  id: file.id,
+                  parentId: parent,
+                  name: file.name,
+                })
+            }
           } else {
             files.push(file)
             if (top)
@@ -391,8 +405,9 @@ const scanFolders = Effect.fn("Drive.scanFolders")(function* (
     }
     sourceFiles.set(folderId, files)
     placements.set(folderId, placed)
+    nodes.set(folderId, [...tree.values()])
   }
-  return { sourceFiles, placements } satisfies Scan
+  return { sourceFiles, placements, nodes } satisfies Scan
 })
 
 /**
@@ -404,7 +419,7 @@ const reconcile = Effect.fn("Drive.reconcile")(function* (
   session: LockedSession,
   userId: string,
   folderIds: string[],
-  { sourceFiles, placements }: Scan,
+  { sourceFiles, placements, nodes }: Scan,
   report: (progress: Partial<SyncProgress>) => Effect.Effect<void>
 ) {
   yield* Effect.annotateCurrentSpan("mediabinder.user_id", userId)
@@ -500,6 +515,25 @@ const reconcile = Effect.fn("Drive.reconcile")(function* (
           memberships
         )
         yield* applyFolderSets(tx, userId, placements, owned)
+        // The tree is replaced as a whole, so folders that are gone from Drive
+        // leave with this commit and a failed scan never reaches it.
+        yield* tx.execute("DELETE FROM drive_folder_node WHERE user_id=?", [
+          userId,
+        ])
+        yield* insertInChunks(
+          tx,
+          "INSERT INTO drive_folder_node(user_id,root_folder_id,folder_id,parent_id,name,synced_at) VALUES",
+          "(?,?,?,?,?,NOW(3))",
+          [...nodes].flatMap(([rootId, list]) =>
+            list.map((node) => [
+              userId,
+              rootId,
+              node.id,
+              node.parentId,
+              node.name.slice(0, 1024),
+            ])
+          )
+        )
         yield* tx.execute(
           "UPDATE drive_folder SET last_synced_at = NOW(3) WHERE user_id = ?",
           [userId]

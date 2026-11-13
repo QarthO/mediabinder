@@ -21,6 +21,19 @@ export interface Media {
   set_ids: string[]
   post_count: number
 }
+/** One Drive file of a library item, and where under each linked folder it is. */
+export interface ItemCopy {
+  drive_id: string
+  raw_name: string
+  size: number
+  mime_type: string
+  uploaded_at: string
+  locations: {
+    folder_name: string
+    // Folder names below the linked folder; null until a sync stores the tree.
+    path: string[] | null
+  }[]
+}
 export interface MediaSet {
   id: string
   display_name: string
