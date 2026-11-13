@@ -6,6 +6,7 @@ import {
   count,
   execute,
   insertFolder,
+  insertMedia,
   newUser,
   routeHandler,
   rows,
@@ -13,6 +14,7 @@ import {
   stubGoogle,
 } from "@/test/fixtures"
 import { Effect } from "effect"
+import { concat, ftyp, moov, track } from "@/test/iso-bmff"
 import { Database } from "@/effect/database"
 import { runAppEffect, runTracedAppEffect } from "@/effect/runtime.server"
 import { Route } from "@/routes/api.drive.webhook"
@@ -279,6 +281,30 @@ describeMysql("drive webhooks", () => {
 
     expect(await pass()).toBe("worked")
     expect(await count("media WHERE user_id=?", [user.id])).toBe(1)
+    expect(await pass()).toBe("idle")
+  })
+
+  test("a worker pass reads the codec of videos that have none, then goes idle", async () => {
+    const user = newUser()
+    const clip = concat(ftyp, moov(track("vide", "avc1")))
+    const id = await insertMedia({ userId: user.id, mimeType: "video/mp4" })
+    await execute("UPDATE media SET size=? WHERE id=?", [clip.length, id])
+    google((url, init) => {
+      const [, from, to] =
+        /^bytes=(\d+)-(\d+)$/.exec(
+          new Headers(init.headers).get("range") ?? ""
+        ) ?? []
+      expect(url.searchParams.get("alt")).toBe("media")
+      return new Response(clip.slice(Number(from), Number(to) + 1), {
+        status: 206,
+      })
+    })
+    const pass = () => runAppEffect("test", DriveWebhook.pass)
+
+    expect(await pass()).toBe("worked")
+    expect(
+      await rows("SELECT video_codec FROM media WHERE id=?", [id])
+    ).toEqual([{ video_codec: "avc1" }])
     expect(await pass()).toBe("idle")
   })
 })

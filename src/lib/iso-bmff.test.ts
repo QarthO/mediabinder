@@ -9,7 +9,13 @@ import {
   track,
   wideBox,
 } from "@/test/iso-bmff"
-import { MAX_BOX_HEADERS, MAX_MOOV_BYTES, sniffVideoCodec } from "./iso-bmff"
+import {
+  HEAD_BYTES,
+  MAX_BOX_HEADERS,
+  MAX_MOOV_BYTES,
+  sniffVideoCodec,
+  TAIL_BYTES,
+} from "./iso-bmff"
 
 const sniff = (file: Uint8Array, size = file.length) => {
   const reader = memoryReader(file)
@@ -27,16 +33,58 @@ describe("sniffVideoCodec", () => {
     }
   })
 
-  it("finds moov before and after mdat, reading headers instead of the media", async () => {
+  it("reads a small file in one request", async () => {
+    const file = concat(ftyp, mdat(5000), moov(track("vide", "hvc1")))
+    const { result, reads } = await sniff(file)
+    expect(result).toEqual({ found: true, codec: "hvc1" })
+    expect(reads).toEqual([{ start: 0, length: file.length }])
+  })
+
+  it("finds moov at the end of a large file with one parallel round trip", async () => {
+    // An iPhone .mov: moov after a media box far bigger than either buffer.
     const meta = moov(track("vide", "hvc1"))
-    const atStart = await sniff(concat(ftyp, meta, mdat(5000)))
-    const atEnd = await sniff(concat(ftyp, mdat(5000), meta))
-    expect(atStart.result).toEqual({ found: true, codec: "hvc1" })
-    expect(atEnd.result).toEqual({ found: true, codec: "hvc1" })
-    // The 5000 media bytes are skipped by header, never requested.
-    expect(
-      atEnd.reads.every(({ length }) => length <= 16 || length === meta.length)
-    ).toBe(true)
+    const file = concat(ftyp, mdat(3 * TAIL_BYTES), meta)
+    const { result, reads } = await sniff(file)
+    expect(result).toEqual({ found: true, codec: "hvc1" })
+    expect(reads).toEqual([
+      { start: 0, length: HEAD_BYTES },
+      { start: file.length - TAIL_BYTES, length: TAIL_BYTES },
+    ])
+  })
+
+  it("finds moov at the start of a large file without another request", async () => {
+    const file = concat(ftyp, moov(track("vide", "avc1")), mdat(3 * TAIL_BYTES))
+    const { result, reads } = await sniff(file)
+    expect(result).toEqual({ found: true, codec: "avc1" })
+    expect(reads).toHaveLength(2)
+  })
+
+  it("reads moov on its own when it spans the buffers", async () => {
+    const pad = (bytes: number) =>
+      box(
+        "moov",
+        concat(
+          moov(track("vide", "hev1")).subarray(8),
+          box("free", new Uint8Array(bytes))
+        )
+      )
+    // Starts in the head, runs past it, and the tail is far away.
+    const inHead = concat(ftyp, pad(HEAD_BYTES * 2), mdat(3 * TAIL_BYTES))
+    const first = await sniff(inHead)
+    expect(first.result).toEqual({ found: true, codec: "hev1" })
+    expect(first.reads).toHaveLength(3)
+    expect(first.reads[2]).toEqual({
+      start: ftyp.length,
+      length: HEAD_BYTES * 2 + pad(0).length,
+    })
+    // Starts before the tail and runs into it.
+    const inTail = concat(ftyp, mdat(3 * TAIL_BYTES), pad(TAIL_BYTES + 100))
+    const second = await sniff(inTail)
+    expect(second.result).toEqual({ found: true, codec: "hev1" })
+    expect(second.reads).toHaveLength(4)
+    // A header in neither buffer: a 16-byte read finds it, one more reads moov.
+    expect(second.reads[2].length).toBe(16)
+    expect(second.reads[3].length).toBe(TAIL_BYTES + 100 + pad(0).length)
   })
 
   it("walks past a 64-bit mdat size and a free box", async () => {
@@ -47,6 +95,42 @@ describe("sniffVideoCodec", () => {
       moov(track("vide", "avc1"))
     )
     expect((await sniff(file)).result).toEqual({ found: true, codec: "avc1" })
+  })
+
+  it("handles 64-bit sizes in a file too big to hold", async () => {
+    // 5 GiB: only the two ends exist, as a sparse reader serves them.
+    const meta = moov(track("vide", "hvc1"))
+    const size = 5 * 1024 ** 3
+    const head = concat(
+      ftyp,
+      wideBox("mdat", new Uint8Array(0), size - ftyp.length - meta.length)
+    )
+    const reads: number[] = []
+    const result = await Effect.runPromise(
+      sniffVideoCodec(size, (start, length) =>
+        Effect.sync(() => {
+          reads.push(start)
+          const out = new Uint8Array(length)
+          if (start === 0) out.set(head)
+          else out.set(meta, length - meta.length)
+          return out
+        })
+      )
+    )
+    expect(result).toEqual({ found: true, codec: "hvc1" })
+    expect(reads).toEqual([0, size - TAIL_BYTES])
+  })
+
+  it("finds a size-0 moov in the tail of a large file", async () => {
+    const meta = moov(track("vide", "hev1"))
+    const file = concat(
+      ftyp,
+      mdat(2 * TAIL_BYTES),
+      box("moov", meta.subarray(8), 0)
+    )
+    const { result, reads } = await sniff(file)
+    expect(result).toEqual({ found: true, codec: "hev1" })
+    expect(reads).toHaveLength(2)
   })
 
   it("treats a size-0 last box as running to the end of the file", async () => {
@@ -88,7 +172,8 @@ describe("sniffVideoCodec", () => {
       ftyp.length + MAX_MOOV_BYTES + 1
     )
     expect(result).toEqual({ found: false, reason: "moov-too-large" })
-    expect(reads.every(({ length }) => length <= 16)).toBe(true)
+    // Only the two buffers were read; the oversized moov never was.
+    expect(reads.every(({ length }) => length <= TAIL_BYTES)).toBe(true)
   })
 
   it("survives truncated and garbage data", async () => {
@@ -117,9 +202,8 @@ describe("sniffVideoCodec", () => {
       ),
       moov(track("vide", "avc1"))
     )
-    const { result, reads } = await sniff(file)
+    const { result } = await sniff(file)
     expect(result).toEqual({ found: false, reason: "too-many-boxes" })
-    expect(reads).toHaveLength(MAX_BOX_HEADERS)
   })
 
   it("passes on what the reader fails with", async () => {

@@ -96,3 +96,6 @@ export interface SyncRun {
   started_at: string
   finished_at: string | null
 }
+
+/** The newest sync run, plus how many videos still wait for their codec. */
+export type SyncStatus = SyncRun & { codecs_pending: number }

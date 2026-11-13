@@ -1,4 +1,4 @@
-import { Cause, Effect, Fiber, Metric, Schedule } from "effect"
+import { Cause, Effect, Fiber, Metric } from "effect"
 import {
   disposeAppRuntime,
   forkAppWorker,
@@ -30,6 +30,9 @@ const runPass = pass.pipe(
     lastFailure = null
     return count(outcome)
   }),
+  Effect.flatMap((outcome) =>
+    Effect.sleep(outcome === "worked" ? "1 second" : "10 seconds")
+  ),
   Effect.catchCause((cause) => {
     // A stop is not a failure.
     if (Cause.hasInterruptsOnly(cause)) return Effect.failCause(cause)
@@ -39,17 +42,20 @@ const runPass = pass.pipe(
       if (message === lastFailure) return
       lastFailure = message
       reportAppError(cause, { operation: "DriveWorker.pass" })
-    }).pipe(Effect.andThen(count("failed")))
+    }).pipe(
+      Effect.andThen(count("failed")),
+      Effect.andThen(Effect.sleep("10 seconds"))
+    )
   })
 )
 
 // The loop has no span of its own; the passes that find work do. The next
-// pass starts ten seconds after the last one ended.
+// pass starts ten seconds after an idle one, but a second after one that
+// worked, so a backlog of codec checks, or a sync that just queued some,
+// doesn't wait out the interval.
 const program = Effect.logInfo(
   `Drive worker started; webhook registration ${driveWebhookUrl() ? "enabled" : "disabled"}`
-).pipe(
-  Effect.andThen(runPass.pipe(Effect.repeat(Schedule.spaced("10 seconds"))))
-)
+).pipe(Effect.andThen(runPass.pipe(Effect.forever)))
 
 const worker = forkAppWorker(program)
 

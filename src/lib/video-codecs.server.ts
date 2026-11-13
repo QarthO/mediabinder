@@ -1,31 +1,37 @@
-import { Cause, Effect, Metric, Option } from "effect"
+import { Cause, Clock, Effect, Metric, Option } from "effect"
 import { HttpClientRequest, HttpClientResponse } from "effect/http"
 import type { RowDataPacket } from "mysql2/promise"
-import type { DatabaseSession } from "@/effect/database"
+import { Database } from "@/effect/database"
+import * as Drive from "@/effect/drive-api.server"
 import { DRIVE_API, driveRequest } from "@/effect/drive-http.server"
 import { DriveApiError } from "@/effect/errors"
+import { isExpectedAppError } from "@/observability/error-policy"
 import * as Telemetry from "@/telemetry"
 import { sniffVideoCodec, UNKNOWN_VIDEO_CODEC } from "./iso-bmff"
-import { isIsoBmffVideo } from "./media-formats"
+import { ISO_BMFF_VIDEO_TYPES } from "./media-formats"
 
-// Records each video's codec during a Drive sync, so the viewer knows whether
-// the browser can play it before downloading anything. Per file this reads a
-// few bytes of headers and the file's `moov` box through Drive range
-// requests, never the media itself.
+// Records each video's codec in the background, so the viewer knows whether
+// the browser can play it before downloading anything. A sync only saves the
+// files (and clears the codec of one whose bytes changed); the Drive worker
+// finds the videos with no codec and reads them here. Per file this is one
+// round trip in the common case: the file's first 64 KiB and last 1 MiB are
+// read at once, which hold `moov` wherever it is (see `iso-bmff.ts`). The
+// media itself is never downloaded.
 //
-// This is per-file work, so it is counted, not spanned. Nothing here carries a
-// file ID or name; the codec attribute is a fourcc from a fixed list.
+// This is per-file work, so it is counted, not spanned: only a worker pass
+// that did some gets a span. Nothing here carries a file ID or name; the
+// codec attribute is a fourcc from a fixed list.
 
-const codecChecks = Metric.counter("mediabinder.sync.codec_checks", {
+const codecChecks = Metric.counter("mediabinder.worker.codec_checks", {
   description:
-    "Video codec lookups during Drive syncs: `recorded` a codec, `unknown` (the file can't be read, remembered until it changes) or `failed` (a Drive hiccup, retried next sync)",
+    "Video codec lookups by the Drive worker: `recorded` a codec, `unknown` (the file can't be read, remembered until it changes) or `failed` (a Drive hiccup, retried later)",
   attributes: { unit: "{file}" },
   incremental: true,
 })
 
-const codecsFound = Metric.counter("mediabinder.sync.video_codecs", {
+const codecsFound = Metric.counter("mediabinder.worker.video_codecs", {
   description:
-    "Video codecs recorded by Drive syncs, by sample-entry fourcc (`other` for any not listed)",
+    "Video codecs recorded by the Drive worker, by sample-entry fourcc (`other` for any not listed)",
   attributes: { unit: "{file}" },
   incremental: true,
 })
@@ -51,8 +57,18 @@ const KNOWN_CODECS = new Set([
   "jpeg",
 ])
 
-const CONCURRENCY = 4
-const FILE_TIMEOUT = "30 seconds"
+// Files read at once, and how many are probed before their results are saved:
+// small saves keep progress visible and a restart cheap.
+const CONCURRENCY = 12
+const CHUNK = 36
+// A worker pass stops starting chunks after this long, so due syncs and watch
+// renewals, which wait behind it, are never held up for long.
+const BATCH = 200
+const PASS_BUDGET_MS = 20_000
+// A file or person that failed is left alone this long, in memory: a restart
+// simply tries again.
+const RETRY_AFTER_MS = 10 * 60_000
+const FILE_TIMEOUT = "20 seconds"
 const REQUEST_TIMEOUT = "15 seconds"
 
 // Drive answers these for a file it will never let us read; the same request
@@ -123,7 +139,7 @@ const check = (token: string, driveId: string, size: number) =>
       return Cause.isTimeoutError(error)
         ? Effect.succeed({ outcome: "failed" })
         : Telemetry.logException(cause, {
-            operation: "Drive.detectCodecs",
+            operation: "DriveWorker.checkCodecs",
           }).pipe(Effect.as({ outcome: "failed" }))
     }),
     Effect.tap((result) =>
@@ -149,95 +165,183 @@ const check = (token: string, driveId: string, size: number) =>
     )
   )
 
-/** Drive ID to codec; `null` clears a codec that no longer applies. */
-export type CodecUpdates = Map<string, string | null>
+const types = ISO_BMFF_VIDEO_TYPES
+const typeList = types.map(() => "?").join(",")
+// What "waiting for a codec" means: an available ISO-BMFF video with none.
+const PENDING = `mime_type IN (${typeList}) AND video_codec IS NULL AND available=TRUE`
 
-type ListedFile = {
+export type PendingFile = {
   id: string
-  mimeType: string
-  size?: string
-  sha256Checksum?: string
+  user_id: string
+  drive_id: string
+  size: number
+}
+
+// Retry times by media ID and by user ID, for what failed transiently.
+const failedFiles = new Map<string, number>()
+const failedUsers = new Map<string, number>()
+
+const forget = (until: Map<string, number>, now: number) => {
+  for (const [key, time] of until) if (time <= now) until.delete(key)
 }
 
 /**
- * Works out which of the scanned files need their codec read, reads them, and
- * returns what to store. A file needs it when it is an ISO-BMFF video with no
- * codec yet, or whose bytes changed since the stored row (a different size, or
- * a different checksum when both are known). Reads happen here, after the scan
- * and before the catalog transaction, so the transaction never waits on Drive.
- * Nothing here fails the sync: a file that can't be read is stored as
- * `unknown`, and a Drive hiccup leaves it empty to be tried again next sync.
+ * How many of the user's videos are waiting for a codec, for the sync
+ * toast's progress. An index on the MIME type and codec makes it a short scan.
  */
-export const detectCodecs = Effect.fn("Drive.detectCodecs")(function* (
-  session: DatabaseSession,
-  userId: string,
-  token: string,
-  files: ReadonlyArray<ListedFile>
+export const pendingCount = Effect.fn("VideoCodecs.pending")(function* (
+  userId: string
 ) {
-  const stored = new Map(
-    (yield* session.queryRows<RowDataPacket>(
-      `SELECT m.drive_id,m.size,m.video_codec,c.sha256 FROM media m
-       LEFT JOIN catalog c ON c.id=m.catalog_id
-       WHERE m.user_id=? AND (m.mime_type LIKE 'video/%' OR m.video_codec IS NOT NULL)`,
-      [userId]
-    )).map((row) => [row.drive_id as string, row] as const)
+  yield* Effect.annotateCurrentSpan("mediabinder.user_id", userId)
+  const database = yield* Database
+  const [row] = yield* database.queryRows<{ n: number } & RowDataPacket>(
+    "videoCodecs.pending",
+    `SELECT COUNT(*) AS n FROM media WHERE user_id=? AND ${PENDING}`,
+    [userId, ...types]
   )
-  const updates: CodecUpdates = new Map()
-  const pending: { id: string; size: number; hadCodec: boolean }[] = []
-  for (const file of files) {
-    const row = stored.get(file.id)
-    const size = Number(file.size)
-    if (!isIsoBmffVideo(file.mimeType) || !(size > 0)) {
-      if (row?.video_codec != null) updates.set(file.id, null)
-      continue
-    }
-    const checksum = file.sha256Checksum?.toLowerCase()
-    const changed =
-      row !== undefined &&
-      (Number(row.size) !== size ||
-        (Boolean(checksum) && Boolean(row.sha256) && row.sha256 !== checksum))
-    if (row && row.video_codec != null && !changed) continue
-    pending.push({ id: file.id, size, hadCodec: row?.video_codec != null })
-  }
-  yield* Effect.annotateCurrentSpan(
-    "mediabinder.sync.codec_files",
-    pending.length
-  )
-  yield* Effect.forEach(
-    pending,
-    (file) =>
-      check(token, file.id, file.size).pipe(
-        Effect.tap((result) =>
-          result.outcome === "failed"
-            ? // Content changed but couldn't be read: drop the old codec.
-              Effect.sync(() => {
-                if (file.hadCodec) updates.set(file.id, null)
-              })
-            : Effect.sync(() => {
-                updates.set(file.id, result.codec)
-              })
-        )
-      ),
-    { concurrency: CONCURRENCY, discard: true }
-  )
-  return updates
+  return Number(row?.n ?? 0)
 })
 
-/** Writes the codecs, one statement per codec and chunk rather than per file. */
-export const saveCodecs = Effect.fnUntraced(function* (
-  tx: DatabaseSession,
-  userId: string,
-  updates: CodecUpdates
-) {
-  const byCodec = new Map<string | null, string[]>()
-  for (const [id, codec] of updates)
-    byCodec.set(codec, [...(byCodec.get(codec) ?? []), id])
-  for (const [codec, ids] of byCodec)
-    for (let index = 0; index < ids.length; index += 500) {
-      const chunk = ids.slice(index, index + 500)
-      yield* tx.execute(
-        `UPDATE media SET video_codec=? WHERE user_id=? AND drive_id IN (${chunk.map(() => "?").join(",")})`,
-        [codec, userId, ...chunk]
+/**
+ * The next videos for the worker to read, up to one batch: available,
+ * ISO-BMFF, no codec, whose owner isn't syncing right now (the sync is about
+ * to rewrite their rows) and that didn't just fail. Not traced: the worker's
+ * idle check.
+ */
+export const pendingFiles = Effect.fnUntraced(function* () {
+  const database = yield* Database
+  const now = yield* Clock.currentTimeMillis
+  forget(failedFiles, now)
+  forget(failedUsers, now)
+  const users = [...failedUsers.keys()]
+  const files = [...failedFiles.keys()].slice(0, 1000)
+  const rows = yield* database.queryRows<PendingFile & RowDataPacket>(
+    "videoCodecs.pendingFiles",
+    `SELECT id,user_id,drive_id,size FROM media WHERE ${PENDING}
+     AND IS_USED_LOCK(CONCAT('drive:',user_id)) IS NULL${
+       users.length
+         ? ` AND user_id NOT IN (${users.map(() => "?").join(",")})`
+         : ""
+     }${
+       files.length ? ` AND id NOT IN (${files.map(() => "?").join(",")})` : ""
+     }
+     ORDER BY user_id LIMIT ?`,
+    [...types, ...users, ...files, BATCH]
+  )
+  return rows.map((row) => ({ ...row, size: Number(row.size) }))
+})
+
+type Saved = { id: string; size: number; codec: string }
+
+// One statement per codec and chunk. Matching the size as well as the ID
+// leaves a row alone that a sync rewrote while it was being read, and the
+// NULL check makes a repeat harmless. Nothing else is locked.
+const save = Effect.fnUntraced(function* (saved: ReadonlyArray<Saved>) {
+  const database = yield* Database
+  const byCodec = new Map<string, Saved[]>()
+  for (const file of saved)
+    byCodec.set(file.codec, [...(byCodec.get(file.codec) ?? []), file])
+  for (const [codec, list] of byCodec)
+    for (let index = 0; index < list.length; index += 500) {
+      const chunk = list.slice(index, index + 500)
+      yield* database.execute(
+        "videoCodecs.save",
+        `UPDATE media SET video_codec=? WHERE video_codec IS NULL AND (id,size) IN (${chunk.map(() => "(?,?)").join(",")})`,
+        [codec, ...chunk.flatMap((file) => [file.id, file.size])]
       )
     }
+})
+
+/**
+ * One batch of the worker's codec work: reads the codec of the videos that
+ * have none and stores it. Returns how many files it took up. Only a batch
+ * that has files is spanned (as `DriveWorker.checkCodecs`), so an idle worker
+ * exports no traces.
+ *
+ * Reads the codec of each file and stores it, a chunk at a time. Files of one
+ * person share a token: the service account in shared-folder mode, their own
+ * Google access otherwise. A person whose token can't be had, or a file that
+ * failed in a Drive hiccup, is left for later; a file that can't be parsed is
+ * stored as `unknown`. Stops starting chunks once the pass's time is used.
+ */
+const checkPending = Effect.fn("DriveWorker.checkCodecs")(function* (
+  files: ReadonlyArray<PendingFile>
+) {
+  const started = yield* Clock.currentTimeMillis
+  const byUser = new Map<string, PendingFile[]>()
+  for (const file of files)
+    byUser.set(file.user_id, [...(byUser.get(file.user_id) ?? []), file])
+  const totals = { recorded: 0, unknown: 0, failed: 0, skipped: 0 }
+  for (const [userId, list] of byUser) {
+    const token = yield* Drive.readToken(userId).pipe(
+      Effect.map(Option.some),
+      Effect.catch((error) =>
+        Clock.currentTimeMillis.pipe(
+          Effect.tap((now) =>
+            Effect.sync(() => failedUsers.set(userId, now + RETRY_AFTER_MS))
+          ),
+          Effect.andThen(
+            isExpectedAppError(error)
+              ? Effect.logWarning("Video codec checks skipped a user").pipe(
+                  Effect.annotateLogs({
+                    "mediabinder.user_id": userId,
+                    "error.type":
+                      error instanceof Error ? error.name : typeof error,
+                  })
+                )
+              : Telemetry.logException(Cause.fail(error), {
+                  operation: "DriveWorker.checkCodecs",
+                  attributes: { "mediabinder.user_id": userId },
+                })
+          ),
+          Effect.as(Option.none<string>())
+        )
+      )
+    )
+    if (Option.isNone(token)) {
+      totals.skipped += list.length
+      continue
+    }
+    for (let index = 0; index < list.length; index += CHUNK) {
+      const now = yield* Clock.currentTimeMillis
+      if (now - started > PASS_BUDGET_MS) {
+        totals.skipped += list.length - index
+        break
+      }
+      const results = yield* Effect.forEach(
+        list.slice(index, index + CHUNK),
+        (file) =>
+          check(token.value, file.drive_id, file.size).pipe(
+            Effect.map((result) => ({ file, result }))
+          ),
+        { concurrency: CONCURRENCY }
+      )
+      const saved: Saved[] = []
+      for (const { file, result } of results) {
+        if (result.outcome === "failed") {
+          totals.failed++
+          failedFiles.set(file.id, now + RETRY_AFTER_MS)
+        } else {
+          totals[result.outcome]++
+          saved.push({ id: file.id, size: file.size, codec: result.codec })
+        }
+      }
+      yield* save(saved)
+    }
+  }
+  yield* Effect.annotateCurrentSpan({
+    "mediabinder.worker.codec.files": files.length,
+    "mediabinder.worker.codec.users": byUser.size,
+    "mediabinder.worker.codec.recorded": totals.recorded,
+    "mediabinder.worker.codec.unknown": totals.unknown,
+    "mediabinder.worker.codec.failed": totals.failed,
+    "mediabinder.worker.codec.skipped": totals.skipped,
+  })
+  return files.length
+})
+
+export const checkCodecs = Effect.gen(function* () {
+  const files = yield* pendingFiles()
+  if (files.length === 0) return 0
+  return yield* checkPending(files).pipe(Effect.withTracerEnabled(true))
 })

@@ -29,6 +29,7 @@ import { list as listCopies } from "./copies.server"
 import { startSync } from "./drive.server"
 import { status as syncStatus } from "./sync-progress.server"
 import * as Tags from "./tags.server"
+import { pendingCount as pendingCodecs } from "./video-codecs.server"
 import type { Library, Media, MediaSet, Post, DriveSource } from "./types"
 import {
   metadata,
@@ -395,7 +396,16 @@ const sourceActions = {
     run: (_, { userId, headers }) => startSync(userId, headers),
   }),
   "sync-status": mutation("sync-status", {
-    run: (_, { userId }) => syncStatus(userId),
+    run: (_, { userId }) =>
+      Effect.gen(function* () {
+        const run = yield* syncStatus(userId)
+        if (!run) return null
+        // Only a finished run has codecs to wait for; polling a running one
+        // stays a single row read.
+        const codecs_pending =
+          run.status === "succeeded" ? yield* pendingCodecs(userId) : 0
+        return { ...run, codecs_pending }
+      }),
   }),
   copies: mutation("copies", {
     input: z.object({ id }),
