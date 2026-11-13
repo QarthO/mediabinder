@@ -230,14 +230,24 @@ export const DatabaseClientLive = Layer.effect(
 export const DatabaseLive = Layer.effect(
   Database,
   Effect.map(DatabaseClient, ({ client, lockClient }) =>
-    makeDatabase(client, lockClient)
+    makeDatabase(
+      client,
+      lockClient,
+      databaseClientConfig(QUERY_POOL_SIZE).database
+    )
   )
 ).pipe(Layer.provideMerge(DatabaseClientLive))
 
 export function makeDatabase(
   client: Effect.Effect<SqlClient.SqlClient, SqlError>,
-  lockClient: Effect.Effect<SqlClient.SqlClient, SqlError> = client
+  lockClient: Effect.Effect<SqlClient.SqlClient, SqlError> = client,
+  namespace?: string
 ) {
+  const databaseQuery = <TResult>(
+    operation: string,
+    statement: string,
+    query: Effect.Effect<TResult, SqlError>
+  ) => runStatement(namespace, operation, statement, query)
   const withClient = <TResult, TError, TRequirements>(
     operation: string,
     use: (
@@ -258,6 +268,7 @@ export function makeDatabase(
     withClient(operation, (sql) =>
       databaseQuery(
         operation,
+        statement,
         sql.unsafe(statement, values).raw as Effect.Effect<
           ResultSetHeader,
           SqlError
@@ -272,7 +283,11 @@ export function makeDatabase(
     values: Array<QueryValue> = []
   ) =>
     withClient(operation, (sql) =>
-      databaseQuery(operation, sql.unsafe<TRow>(statement, values).unprepared)
+      databaseQuery(
+        operation,
+        statement,
+        sql.unsafe<TRow>(statement, values).unprepared
+      )
     )
 
   // The same two calls on one reserved connection.
@@ -283,6 +298,7 @@ export function makeDatabase(
     const execute: LockedSession["execute"] = (statement, values = []) =>
       databaseQuery(
         operation,
+        statement,
         connection.executeRaw(statement, values) as Effect.Effect<
           ResultSetHeader,
           SqlError
@@ -294,6 +310,7 @@ export function makeDatabase(
     ) =>
       databaseQuery(
         operation,
+        statement,
         connection.executeUnprepared(
           statement,
           values,
@@ -303,6 +320,7 @@ export function makeDatabase(
     const control = (statement: string) =>
       databaseQuery(
         operation,
+        statement,
         connection.executeUnprepared(statement, [], undefined)
       )
     return {
@@ -377,14 +395,45 @@ export function makeDatabase(
   })
 }
 
-function databaseQuery<TResult>(
+/**
+ * Runs one statement in a client span named for OpenTelemetry's
+ * `db.query.summary`, such as `SELECT drive_sync_run`, with the query text,
+ * which carries `?` placeholders and never values. Effect SQL's own span for
+ * the statement is turned off: it would be named after the database, which
+ * reads like the service name.
+ */
+function runStatement<TResult>(
+  namespace: string | undefined,
   operation: string,
+  statement: string,
   query: Effect.Effect<TResult, SqlError>
 ): Effect.Effect<TResult, DatabaseError> {
+  const summary = querySummary(statement)
   return query.pipe(
+    Effect.withTracerEnabled(false),
     Effect.mapError((cause) => DatabaseError.make({ operation, cause })),
     // mysql2 cannot cancel a running statement. Wait for active driver work
     // to settle before an interrupt can rollback or release its connection.
-    Effect.uninterruptible
+    Effect.uninterruptible,
+    Effect.withSpan(summary, {
+      kind: "client",
+      attributes: {
+        "db.system.name": "mysql",
+        ...(namespace ? { "db.namespace": namespace } : {}),
+        "db.query.summary": summary,
+        "db.query.text": statement,
+      },
+    })
   )
+}
+
+/**
+ * The statement's operation and first table, such as `SELECT drive_sync_run`
+ * or `INSERT drive_watch`, or the operation alone (`BEGIN`, `SELECT` for
+ * `SELECT GET_LOCK(...)`).
+ */
+function querySummary(statement: string): string {
+  const operation = (statement.trim().match(/^\w+/)?.[0] ?? "SQL").toUpperCase()
+  const table = statement.match(/\b(?:FROM|INTO|UPDATE|JOIN)\s+`?(\w+)/i)?.[1]
+  return table ? `${operation} ${table}` : operation
 }
