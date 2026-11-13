@@ -1,0 +1,244 @@
+/* Settings, privacy card, folder picker, login, and the loading screen. */
+.settings-content {
+  max-width: 800px;
+}
+.settings-card {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  margin-bottom: 22px;
+}
+.settings-section-heading {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 22px;
+  border-bottom: 1px solid var(--border);
+}
+.settings-icon {
+  width: 43px;
+  height: 43px;
+  display: grid;
+  place-items: center;
+  background: #22324a;
+  color: #91b9f2;
+  border: 1px solid #344965;
+}
+.settings-section-heading h2 {
+  font-size: 1rem;
+}
+.settings-section-heading p {
+  font-size: 0.8125rem;
+  margin-top: 4px;
+  color: #8295af;
+}
+.connection-badge {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #90aa9a;
+  font-size: 0.75rem;
+}
+.settings-body {
+  padding: 24px;
+}
+.settings-body > p {
+  margin-top: 7px;
+  font-size: 0.875rem;
+  color: #879bb7;
+  line-height: 1.8;
+  max-width: 600px;
+}
+.settings-actions {
+  display: flex;
+  justify-content: space-between;
+}
+.current-folder {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  background: var(--background);
+  color: var(--foreground);
+  margin: 22px 0;
+}
+.current-folder strong {
+  font-size: 0.875rem;
+  font-weight: 550;
+}
+.current-folder small {
+  display: block;
+  font: 0.75rem var(--font-mono);
+  margin-top: 4px;
+  color: var(--muted-foreground);
+}
+.current-folder a {
+  margin-left: auto;
+}
+.settings-note {
+  display: flex;
+  gap: 10px;
+  font-size: 0.8125rem;
+  color: #6f85a1;
+  margin-top: 25px;
+  line-height: 1.8;
+}
+.settings-note svg {
+  margin-top: 3px;
+}
+.settings-card-footer {
+  padding: 16px 24px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 15px;
+  font-size: 0.8125rem;
+  color: #8194ae;
+}
+.privacy-card {
+  display: flex;
+  gap: 15px;
+  padding: 22px;
+  color: #7f95b2;
+}
+.privacy-card h3 {
+  color: #b0bfd3;
+}
+.privacy-card p {
+  font-size: 0.8125rem;
+  line-height: 1.8;
+  margin-top: 5px;
+}
+.folder-picker {
+  margin-top: 20px;
+  border: 1px solid var(--border);
+  padding: 10px;
+}
+.folder-options {
+  max-height: 240px;
+  overflow: auto;
+  margin-top: 9px;
+}
+.folder-options button {
+  width: 100%;
+  text-align: left;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 10px;
+  color: var(--foreground);
+}
+.folder-options button:hover,
+.folder-options button.chosen {
+  background: var(--accent);
+}
+.folder-options small {
+  font: 0.75rem var(--font-mono);
+  color: var(--muted-foreground);
+  display: block;
+  margin-top: 3px;
+}
+.folder-options > p {
+  padding: 15px;
+  font-size: 0.8125rem;
+}
+.folder-picker > p {
+  padding: 16px;
+}
+.login {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  background:
+    radial-gradient(ellipse at 50% 45%, #1a263833, transparent 60%),
+    var(--background);
+}
+.login-card {
+  width: 330px;
+  max-width: calc(100% - 48px);
+  margin: auto;
+  position: relative;
+  padding: 35px 0;
+  text-align: center;
+}
+.login-emblem {
+  width: 60px;
+  height: 68px;
+  border: 1px solid #34547d;
+  background: #1b2b43;
+  display: grid;
+  place-items: center;
+  margin: 0 auto 30px;
+  box-shadow:
+    5px 5px 0 #101a29,
+    6px 6px 0 #2a4161;
+}
+.login-emblem svg {
+  width: 36px;
+  height: 36px;
+}
+.login-card h1 {
+  font-size: 1.5rem;
+  font-weight: 540;
+  letter-spacing: -0.9px;
+}
+.login-card > p {
+  color: #8596ae;
+  font-size: 0.875rem;
+  line-height: 1.9;
+  margin-top: 15px;
+}
+.google-button {
+  margin: 32px auto 0;
+  display: block;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.google-button img {
+  display: block;
+  width: 225px;
+  height: 50px;
+}
+.google-button:focus-visible {
+  outline: 2px solid #a8c7fa;
+  outline-offset: 4px;
+}
+.google-button:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+.login-privacy {
+  display: inline-block;
+  margin-top: 20px;
+  color: var(--muted-foreground);
+  font-size: 0.875rem;
+  text-underline-offset: 4px;
+}
+.login-privacy:hover {
+  color: var(--foreground);
+  text-decoration: underline;
+}
+.login-privacy:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 4px;
+}
+.form-error {
+  color: #f5b4a8 !important;
+  font-size: 0.8125rem !important;
+}
+.loading-screen {
+  min-height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 25px;
+}
+.spin {
+  animation: spin 1s linear infinite;
+}
