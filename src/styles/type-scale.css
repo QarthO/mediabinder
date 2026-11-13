@@ -64,3 +64,10 @@ html {
 .sidebar-collapsed .account {
   flex-direction: column;
 }
+.account button.sign-out {
+  color: var(--color-destructive);
+}
+.account button.sign-out:hover {
+  color: var(--color-destructive);
+  background: color-mix(in oklch, var(--color-destructive) 16%, transparent);
+}
