@@ -1,6 +1,7 @@
-import assert from "node:assert/strict"
-import { test } from "node:test"
-import { Effect } from "effect"
+import { afterEach, describe, expect, vi } from "vite-plus/test"
+import { it } from "@effect/vitest"
+import { Effect, Fiber } from "effect"
+import { TestClock } from "effect/testing"
 import {
   makeThumbnailCache,
   MAX_THUMBNAIL_BYTES,
@@ -13,70 +14,102 @@ const thumbnail = {
   contentType: "image/jpeg",
   etag: '"test"',
 }
-test("thumbnail cache shares requests, bounds concurrency, isolates users, expires and retries failures", async () => {
-  let calls = 0,
-    active = 0,
-    peak = 0,
-    failed = false
-  const load = (key: string) =>
-    Effect.tryPromise({
-      try: async () => {
-        calls++
-        active++
-        peak = Math.max(peak, active)
-        try {
-          await new Promise((resolve) => setTimeout(resolve, 5))
-          if (key === "failure" && !failed) {
-            failed = true
-            throw new ThumbnailError({ status: 502, message: "temporary" })
-          }
-          return thumbnail
-        } finally {
-          active--
-        }
-      },
-      catch: (cause) => cause as ThumbnailError,
-    })
-  const cache = await Effect.runPromise(
-    makeThumbnailCache(load, { capacity: 2, concurrency: 1, ttl: "60 millis" })
-  )
-  const get = (key: string) => Effect.runPromise(cache.get(key))
-  await Promise.all([get("alice:file"), get("alice:file"), get("bob:file")])
-  assert.equal(calls, 2)
-  assert.equal(peak, 1)
-  await get("alice:file")
-  assert.equal(calls, 2)
-  await get("third:file") // Bob is least recently used.
-  await get("bob:file")
-  assert.equal(calls, 4)
-  await new Promise((resolve) => setTimeout(resolve, 70))
-  await get("bob:file")
-  assert.equal(calls, 5)
-  await assert.rejects(get("failure"))
-  await get("failure")
-  assert.equal(calls, 7)
+
+afterEach(() => {
+  vi.restoreAllMocks()
 })
 
-test("thumbnail downloads reject oversized and non-image bodies", async () => {
-  const originalFetch = globalThis.fetch
-  try {
-    globalThis.fetch = async () =>
-      new Response(new Uint8Array(MAX_THUMBNAIL_BYTES + 1), {
-        headers: { "content-type": "image/jpeg" },
+describe("thumbnail cache", () => {
+  it.effect(
+    "shares requests, bounds concurrency, expires entries and retries failures",
+    () =>
+      Effect.gen(function* () {
+        let calls = 0,
+          active = 0,
+          peak = 0,
+          failed = false
+        const load = (key: string) =>
+          Effect.gen(function* () {
+            calls++
+            active++
+            peak = Math.max(peak, active)
+            yield* Effect.sleep("5 millis")
+            if (key === "failure" && !failed) {
+              failed = true
+              return yield* new ThumbnailError({
+                status: 502,
+                message: "temporary",
+              })
+            }
+            return thumbnail
+          }).pipe(
+            Effect.ensuring(
+              Effect.sync(() => {
+                active--
+              })
+            )
+          )
+        const cache = yield* makeThumbnailCache(load, {
+          capacity: 2,
+          concurrency: 1,
+          ttl: "60 millis",
+        })
+        // Starts the requests, lets the clock run their loads, and returns.
+        const get = Effect.fnUntraced(function* (...keys: string[]) {
+          const fiber = yield* Effect.forkChild(
+            Effect.all(
+              keys.map((key) => cache.get(key)),
+              { concurrency: "unbounded", mode: "result" }
+            )
+          )
+          yield* TestClock.adjust("20 millis")
+          return yield* Fiber.join(fiber)
+        })
+
+        yield* get("alice:file", "alice:file", "bob:file")
+        expect(calls).toBe(2)
+        expect(peak).toBe(1)
+        yield* get("alice:file")
+        expect(calls).toBe(2)
+        yield* get("third:file") // Bob is least recently used.
+        yield* get("bob:file")
+        expect(calls).toBe(4)
+        yield* TestClock.adjust("70 millis")
+        yield* get("bob:file")
+        expect(calls).toBe(5)
+        const [first] = yield* get("failure")
+        expect(first._tag).toBe("Failure")
+        const [second] = yield* get("failure")
+        expect(second._tag).toBe("Success")
+        expect(calls).toBe(7)
       })
-    await assert.rejects(
-      Effect.runPromise(readThumbnail("https://example.com", "test")),
-      /size limit/
-    )
-    globalThis.fetch = async () =>
-      new Response("<html>error</html>", {
-        headers: { "content-type": "text/html" },
-      })
-    await assert.rejects(
-      Effect.runPromise(readThumbnail("https://example.com", "test")),
-      /invalid thumbnail/
-    )
-  } finally {
-    globalThis.fetch = originalFetch
-  }
+  )
+})
+
+describe("readThumbnail", () => {
+  it.effect("rejects oversized and non-image bodies", () =>
+    Effect.gen(function* () {
+      vi.spyOn(globalThis, "fetch").mockImplementation(
+        async () =>
+          new Response(new Uint8Array(MAX_THUMBNAIL_BYTES + 1), {
+            headers: { "content-type": "image/jpeg" },
+          })
+      )
+      const oversized = yield* readThumbnail(
+        "https://example.com",
+        "test"
+      ).pipe(Effect.flip)
+      expect(oversized.message).toMatch(/size limit/)
+      vi.spyOn(globalThis, "fetch").mockImplementation(
+        async () =>
+          new Response("<html>error</html>", {
+            headers: { "content-type": "text/html" },
+          })
+      )
+      const invalid = yield* readThumbnail("https://example.com", "test").pipe(
+        Effect.flip
+      )
+      expect(invalid.message).toMatch(/invalid thumbnail/)
+    })
+  )
 })

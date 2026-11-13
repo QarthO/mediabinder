@@ -1,56 +1,53 @@
-import { test } from "node:test"
-import assert from "node:assert/strict"
+import { describe, expect, it } from "vite-plus/test"
 import { parseNameList, formatNameList } from "./name-list"
 import { tags, newSet, metadata, addMediaSets } from "./validation"
 
 const id = "a6507f20-de60-48a4-a04d-e911c64f5f9e"
 
-test("copied names round-trip with spaces inside names intact", () => {
-  const names = ["Travel", "New York", "Behind the scenes"]
-  assert.equal(formatNameList(names), "Travel, New York, Behind the scenes")
-  assert.deepEqual(parseNameList(formatNameList(names)), names)
-})
+describe("name lists", () => {
+  it("round-trips copied names with spaces inside names intact", () => {
+    const names = ["Travel", "New York", "Behind the scenes"]
+    expect(formatNameList(names)).toBe("Travel, New York, Behind the scenes")
+    expect(parseNameList(formatNameList(names))).toEqual(names)
+  })
 
-test("pasted lists trim separator whitespace, ignore blanks, and deduplicate casing", () => {
-  const names = parseNameList(
-    " Travel ,  New York,,\nTRAVEL,\t new york , Blue  sky, "
-  )
-  assert.deepEqual(names, ["Travel", "New York", "Blue  sky"])
-  assert.deepEqual(tags.parse(names), ["travel", "new york", "blue  sky"])
-  assert.deepEqual(parseNameList(", , \n"), [])
-})
+  it("trims pasted separators, ignores blanks and deduplicates casing", () => {
+    const names = parseNameList(
+      " Travel ,  New York,,\nTRAVEL,\t new york , Blue  sky, "
+    )
+    expect(names).toEqual(["Travel", "New York", "Blue  sky"])
+    expect(tags.parse(names)).toEqual(["travel", "new york", "blue  sky"])
+    expect(parseNameList(", , \n")).toEqual([])
+  })
 
-test("name limits apply to individual names and list counts", () => {
-  const names = parseNameList(`${"a".repeat(50)}, ${"b".repeat(50)}`)
-  assert.equal(tags.safeParse(names).success, true)
-  assert.equal(tags.safeParse(["a".repeat(51)]).success, false)
-  assert.equal(
-    tags.safeParse(Array.from({ length: 51 }, (_, i) => `tag${i}`)).success,
-    false
-  )
-  assert.equal(addMediaSets.safeParse({ ids: [id], names: [] }).success, false)
-  assert.equal(
-    addMediaSets.safeParse({ ids: [id], names: ["a".repeat(256)] }).success,
-    false
-  )
-})
+  it("applies limits to individual names and list counts", () => {
+    const names = parseNameList(`${"a".repeat(50)}, ${"b".repeat(50)}`)
+    expect(tags.safeParse(names).success).toBe(true)
+    expect(tags.safeParse(["a".repeat(51)]).success).toBe(false)
+    expect(
+      tags.safeParse(Array.from({ length: 51 }, (_, i) => `tag${i}`)).success
+    ).toBe(false)
+    expect(addMediaSets.safeParse({ ids: [id], names: [] }).success).toBe(false)
+    expect(
+      addMediaSets.safeParse({ ids: [id], names: ["a".repeat(256)] }).success
+    ).toBe(false)
+  })
 
-test("commas cannot enter tag names or set names through create or rename", () => {
-  assert.equal(tags.safeParse(["one,two"]).success, false)
-  assert.equal(newSet.safeParse({ displayName: "one, two" }).success, false)
-  assert.equal(
-    addMediaSets.safeParse({ ids: [id], names: ["one, two"] }).success,
-    false
-  )
-  const input = {
-    id,
-    displayName: "one, two",
-    createdAt: "2026-09-05T00:00:00Z",
-  }
-  assert.equal(metadata.safeParse({ ...input, kind: "set" }).success, false)
-  assert.equal(metadata.safeParse({ ...input, kind: "media" }).success, true)
-  assert.deepEqual(
-    addMediaSets.parse({ ids: [id, id], names: [" Travel ", "travel"] }),
-    { ids: [id], names: ["travel"] }
-  )
+  it("keeps commas out of tag and set names on create and rename", () => {
+    expect(tags.safeParse(["one,two"]).success).toBe(false)
+    expect(newSet.safeParse({ displayName: "one, two" }).success).toBe(false)
+    expect(
+      addMediaSets.safeParse({ ids: [id], names: ["one, two"] }).success
+    ).toBe(false)
+    const input = {
+      id,
+      displayName: "one, two",
+      createdAt: "2026-09-05T00:00:00Z",
+    }
+    expect(metadata.safeParse({ ...input, kind: "set" }).success).toBe(false)
+    expect(metadata.safeParse({ ...input, kind: "media" }).success).toBe(true)
+    expect(
+      addMediaSets.parse({ ids: [id, id], names: [" Travel ", "travel"] })
+    ).toEqual({ ids: [id], names: ["travel"] })
+  })
 })

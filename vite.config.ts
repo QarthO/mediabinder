@@ -15,6 +15,18 @@ export default defineConfig({
     host: "0.0.0.0",
     port: 3100,
   },
+  test: {
+    include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
+    globalSetup: ["src/test/global-setup.ts"],
+    setupFiles: ["src/test/setup.ts"],
+    // Worker threads start faster than forked processes.
+    pool: "threads",
+    // These only catch hangs. Tests share the machine with every other
+    // stack and test run, so the same test can take many times as long
+    // while they're busy.
+    testTimeout: 60_000,
+    hookTimeout: 300_000,
+  },
   lint: {
     jsPlugins: [
       { name: "vite-plus", specifier: "vite-plus/oxlint-plugin" },

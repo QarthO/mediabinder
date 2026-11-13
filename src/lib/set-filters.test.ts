@@ -1,5 +1,4 @@
-import assert from "node:assert/strict"
-import { test } from "node:test"
+import { describe, expect, it } from "vite-plus/test"
 import { filterSets } from "./set-filters"
 import type { MediaSet } from "./types"
 
@@ -46,62 +45,56 @@ const options = {
 }
 const ids = (result: MediaSet[]) => result.map((set) => set.id)
 
-test("unfiltered sets include empty sets and sort newest first without mutating query data", () => {
-  assert.deepEqual(ids(filterSets(sets, [], options)), [
-    "clips",
-    "shoot",
-    "empty",
-  ])
-  assert.deepEqual(ids(sets), ["empty", "shoot", "clips"])
-})
-test("set search finds names, original names and tags ignoring case and whitespace", () => {
-  for (const search of [" summer ", "ORIGINAL", "outdoor"])
-    assert.deepEqual(ids(filterSets(sets, [], { ...options, search })), [
+describe("filterSets", () => {
+  it("includes empty sets and sorts newest first without mutating query data", () => {
+    expect(ids(filterSets(sets, [], options))).toEqual([
+      "clips",
       "shoot",
+      "empty",
     ])
-})
-test("media filters restrict sets by matching members only when active", () => {
-  const media = [{ set_ids: ["shoot"] }]
-  // Only membership is read: the caller has already applied media/folder filters.
-  assert.deepEqual(
-    ids(
-      filterSets(sets, media, {
-        ...options,
-        filterByMedia: true,
-      })
-    ),
-    ["shoot"]
-  )
-  assert.deepEqual(
-    filterSets(sets, [], { ...options, filterByMedia: true }),
-    []
-  )
-})
-test("set picker composes with search and sorting supports oldest and name", () => {
-  assert.deepEqual(
-    ids(filterSets(sets, [], { ...options, setFilter: "shoot" })),
-    ["shoot"]
-  )
-  assert.deepEqual(
-    filterSets(sets, [], { ...options, setFilter: "shoot", search: "clips" }),
-    []
-  )
-  assert.deepEqual(
-    ids(
-      filterSets(sets, [], {
-        ...options,
-        sorting: [{ id: "uploaded_at", desc: false }],
-      })
-    ),
-    ["empty", "shoot", "clips"]
-  )
-  assert.deepEqual(
-    ids(
-      filterSets(sets, [], {
-        ...options,
-        sorting: [{ id: "display_name", desc: false }],
-      })
-    ),
-    ["clips", "empty", "shoot"]
-  )
+    expect(ids(sets)).toEqual(["empty", "shoot", "clips"])
+  })
+
+  it("searches names, original names and tags ignoring case and whitespace", () => {
+    for (const search of [" summer ", "ORIGINAL", "outdoor"])
+      expect(ids(filterSets(sets, [], { ...options, search }))).toEqual([
+        "shoot",
+      ])
+  })
+
+  it("restricts sets by matching members only when media filters are active", () => {
+    const media = [{ set_ids: ["shoot"] }]
+    // Only membership is read: the caller has already applied media/folder filters.
+    expect(
+      ids(filterSets(sets, media, { ...options, filterByMedia: true }))
+    ).toEqual(["shoot"])
+    expect(filterSets(sets, [], { ...options, filterByMedia: true })).toEqual(
+      []
+    )
+  })
+
+  it("composes the set picker with search and sorts by date or name", () => {
+    expect(
+      ids(filterSets(sets, [], { ...options, setFilter: "shoot" }))
+    ).toEqual(["shoot"])
+    expect(
+      filterSets(sets, [], { ...options, setFilter: "shoot", search: "clips" })
+    ).toEqual([])
+    expect(
+      ids(
+        filterSets(sets, [], {
+          ...options,
+          sorting: [{ id: "uploaded_at", desc: false }],
+        })
+      )
+    ).toEqual(["empty", "shoot", "clips"])
+    expect(
+      ids(
+        filterSets(sets, [], {
+          ...options,
+          sorting: [{ id: "display_name", desc: false }],
+        })
+      )
+    ).toEqual(["clips", "empty", "shoot"])
+  })
 })
