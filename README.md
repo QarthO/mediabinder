@@ -128,7 +128,7 @@ The linking rules are covered by `src/lib/shared-folders.mysql.test.ts`, with mo
 
 ## Observability
 
-MediaBinder can export OpenTelemetry traces, logs and metrics over OTLP/HTTP (protobuf) to any backend, such as an OpenTelemetry Collector, Grafana Tempo and Loki, or a hosted service. It is configured only through the standard `OTEL_*` variables, all optional. Nothing is exported, and nothing is logged about it, unless an endpoint is set. No collector is deployed by default. The web and worker processes report as service `mediabinder`, with `service.version` and `vcs.ref.head.revision` set to the build commit.
+MediaBinder can export OpenTelemetry traces, logs and metrics over OTLP/HTTP (protobuf) to any backend, such as an OpenTelemetry Collector, Grafana Tempo and Loki, or a hosted service. It is configured only through the standard `OTEL_*` variables, all optional. Nothing is exported, and nothing is logged about it, unless an endpoint is set. No collector is deployed by default. The web process reports as service `mediabinder`, the Drive worker as `mediabinder-worker` (in the standalone image it runs inside the same container), and browsers as `mediabinder-browser`. All carry `service.version` and `vcs.ref.head.revision` set to the build commit.
 
 | Variable                                            | Default / purpose                                                                                                                                                        |
 | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -141,7 +141,7 @@ MediaBinder can export OpenTelemetry traces, logs and metrics over OTLP/HTTP (pr
 | `OTEL_RESOURCE_ATTRIBUTES`                          | Unset. Extra resource attributes, such as `deployment.environment.name=production`.                                                                                      |
 | `OTEL_SDK_DISABLED`                                 | `false`. `true` turns all export off.                                                                                                                                    |
 
-Traces and logs are on whenever an endpoint is set; metrics are opt-in with `OTEL_METRICS_EXPORTER=otlp`. A request is one trace: its server span has the Drive, thumbnail and database-lock work as children. Span names are stable (`Library.post`, `Media.get`, `Thumbnail.get`, `Drive.get`); they never contain file names, tags or user data. An invalid `OTEL_*` value disables export with one console error instead of stopping the server. Logs still go to the container's stdout as JSON either way.
+Traces and logs are on whenever an endpoint is set; metrics are opt-in with `OTEL_METRICS_EXPORTER=otlp`. A request is one trace: its server span has the Drive, thumbnail, catalog and database work as children. Span names are stable (`Library.post`, `Media.get`, `Thumbnail.get`, `Drive.sync`); they never contain file names, tags or user data. An invalid `OTEL_*` value disables export with one console error instead of stopping the server. Logs still go to the container's stdout as JSON either way.
 
 Errors are exported as error logs, not span events. Each carries `exception.type`, `exception.message` and `exception.stacktrace`, plus a stable `error.fingerprint` (the error type, its message with ids and numbers removed, and the operation) to group occurrences, and `mediabinder.operation`. Expected outcomes, such as a rejected request, a validation error, a cancelled request or a missing thumbnail, are not reported.
 
@@ -151,11 +151,9 @@ When an OTLP endpoint is configured, signed-in browsers also report, as service 
 
 ## Development and checks
 
-Node 24 and pnpm 11 are used in Docker. On the host, `pnpm install --frozen-lockfile`, `pnpm typecheck`, `pnpm test`, and `pnpm build` check the code. Runtime development is simplest through `pnpm dev:docker`; container startup runs idempotent migrations before serving. For host-only runtime commands, supply the environment and a reachable MySQL URL yourself.
+See [docs/development.md](docs/development.md) for commands, the development Docker stack, React Scan, running the MySQL tests and running a local OTLP receiver, and [CONTRIBUTING.md](CONTRIBUTING.md) for pull requests. `pnpm verify` runs the checks CI runs (`static`, `tests`, `database`, `build`).
 
 Use T3 Code's browser preview at http://localhost:3100 to check the real Google login and Drive flows. No development authentication bypass is included. `/api/health` checks the database connection. Back up MySQL before upgrading; versioned application migrations are in `migrations/`, and Better Auth manages its own tables during startup. The multiple-folder migration preserves your existing source and catalog.
-
-The `*.mysql.test.ts` suites run the server modules (library edits, shared catalog, shared folders, Drive webhooks, sync progress, the media proxy route) against a real MySQL, with Google and the session lookup faked at their single seams. They skip themselves unless `MEDIABINDER_TEST_MYSQL=1`. Start a disposable server, for example `docker run -d --rm -p 127.0.0.1:3306:3306 -e MYSQL_ROOT_PASSWORD=root mysql:8.4`, then run `MEDIABINDER_TEST_MYSQL=1 DB_HOST=127.0.0.1 DB_NAME=mediabinder_test DB_USER=root DB_PASS=root pnpm verify database`. Each Vitest worker gets its own `<DB_NAME>_<n>` database, so `DB_NAME` must end in `_test` and the account must be able to create databases; never point it at real data.
 
 ## Preview fixtures
 
@@ -163,7 +161,7 @@ The initial browser validation uses only `ExampleMediaFolder`, with eight sample
 
 ### Thumbnail loading and diagnostics
 
-Thumbnails use a focused Effect service; the rest of the app still uses TanStack Query and async/await. The virtual table eagerly loads its eight overscan rows in each direction. A loading placeholder covers cold requests, and the browser retries failed thumbnail requests once.
+Thumbnails use a focused Effect service, and the server side of the app runs on Effect; the client uses TanStack Query. The virtual table eagerly loads its eight overscan rows in each direction. A loading placeholder covers cold requests, and the browser retries failed thumbnail requests once.
 
 Thumbnail responses use a private five-minute browser cache (`Vary: Cookie`) with ETags for revalidation. The web process caches at most 64 thumbnails for fifteen minutes, each capped at 1 MiB, with six concurrent Google loads. Concurrent requests for the same user/file share a lookup; failed loads are not cached. Nothing is written to disk. A cold server restart empties this cache. Drive image replacements can take up to twenty minutes to appear across the two cache layers. Every network request still checks the session, ownership, and current availability before accessing the server cache. Original images and video streams retain `no-store` and byte-range streaming.
 
@@ -173,7 +171,7 @@ Each thumbnail response includes `Server-Timing` for duration and cache reuse. E
 
 Set Google Auth Platform's homepage to your `MEDIABINDER_URL` and privacy-policy URL to `/privacy` on that origin. Deploy the privacy page before switching Audience to **In production**, then reconnect Google to replace Testing-mode authorization. Production status does not remove Google's unverified-app warning.
 
-Library JSON requests and Google Drive JSON/watch requests use Effect HttpClient with a 30-second timeout, cancellation and tagged errors. Mutations are not automatically retried. Video proxy requests use Effect's Promise integration and retain the incoming request signal for the entire streamed response. Network spans use the same optional exporter as thumbnails. Database transaction and worker orchestration remain separate from this networking migration.
+Library JSON requests and Google Drive JSON/watch requests use Effect HttpClient with a 30-second timeout, cancellation and tagged errors. Mutations are not automatically retried. Video proxy requests retain the incoming request signal for the entire streamed response. Drive request counts and durations are exported as metrics (`mediabinder.drive.api.requests`), not as a span per request.
 
 The login button uses Google's unmodified pre-approved asset; see `public/google-signin-NOTICE.txt` for its source.
 
@@ -189,16 +187,11 @@ Use **All content / Uncataloged / Cataloged** beside the media-type filter. Rena
 
 Catalog writes and merge transactions share one database lock to prevent edits being lost during consolidation. Google scans happen outside that lock, and failed scans preserve the existing catalog.
 
-`src/lib/shared-catalog.mysql.test.ts` covers deduplication, shared curation, access isolation and history preservation; run it as described under **Development and checks**.
+`src/lib/shared-catalog.mysql.test.ts` covers deduplication, shared curation, access isolation and history preservation; run it as described in [docs/development.md](docs/development.md#running-the-mysql-tests).
 
 ### Checking UI responsiveness
 
-React Scan loads only when the dev server starts with `VITE_REACT_SCAN=true`
-(local package, no CDN); without it the toolbar never instruments React. Use
-`VITE_REACT_SCAN=true pnpm dev`, or `VITE_REACT_SCAN=true pnpm dev:docker`
-(`compose.dev.yaml` passes it to the container). Use the on-page toolbar or `window.__mediaBinderRenderAudit.reset()` and
-`window.__mediaBinderRenderAudit.snapshot()` around a single interaction in T3
-Preview. The UI commit checklist is in `AGENTS.md`.
+React Scan and the render audit are described in [docs/development.md](docs/development.md#react-scan); the commit checklist is in [AGENTS.md](AGENTS.md#ui-performance-before-committing).
 
 Search keeps keystrokes local and applies results after a 150 ms pause (Enter
 applies immediately). Lists and grids mount only a viewport of cards/rows.
@@ -206,8 +199,6 @@ Compact tags and sets show two rows with a +N overflow; closed pickers do not
 mount their option trees. Native thumbnail completion does not update React
 state. Google requests remain behind the existing authenticated, bounded caches.
 
-Always also check a production build: React Scan is excluded there. User Timing
-marks `mediabinder-hydration-start` and `mediabinder-interactive` distinguish
-JavaScript hydration from first paint and from thumbnail/network completion.
-Validate cold loads, complete filter labels in server HTML, and immediate typing
-and filtering; a fast first paint alone is insufficient.
+Always also check a production build: React Scan is excluded there. Validate
+cold loads, complete filter labels in server HTML, and immediate typing and
+filtering; a fast first paint alone is insufficient.
