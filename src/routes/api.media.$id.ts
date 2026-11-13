@@ -5,7 +5,7 @@ import { requireSession } from "@/lib/auth.server"
 import { rows } from "@/lib/database.server"
 import { errorResponse } from "@/lib/http-errors"
 import { thumbnailResponse } from "@/effect/thumbnails.server"
-import { mediaResponse } from "@/effect/media.server"
+import * as Media from "@/effect/media.server"
 export const Route = createFileRoute("/api/media/$id")({
   server: {
     handlers: {
@@ -30,7 +30,7 @@ export const Route = createFileRoute("/api/media/$id")({
               return yield* Effect.promise(() =>
                 thumbnailResponse(session.user.id, media.drive_id, request)
               )
-            return yield* mediaResponse(request, media)
+            return yield* Media.stream(request, media)
           }).pipe(
             Effect.catchTag("AuthenticationError", (error) =>
               Effect.succeed(errorResponse(error))

@@ -24,16 +24,13 @@ import {
   tags,
   linkFolder,
 } from "./validation"
+import { DriveAccessError } from "@/effect/errors"
+import { runTracedAppEffect } from "@/effect/runtime.server"
+import * as DriveAccess from "./drive-access.server"
 import {
-  DriveAccessError,
-  createFolder,
-  getFolder,
   pickerConfig,
-  removeAppShare,
   shareAddress,
-  shareFolderWithApp,
   sharedFolderMode,
-  waitForAppAccess,
 } from "./drive-access.server"
 import {
   driveJson,
@@ -43,6 +40,21 @@ import {
 } from "./drive.server"
 import { syncStatus } from "./sync-progress.server"
 import type { RowDataPacket } from "mysql2/promise"
+
+// Promise facades over the DriveAccess Effects, until this module is converted.
+const createFolder = (...args: Parameters<typeof DriveAccess.createFolder>) =>
+  runTracedAppEffect(DriveAccess.createFolder(...args))
+const getFolder = (...args: Parameters<typeof DriveAccess.getFolder>) =>
+  runTracedAppEffect(DriveAccess.getFolder(...args))
+const shareFolderWithApp = (
+  ...args: Parameters<typeof DriveAccess.shareFolderWithApp>
+) => runTracedAppEffect(DriveAccess.shareFolderWithApp(...args))
+const removeAppShare = (
+  ...args: Parameters<typeof DriveAccess.removeAppShare>
+) => runTracedAppEffect(DriveAccess.removeAppShare(...args))
+const waitForAppAccess = (
+  ...args: Parameters<typeof DriveAccess.waitForAppAccess>
+) => runTracedAppEffect(DriveAccess.waitForAppAccess(...args))
 
 export async function library(
   user: Library["user"] & { id: string }

@@ -6,9 +6,12 @@ import {
   Effect,
   Exit,
   Layer,
+  Option,
   Schema,
   Semaphore,
 } from "effect"
+import { HttpClientRequest, HttpClientResponse } from "effect/http"
+import { driveRequest } from "./drive-http.server"
 
 export class ThumbnailError extends Schema.TaggedError<ThumbnailError>()(
   "ThumbnailError",
@@ -60,7 +63,7 @@ export const makeThumbnailCache = Effect.fn("makeThumbnailCache")(function* (
     }
   )
   return {
-    get: Effect.fn("thumbnails.get")(function* (key: string) {
+    get: Effect.fn("Thumbnail.cacheGet")(function* (key: string) {
       const reused = yield* Cache.has(cache, key)
       const [duration, thumbnail] = yield* Cache.get(cache, key).pipe(
         Effect.timed
@@ -89,88 +92,78 @@ export class Thumbnails extends Context.Service<
   )
 }
 
-export const readThumbnail = Effect.fn("thumbnails.download")(function* (
+export const readThumbnail = Effect.fn("Thumbnail.download")(function* (
   url: string,
   token: string
 ) {
-  return yield* Effect.tryPromise({
-    try: async (signal) => {
-      const response = await fetch(url, {
-        headers: { Authorization: `Bearer ${token}` },
-        signal,
-      })
-      if (!response.ok) {
-        await response.body?.cancel()
-        throw new ThumbnailError({
-          status: response.status === 404 ? 404 : 502,
-          message: "Google could not provide this thumbnail. Try again.",
-        })
-      }
-      const contentType =
-        response.headers.get("content-type")?.split(";")[0] ?? ""
-      if (
-        !["image/jpeg", "image/png", "image/webp", "image/gif"].includes(
-          contentType
-        )
-      ) {
-        await response.body?.cancel()
-        throw new ThumbnailError({
-          status: 502,
-          message: "Google returned an invalid thumbnail.",
-        })
-      }
-      const reader = response.body?.getReader()
-      if (!reader)
-        throw new ThumbnailError({
-          status: 502,
-          message: "Google returned an empty thumbnail.",
-        })
+  const fail = (status: number, message: string) =>
+    new ThumbnailError({ status, message })
+  const response = yield* driveRequest(
+    "thumbnail.download",
+    HttpClientRequest.get(url, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+  ).pipe(
+    Effect.mapError(() => fail(502, "Thumbnail download failed. Try again."))
+  )
+  // The body is read here, a chunk at a time, to stop at the size limit.
+  const source = Option.getOrThrow(HttpClientResponse.toWeb(response))
+  const discard = Effect.tryPromise(
+    () => source.body?.cancel() ?? Promise.resolve()
+  ).pipe(Effect.ignore)
+  if (!response.status || response.status < 200 || response.status >= 300) {
+    yield* discard
+    return yield* fail(
+      response.status === 404 ? 404 : 502,
+      "Google could not provide this thumbnail. Try again."
+    )
+  }
+  const contentType = source.headers.get("content-type")?.split(";")[0] ?? ""
+  if (
+    !["image/jpeg", "image/png", "image/webp", "image/gif"].includes(
+      contentType
+    )
+  ) {
+    yield* discard
+    return yield* fail(502, "Google returned an invalid thumbnail.")
+  }
+  const reader = source.body?.getReader()
+  if (!reader) return yield* fail(502, "Google returned an empty thumbnail.")
+  const chunks = yield* Effect.tryPromise({
+    try: async () => {
       const chunks: Uint8Array[] = []
       let size = 0
-      await Effect.runPromise(
-        Effect.tryPromise({
-          try: async () => {
-            while (true) {
-              const { done, value } = await reader.read()
-              if (done) break
-              size += value.byteLength
-              if (size > MAX_THUMBNAIL_BYTES)
-                throw new ThumbnailError({
-                  status: 502,
-                  message: "Thumbnail exceeds the size limit.",
-                })
-              chunks.push(value)
-            }
-          },
-          catch: (cause) => cause,
-        }).pipe(
-          Effect.ensuring(
-            Effect.tryPromise(() => reader.cancel()).pipe(
-              Effect.ignore,
-              Effect.andThen(Effect.sync(() => reader.releaseLock()))
-            )
-          )
-        ),
-        { signal }
-      )
-      const bytes = new Uint8Array(size)
-      let offset = 0
-      for (const chunk of chunks) {
-        bytes.set(chunk, offset)
-        offset += chunk.byteLength
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        size += value.byteLength
+        if (size > MAX_THUMBNAIL_BYTES)
+          throw fail(502, "Thumbnail exceeds the size limit.")
+        chunks.push(value)
       }
-      return {
-        bytes,
-        contentType,
-        etag: `"${createHash("sha256").update(bytes).digest("hex")}"`,
-      }
+      return chunks
     },
     catch: (cause) =>
       cause instanceof ThumbnailError
         ? cause
-        : new ThumbnailError({
-            status: 502,
-            message: "Thumbnail download failed. Try again.",
-          }),
-  })
+        : fail(502, "Thumbnail download failed. Try again."),
+  }).pipe(
+    Effect.ensuring(
+      Effect.tryPromise(() => reader.cancel()).pipe(
+        Effect.ignore,
+        Effect.andThen(Effect.sync(() => reader.releaseLock()))
+      )
+    )
+  )
+  const bytes = new Uint8Array(chunks.reduce((n, c) => n + c.byteLength, 0))
+  let offset = 0
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  return {
+    bytes,
+    contentType,
+    etag: `"${createHash("sha256").update(bytes).digest("hex")}"`,
+  }
 })

@@ -5,7 +5,11 @@ import { EXPECTED_ERROR_TAGS } from "@/lib/http-errors"
 
 // Tagged errors that carry an HTTP status. Below 500 they describe a request
 // the app refused or couldn't satisfy, such as a missing thumbnail.
-const STATUS_ERROR_TAGS = new Set(["NetworkError", "ThumbnailError"])
+const STATUS_ERROR_TAGS = new Set([
+  "DriveApiError",
+  "NetworkError",
+  "ThumbnailError",
+])
 
 /** Outcomes the app handles on purpose, so they are not reported as errors. */
 export function isExpectedAppError(value: unknown): boolean {
@@ -18,6 +22,11 @@ export function isExpectedAppError(value: unknown): boolean {
   if (EXPECTED_ERROR_TAGS.has(value._tag)) return true
   // A preview too large to buffer has no status: its caller falls back to
   // streaming the original.
+  // Google refusing a share or lookup is the person's to fix, except when it
+  // answered with something other than a refusal.
+  if (value._tag === "DriveAccessError") {
+    return !("code" in value) || value.code !== "unavailable"
+  }
   if (value._tag === "PreviewError") {
     return !("status" in value) || isClientStatus(value.status)
   }

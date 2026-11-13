@@ -3,12 +3,10 @@ import {
   resolveCatalog,
   withDriveLock,
 } from "./catalog.server"
-import { runAppEffect } from "@/effect/runtime.server"
-import { Effect } from "effect"
-import { jsonRequest } from "@/effect/http"
+import { runTracedAppEffect } from "@/effect/runtime.server"
+import * as Drive from "@/effect/drive-api.server"
 import { randomUUID } from "node:crypto"
-import { auth } from "./auth.server"
-import { serviceAccountToken, sharedFolderMode } from "./drive-access.server"
+import { sharedFolderMode } from "./drive-access.server"
 import type { LockedSession } from "@/effect/database"
 import type { SessionConnection } from "./database.server"
 import type { SyncRun } from "./types"
@@ -36,83 +34,20 @@ export interface DriveFile {
   // Limited-access folder: it doesn't inherit its parent's sharing.
   inheritedPermissionsDisabled?: boolean
 }
-export async function driveToken(headers?: Headers, userId?: string) {
-  return runAppEffect(
-    "Drive.token",
-    Effect.gen(function* () {
-      const result = yield* Effect.tryPromise({
-        try: () =>
-          auth.api.getAccessToken({
-            ...(headers ? { headers } : {}),
-            body: { providerId: "google", ...(userId ? { userId } : {}) },
-          }),
-        catch: () => new Error("Reconnect Google Drive in settings."),
-      })
-      if (!result.accessToken)
-        return yield* Effect.fail(
-          new Error("Reconnect Google Drive in settings.")
-        )
-      return result.accessToken
-    })
-  )
-}
-
-// Token used to read Drive content. In shared-folder mode that is MediaBinder's
-// service account (routes check ownership first); otherwise the user's token.
-export async function driveReadToken(userId?: string, headers?: Headers) {
-  return sharedFolderMode()
-    ? serviceAccountToken()
-    : driveToken(headers, userId)
-}
-
-export async function driveJson<T>(
+// Promise facades over the Drive Effects (effect/drive-api.server.ts) for the
+// sync, the webhook worker, library.server.ts and scripts, which aren't
+// converted yet. They go with their last caller.
+export const driveToken = (headers?: Headers, userId?: string) =>
+  runTracedAppEffect(Drive.token(headers, userId))
+export const driveReadToken = (userId?: string, headers?: Headers) =>
+  runTracedAppEffect(Drive.readToken(userId, headers))
+export const driveJson = <T>(
   token: string,
   path: string,
   params: Record<string, string> = {}
-): Promise<T> {
-  return runAppEffect(
-    "Drive.get",
-    jsonRequest<T>(
-      `https://www.googleapis.com/drive/v3/${path}?${new URLSearchParams(params)}`,
-      {
-        headers: { Authorization: `Bearer ${token}` },
-        errorMessage: (status) =>
-          status === 401
-            ? "Google access expired. Reconnect Google Drive in settings."
-            : status === 403
-              ? "Google Drive denied access. Check the Drive API and folder permissions."
-              : status === 404
-                ? "This file or folder is no longer available in Google Drive."
-                : `Google Drive is unavailable (${status}). Try again.`,
-      }
-    )
-  )
-}
-export async function listFolders(headers: Headers) {
-  // The service account can see every user's shared folders, so browsing is
-  // only offered with full-Drive user tokens. Shared-folder mode uses Google's picker.
-  if (sharedFolderMode())
-    throw new Error("Choose folders with the Google Drive picker.")
-  const token = await driveToken(headers)
-  const folders: { id: string; name: string }[] = []
-  let pageToken = ""
-  do {
-    const page = await driveJson<{
-      files: { id: string; name: string }[]
-      nextPageToken?: string
-    }>(token, "files", {
-      q: "trashed = false and mimeType = 'application/vnd.google-apps.folder'",
-      fields: "nextPageToken,files(id,name)",
-      pageSize: "1000",
-      supportsAllDrives: "true",
-      includeItemsFromAllDrives: "true",
-      ...(pageToken ? { pageToken } : {}),
-    })
-    folders.push(...page.files)
-    pageToken = page.nextPageToken ?? ""
-  } while (pageToken)
-  return folders.sort((a, b) => a.name.localeCompare(b.name))
-}
+) => runTracedAppEffect(Drive.json<T>(token, path, params))
+export const listFolders = (headers: Headers) =>
+  runTracedAppEffect(Drive.listFolders(headers))
 type SyncOptions = {
   headers?: Headers
   token?: string

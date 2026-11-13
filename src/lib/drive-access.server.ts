@@ -1,5 +1,17 @@
 import { createSign } from "node:crypto"
 import { readFileSync } from "node:fs"
+import { Cache, Duration, Effect, Exit, Schedule, Schema } from "effect"
+import { HttpClientRequest } from "effect/http"
+import {
+  DRIVE_API,
+  driveJsonRequest,
+  driveOperation,
+} from "@/effect/drive-http.server"
+import {
+  DriveApiError,
+  DriveAccessError,
+  ValidationError,
+} from "@/effect/errors"
 
 // Shared-folder mode: users share a folder with MediaBinder's service account,
 // which reads Drive on their behalf. Users only grant the non-sensitive
@@ -90,206 +102,259 @@ export function signAssertion(
   return `${header}.${claims}.${base64url(signer.sign(sa.private_key))}`
 }
 
-let cached: { token: string; expires: number } | null = null
-let pending: Promise<string> | null = null
+// Tokens are cached process-wide and refreshed a minute before expiry. The
+// cache also shares one in-flight sign-in between concurrent callers.
+const requestServiceAccountToken = Effect.fnUntraced(function* () {
+  const sa = serviceAccount()
+  if (!sa) return yield* new DriveApiError({ operation: "oauth2.token" })
+  const request = HttpClientRequest.post(sa.token_uri).pipe(
+    HttpClientRequest.bodyUrlParams({
+      grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+      assertion: signAssertion(sa),
+    })
+  )
+  const { status, body } = yield* driveJsonRequest("oauth2.token", request, {
+    timeout: "15 seconds",
+  })
+  const token = Schema.decodeUnknownOption(TokenResponse)(body)
+  if (status < 200 || status >= 300 || token._tag === "None")
+    return yield* new DriveApiError({ operation: "oauth2.token", status })
+  return {
+    token: token.value.access_token,
+    expires: Date.now() + (token.value.expires_in ?? 3600) * 1000,
+  }
+})
+const TokenResponse = Schema.Struct({
+  access_token: Schema.NonEmptyString,
+  expires_in: Schema.optionalKey(Schema.Number),
+})
+const tokenCache = Effect.runSync(
+  Cache.makeWith(requestServiceAccountToken, {
+    capacity: 1,
+    timeToLive: (exit) =>
+      Exit.isSuccess(exit)
+        ? Duration.millis(Math.max(0, exit.value.expires - Date.now() - 60_000))
+        : Duration.zero,
+  })
+)
 export function resetServiceAccountCache() {
   account = undefined
-  cached = null
-  pending = null
+  Effect.runSync(Cache.invalidateAll(tokenCache))
 }
-// Tokens are cached process-wide and refreshed a minute before expiry.
-export async function serviceAccountToken() {
-  const sa = serviceAccount()
-  if (!sa) throw new Error("MediaBinder's Drive service account is not set up.")
-  if (cached && cached.expires > Date.now() + 60_000) return cached.token
-  pending ??= (async () => {
-    try {
-      const response = await fetch(sa.token_uri, {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({
-          grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
-          assertion: signAssertion(sa),
-        }),
-        signal: AbortSignal.timeout(15_000),
-      })
-      const body = (await response.json().catch(() => ({}))) as {
-        access_token?: string
-        expires_in?: number
-      }
-      if (!response.ok || !body.access_token)
-        throw new Error(
-          `MediaBinder's Drive service account could not sign in (${response.status}).`
+export const serviceAccountToken = Effect.fn("DriveAccess.serviceAccountToken")(
+  function* () {
+    if (!serviceAccount())
+      return yield* new DriveApiError({ operation: "oauth2.token" })
+    return (yield* Cache.get(tokenCache, "service-account")).token
+  }
+)
+
+const GoogleError = Schema.Struct({
+  error: Schema.optionalKey(
+    Schema.Struct({
+      errors: Schema.optionalKey(
+        Schema.Array(
+          Schema.Struct({ reason: Schema.optionalKey(Schema.String) })
         )
-      cached = {
-        token: body.access_token,
-        expires: Date.now() + (body.expires_in ?? 3600) * 1000,
-      }
-      return body.access_token
-    } finally {
-      pending = null
-    }
-  })()
-  return pending
+      ),
+      details: Schema.optionalKey(
+        Schema.Array(
+          Schema.Struct({ reason: Schema.optionalKey(Schema.String) })
+        )
+      ),
+    })
+  ),
+})
+const decodeGoogleError = Schema.decodeUnknownOption(GoogleError)
+
+// What Google's refusal means for the person, in words they can act on.
+function refusal(status: number, payload: unknown) {
+  const error = decodeGoogleError(payload)
+  const reasons =
+    error._tag === "Some"
+      ? [
+          ...(error.value.error?.errors ?? []),
+          ...(error.value.error?.details ?? []),
+        ].map((item) => item.reason ?? "")
+      : []
+  if (
+    status === 401 ||
+    reasons.some((reason) =>
+      /insufficientPermissions|SCOPE_INSUFFICIENT|authError/i.test(reason)
+    )
+  )
+    return new DriveAccessError({
+      code: "scope",
+      message:
+        "Reconnect Google so MediaBinder can share the folders you choose.",
+    })
+  // drive.file may only share a folder when the app can also write every file
+  // inside it, so existing folders must be shared by the user in Drive.
+  if (reasons.includes("appNotAuthorizedToChild"))
+    return new DriveAccessError({
+      code: "not-allowed",
+      message:
+        "Google only lets you add MediaBinder to a folder that already has files.",
+    })
+  if (status === 404)
+    return new DriveAccessError({
+      code: "not-found",
+      message: "Google Drive can't find that folder.",
+    })
+  if (status === 403)
+    return new DriveAccessError({
+      code: "not-allowed",
+      message: "Google Drive didn't allow MediaBinder to share this folder.",
+    })
+  return new DriveAccessError({
+    code: "unavailable",
+    message: `Google Drive is unavailable (${status}). Try again.`,
+  })
 }
 
-export class DriveAccessError extends Error {
-  constructor(
-    message: string,
-    readonly code: "scope" | "not-allowed" | "not-found" | "unavailable"
-  ) {
-    super(message)
-  }
-}
-async function driveCall(
+// One Drive v3 call that must succeed. A refusal becomes a DriveAccessError;
+// a call that never got an answer is a DriveApiError.
+const driveCall = Effect.fnUntraced(function* (
   token: string,
   method: "GET" | "POST" | "DELETE",
   path: string,
   params: Record<string, string>,
   body?: unknown
 ) {
-  const response = await fetch(
-    `https://www.googleapis.com/drive/v3/${path}?${new URLSearchParams(params)}`,
-    {
-      method,
-      headers: {
-        Authorization: `Bearer ${token}`,
-        ...(body ? { "Content-Type": "application/json" } : {}),
-      },
-      body: body ? JSON.stringify(body) : undefined,
-      signal: AbortSignal.timeout(20_000),
-    }
+  const operation = driveOperation(method, path)
+  const request = HttpClientRequest.make(method)(`${DRIVE_API}/${path}`, {
+    urlParams: params,
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  const { status, body: payload } = yield* driveJsonRequest(
+    operation,
+    body ? HttpClientRequest.bodyJsonUnsafe(request, body) : request,
+    { timeout: "20 seconds" }
   )
-  if (response.ok)
-    return response.status === 204 ? null : ((await response.json()) as any)
-  const error = (await response.json().catch(() => null)) as {
-    error?: { errors?: { reason?: string }[]; details?: { reason?: string }[] }
-  } | null
-  const reasons = [
-    ...(error?.error?.errors ?? []),
-    ...(error?.error?.details ?? []),
-  ].map((item) => item.reason ?? "")
-  if (
-    response.status === 401 ||
-    reasons.some((reason) =>
-      /insufficientPermissions|SCOPE_INSUFFICIENT|authError/i.test(reason)
-    )
-  )
-    throw new DriveAccessError(
-      "Reconnect Google so MediaBinder can share the folders you choose.",
-      "scope"
-    )
-  // drive.file may only share a folder when the app can also write every file
-  // inside it, so existing folders must be shared by the user in Drive.
-  if (reasons.includes("appNotAuthorizedToChild"))
-    throw new DriveAccessError(
-      "Google only lets you add MediaBinder to a folder that already has files.",
-      "not-allowed"
-    )
-  if (response.status === 404)
-    throw new DriveAccessError(
-      "Google Drive can't find that folder.",
-      "not-found"
-    )
-  if (response.status === 403)
-    throw new DriveAccessError(
-      "Google Drive didn't allow MediaBinder to share this folder.",
-      "not-allowed"
-    )
-  throw new DriveAccessError(
-    `Google Drive is unavailable (${response.status}). Try again.`,
-    "unavailable"
-  )
-}
+  if (status >= 200 && status < 300) return payload
+  return yield* refusal(status, payload)
+})
 
-export interface DriveFolder {
-  id: string
-  name: string
-  mimeType: string
-  owners?: { emailAddress?: string }[]
-  capabilities?: { canListChildren?: boolean }
-}
-export async function getFolder(token: string, folderId: string) {
-  const folder = (await driveCall(token, "GET", `files/${folderId}`, {
+const decodeResponse = <S extends Schema.Constraint>(
+  operation: string,
+  schema: S,
+  payload: unknown
+) =>
+  Schema.decodeUnknownEffect(schema)(payload).pipe(
+    Effect.mapError((cause) => new DriveApiError({ operation, cause }))
+  )
+
+const Folder = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  mimeType: Schema.String,
+  owners: Schema.optionalKey(
+    Schema.Array(
+      Schema.Struct({ emailAddress: Schema.optionalKey(Schema.String) })
+    )
+  ),
+  capabilities: Schema.optionalKey(
+    Schema.Struct({ canListChildren: Schema.optionalKey(Schema.Boolean) })
+  ),
+})
+export type DriveFolder = typeof Folder.Type
+
+export const getFolder = Effect.fn("DriveAccess.getFolder")(function* (
+  token: string,
+  folderId: string
+) {
+  const payload = yield* driveCall(token, "GET", `files/${folderId}`, {
     fields:
       "id,name,mimeType,owners(emailAddress),capabilities(canListChildren)",
     supportsAllDrives: "true",
-  })) as DriveFolder
+  })
+  const folder = yield* decodeResponse("files.get", Folder, payload)
   if (folder.mimeType !== FOLDER_MIME)
-    throw new Error("Choose a Google Drive folder.")
+    return yield* new ValidationError({
+      message: "Choose a Google Drive folder.",
+    })
   return folder
-}
+})
+
+const CreatedFolder = Schema.Struct({ id: Schema.String, name: Schema.String })
 
 // A new, empty folder created by MediaBinder: drive.file can share it, and
 // everything the user later adds to it inherits the share.
-export async function createFolder(userToken: string, name: string) {
-  return (await driveCall(
+export const createFolder = Effect.fn("DriveAccess.createFolder")(function* (
+  userToken: string,
+  name: string
+) {
+  const payload = yield* driveCall(
     userToken,
     "POST",
     "files",
     { fields: "id,name", supportsAllDrives: "true" },
     { name, mimeType: FOLDER_MIME }
-  )) as { id: string; name: string }
-}
+  )
+  return yield* decodeResponse("files.create", CreatedFolder, payload)
+})
+
+const Permission = Schema.Struct({ id: Schema.String })
 
 // Adds the service account as a viewer. Drive returns the existing permission
 // when the account already has access, so repeating this is harmless.
-export async function shareFolderWithApp(userToken: string, folderId: string) {
-  const email = shareAddress()
-  if (!email)
-    throw new Error("MediaBinder's Drive service account is not set up.")
-  const permission = (await driveCall(
-    userToken,
-    "POST",
-    `files/${folderId}/permissions`,
-    { sendNotificationEmail: "false", supportsAllDrives: "true", fields: "id" },
-    {
-      type: shareGroup() ? "group" : "user",
-      role: "reader",
-      emailAddress: email,
-    }
-  )) as { id: string }
-  return permission.id
-}
+export const shareFolderWithApp = Effect.fn("DriveAccess.shareFolderWithApp")(
+  function* (userToken: string, folderId: string) {
+    const email = shareAddress()
+    if (!email)
+      return yield* new DriveApiError({ operation: "permissions.create" })
+    const payload = yield* driveCall(
+      userToken,
+      "POST",
+      `files/${folderId}/permissions`,
+      {
+        sendNotificationEmail: "false",
+        supportsAllDrives: "true",
+        fields: "id",
+      },
+      {
+        type: shareGroup() ? "group" : "user",
+        role: "reader",
+        emailAddress: email,
+      }
+    )
+    return (yield* decodeResponse("permissions.create", Permission, payload)).id
+  }
+)
 
-export async function removeAppShare(
-  userToken: string,
-  folderId: string,
-  permissionId: string
-) {
-  await driveCall(
-    userToken,
-    "DELETE",
-    `files/${folderId}/permissions/${encodeURIComponent(permissionId)}`,
-    { supportsAllDrives: "true" }
-  )
-}
+export const removeAppShare = Effect.fn("DriveAccess.removeAppShare")(
+  function* (userToken: string, folderId: string, permissionId: string) {
+    yield* driveCall(
+      userToken,
+      "DELETE",
+      `files/${folderId}/permissions/${encodeURIComponent(permissionId)}`,
+      { supportsAllDrives: "true" }
+    )
+  }
+)
 
 // Sharing can take a moment to reach the service account. Seeing a folder is
 // not enough: inside a limited-access folder, Drive shows the folder to anyone
-// with access to its parent but lists its contents as empty.
-export async function waitForAppAccess(
-  folderId: string,
-  attempts = 5,
-  delay = 800
-) {
-  for (let attempt = 1; ; attempt++) {
-    try {
-      const folder = await getFolder(await serviceAccountToken(), folderId)
+// with access to its parent but lists its contents as empty. Only "can't see
+// it yet" answers are tried again, `delay` apart, up to `attempts` in all.
+export const waitForAppAccess = Effect.fn("DriveAccess.waitForAppAccess")(
+  function* (folderId: string, attempts = 5, delay = 800) {
+    return yield* Effect.gen(function* () {
+      const folder = yield* getFolder(yield* serviceAccountToken(), folderId)
       if (folder.capabilities?.canListChildren !== true)
-        throw new DriveAccessError(
-          "MediaBinder can't open this folder's contents.",
-          "not-allowed"
-        )
+        return yield* new DriveAccessError({
+          code: "not-allowed",
+          message: "MediaBinder can't open this folder's contents.",
+        })
       return folder
-    } catch (error) {
-      if (
-        attempt >= attempts ||
-        !(error instanceof DriveAccessError) ||
-        !["not-found", "not-allowed"].includes(error.code)
-      )
-        throw error
-      await new Promise((resolve) => setTimeout(resolve, delay))
-    }
+    }).pipe(
+      Effect.retry({
+        schedule: Schedule.spaced(Duration.millis(delay)),
+        times: attempts - 1,
+        while: (error) =>
+          error._tag === "DriveAccessError" &&
+          (error.code === "not-found" || error.code === "not-allowed"),
+      })
+    )
   }
-}
+)
