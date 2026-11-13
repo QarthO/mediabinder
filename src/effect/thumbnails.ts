@@ -32,13 +32,16 @@ export class ThumbnailSource extends Context.Service<
   }
 >()("mediabinder/ThumbnailSource") {}
 
-// 64 entries × at most 1 MiB each, plus at most six in-flight downloads.
-export const MAX_THUMBNAIL_BYTES = 1024 * 1024
+// Google's 640 px thumbnails measure about 40 KiB (81 KiB the largest seen in
+// production), so 256 entries hold about 10 MiB; the 512 KiB cap bounds the
+// worst case at 128 MiB. A library view asks for 20-30 thumbnails at once,
+// and each load takes about a third of a second, so 16 run concurrently.
+export const MAX_THUMBNAIL_BYTES = 512 * 1024
 export const makeThumbnailCache = Effect.fn("makeThumbnailCache")(function* (
   load: (key: string) => Effect.Effect<ThumbnailData, ThumbnailError>,
   options = {
-    capacity: 64,
-    concurrency: 6,
+    capacity: 256,
+    concurrency: 16,
     ttl: "15 minutes" as Duration.Input,
   }
 ) {
