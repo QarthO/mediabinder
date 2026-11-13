@@ -17,20 +17,17 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
+  type ReactNode,
   type Ref,
 } from "react"
 import {
-  flexRender,
-  getCoreRowModel,
-  getFilteredRowModel,
-  getSortedRowModel,
-  useReactTable,
-  type ColumnDef,
+  FlexRender,
+  Subscribe,
   type OnChangeFn,
+  type Row,
+  type RowSelectionState,
   type SortingState,
   type Table,
-  type RowSelectionState,
-  type Row,
 } from "@tanstack/react-table"
 import {
   observeElementRect,
@@ -53,9 +50,95 @@ import { Thumbnail } from "./thumbnail"
 import { bytes } from "@/lib/utils"
 import { TagPopover } from "./tag-popover"
 import { mediaDate } from "@/lib/media-date"
+import {
+  createAppColumnHelper,
+  filterMediaBySearch,
+  mediaTableFeatures,
+  selectNoTableState,
+  sortingKey,
+  useAppTable,
+  type MediaTableMeta,
+} from "@/lib/data-table"
 import type { Media, MediaSet } from "@/lib/types"
 
 const emptySelection: RowSelectionState = {}
+
+type MediaRow = Row<typeof mediaTableFeatures, Media>
+// The table that cells and rows receive. It keeps one identity for the life of
+// the component that owns the table, unlike the table `useMediaTable` returns.
+type MediaCoreTable = Table<typeof mediaTableFeatures, Media>
+export type MediaTable = ReturnType<typeof useMediaTable>
+
+const columnHelper = createAppColumnHelper<Media>()
+const mediaColumns = columnHelper.columns([
+  columnHelper.display({
+    id: "select",
+    enableSorting: false,
+    header: ({ table }) => <SelectAllCheckbox table={table} />,
+    cell: ({ row, table }) => (
+      <MediaCheckbox
+        table={table}
+        id={row.id}
+        label={`Select ${row.original.display_name}`}
+        checked={row.getIsSelected()}
+      />
+    ),
+  }),
+  columnHelper.accessor("display_name", {
+    header: "Name",
+    sortFn: "alphanumeric",
+    cell: ({ row, table }) => (
+      <MediaName
+        table={table}
+        id={row.original.id}
+        name={row.original.display_name}
+        rawName={row.original.raw_name}
+        copyCount={row.original.copy_count}
+        video={row.original.mime_type.startsWith("video/")}
+        selectionMode={table.options.meta!.selectionMode}
+        selected={row.getIsSelected()}
+      />
+    ),
+  }),
+  columnHelper.accessor("tags", {
+    header: "Tags",
+    enableSorting: false,
+    cell: ({ row, table }) => (
+      <MediaTags
+        media={row.original}
+        allTags={table.options.meta!.allTags}
+        colors={table.options.meta!.tagColors}
+        compact
+      />
+    ),
+  }),
+  columnHelper.display({
+    id: "sets",
+    header: "Sets",
+    enableSorting: false,
+    cell: ({ row, table }) => (
+      <MediaSets media={row.original} sets={table.options.meta!.sets} compact />
+    ),
+  }),
+  columnHelper.accessor("uploaded_at", {
+    header: "Uploaded",
+    sortFn: "alphanumeric",
+    cell: ({ row }) => <UploadedDate value={row.original.uploaded_at} />,
+  }),
+  columnHelper.accessor("size", {
+    header: "Size",
+    sortFn: "basic",
+    cell: ({ row }) => <FileSize size={row.original.size} />,
+  }),
+  columnHelper.display({
+    id: "actions",
+    header: "",
+    enableSorting: false,
+    cell: ({ row, table }) => (
+      <MediaActions media={row.original} sets={table.options.meta!.sets} />
+    ),
+  }),
+])
 
 export function useMediaTable(
   items: Media[],
@@ -87,124 +170,60 @@ export function useMediaTable(
         rows: typeof update === "function" ? update(rows) : update,
       }
     })
-  const columns = useMemo<ColumnDef<Media>[]>(
-    () => [
-      {
-        id: "select",
-        enableSorting: false,
-        enableGlobalFilter: false,
-        header: ({ table }) => (
-          <SelectionCheckbox
-            label="Select all matching media"
-            checked={table.getIsAllRowsSelected()}
-            mixed={table.getIsSomeRowsSelected()}
-            onChange={table.getToggleAllRowsSelectedHandler()}
-          />
-        ),
-        cell: ({ row, table }) => (
-          <MediaCheckbox
-            table={table}
-            id={row.id}
-            label={`Select ${row.original.display_name}`}
-            checked={row.getIsSelected()}
-          />
-        ),
-      },
-      {
-        accessorKey: "display_name",
-        header: "Name",
-        cell: ({ row, table }) => (
-          <MediaName
-            table={table}
-            id={row.original.id}
-            name={row.original.display_name}
-            rawName={row.original.raw_name}
-            copyCount={row.original.copy_count}
-            video={row.original.mime_type.startsWith("video/")}
-            selectionMode={(table.options.meta as MediaTableMeta).selectionMode}
-            selected={row.getIsSelected()}
-          />
-        ),
-      },
-      {
-        accessorKey: "tags",
-        header: "Tags",
-        enableSorting: false,
-        cell: ({ row, table }) => (
-          <MediaTags
-            media={row.original}
-            allTags={(table.options.meta as MediaTableMeta).allTags}
-            colors={(table.options.meta as MediaTableMeta).tagColors}
-            compact
-          />
-        ),
-      },
-      {
-        id: "sets",
-        header: "Sets",
-        enableSorting: false,
-        enableGlobalFilter: false,
-        cell: ({ row, table }) => (
-          <MediaSets
-            media={row.original}
-            sets={(table.options.meta as MediaTableMeta).sets}
-            compact
-          />
-        ),
-      },
-      {
-        accessorKey: "uploaded_at",
-        header: "Uploaded",
-        cell: ({ row }) => <UploadedDate value={row.original.uploaded_at} />,
-      },
-      {
-        accessorKey: "size",
-        header: "Size",
-        cell: ({ row }) => <FileSize size={row.original.size} />,
-      },
-      {
-        id: "actions",
-        header: "",
-        enableSorting: false,
-        enableGlobalFilter: false,
-        cell: ({ row, table }) => (
-          <MediaActions
-            media={row.original}
-            sets={(table.options.meta as MediaTableMeta).sets}
-          />
-        ),
-      },
-    ],
-    []
+  const data = useMemo(
+    () => filterMediaBySearch(items, search),
+    [items, search]
   )
-  return useReactTable({
-    data: items,
-    meta: {
-      previewIntent,
-      onOpen,
-      allTags,
-      tagColors,
-      sets,
-      selectionMode,
-    } satisfies MediaTableMeta,
-    columns,
-    state: { globalFilter: search, sorting, rowSelection },
-    onRowSelectionChange: setRowSelection,
-    enableRowSelection: true,
-    onSortingChange,
-    getRowId: (row) => row.id,
-    getCoreRowModel: getCoreRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
-    getSortedRowModel: getSortedRowModel(),
-    globalFilterFn: (row, _column, value: string) =>
-      [
-        row.original.display_name,
-        row.original.raw_name,
-        ...row.original.tags,
-      ].some((text) => text.toLowerCase().includes(value.toLowerCase())),
-    autoResetPageIndex: false,
-    enableSortingRemoval: false,
-  })
+  return useAppTable(
+    {
+      data,
+      columns: mediaColumns,
+      meta: {
+        previewIntent,
+        onOpen,
+        allTags,
+        tagColors,
+        sets,
+        selectionMode,
+      },
+      state: { sorting, rowSelection },
+      onRowSelectionChange: setRowSelection,
+      enableRowSelection: true,
+      onSortingChange,
+      getRowId: (row) => row.id,
+      enableSortingRemoval: false,
+    },
+    selectNoTableState
+  )
+}
+
+// The stage around the catalog: the table owner does not render when the
+// selection changes, so this reads it for the `data-has-selection` marker.
+export function MediaStage({
+  table,
+  selectionMode,
+  children,
+}: {
+  table: MediaTable
+  selectionMode: boolean
+  children: ReactNode
+}) {
+  return (
+    <Subscribe
+      source={table.atoms.rowSelection}
+      selector={(selection) => Object.keys(selection).length > 0}
+    >
+      {(hasSelection) => (
+        <div
+          className="media-stage"
+          data-selecting={selectionMode || undefined}
+          data-has-selection={hasSelection || undefined}
+        >
+          {children}
+        </div>
+      )}
+    </Subscribe>
+  )
 }
 
 // Kiln's table structure: shared column tracks, fixed header, and a measured virtual body.
@@ -212,18 +231,33 @@ export function DataTable({
   table,
   resetKey,
 }: {
-  table: Table<Media>
+  table: MediaTable
   resetKey: string
 }) {
+  return (
+    <Subscribe source={table.atoms.sorting} selector={sortingKey}>
+      {(sorting) => (
+        <DataTableView table={table} resetKey={resetKey} sorting={sorting} />
+      )}
+    </Subscribe>
+  )
+}
+
+function DataTableView({
+  table,
+  resetKey,
+  sorting,
+}: {
+  table: MediaTable
+  resetKey: string
+  sorting: string
+}) {
   const mobile = useMobile()
-  const selectionMode = (table.options.meta as MediaTableMeta).selectionMode
+  const meta = table.options.meta!
+  const selectionMode = meta.selectionMode
   const body = useRef<HTMLTableSectionElement>(null)
   const [scrollbar, setScrollbar] = useState(0)
   const rows = table.getRowModel().rows
-  const selected = table
-    .getFilteredSelectedRowModel()
-    .rows.map((row) => row.original.id)
-  const sorting = JSON.stringify(table.getState().sorting)
   const bodyRef = useCallback(
     (element: HTMLTableSectionElement | null) => {
       body.current = element
@@ -265,67 +299,31 @@ export function DataTable({
         <thead style={{ paddingInlineEnd: scrollbar }}>
           {table.getHeaderGroups().map((group) => (
             <tr key={group.id}>
-              {group.headers.map((header) => {
-                const sorted = header.column.getIsSorted()
-                const Icon =
-                  sorted === "asc"
-                    ? ArrowUp
-                    : sorted === "desc"
-                      ? ArrowDown
-                      : ArrowUpDown
-                return (
-                  <th
-                    key={header.id}
-                    scope="col"
-                    aria-sort={
-                      sorted === "asc"
-                        ? "ascending"
-                        : sorted === "desc"
-                          ? "descending"
-                          : undefined
-                    }
-                  >
-                    {header.column.getCanSort() ? (
-                      <button onClick={header.column.getToggleSortingHandler()}>
-                        {flexRender(
-                          header.column.columnDef.header,
-                          header.getContext()
-                        )}
-                        <Icon size={14} />
-                      </button>
-                    ) : (
-                      flexRender(
-                        header.column.columnDef.header,
-                        header.getContext()
-                      )
-                    )}
-                  </th>
-                )
-              })}
+              {group.headers.map((header) => (
+                <TableHeaderCell
+                  key={header.id}
+                  table={table}
+                  header={header}
+                />
+              ))}
             </tr>
           ))}
         </thead>
         <tbody ref={bodyRef} tabIndex={0} aria-label="Scrollable media rows">
-          <tr
-            aria-hidden="true"
-            className="table-spacer"
-            style={{
-              height: virtual.getTotalSize() + (selected.length ? 88 : 0),
-            }}
-          >
-            <td colSpan={table.getVisibleLeafColumns().length} />
-          </tr>
+          <TableSpacer
+            table={table}
+            height={virtual.getTotalSize()}
+            columns={table.getAllLeafColumns().length}
+          />
           {virtual.getVirtualItems().map((item) => {
             const row = rows[item.index]
             return (
-              <MediaTableRow
+              <MediaTableRowBoundary
                 key={row.id}
                 row={row}
-                table={table}
-                meta={table.options.meta as MediaTableMeta}
+                meta={meta}
                 mobile={mobile}
                 selectionMode={selectionMode}
-                selected={row.getIsSelected()}
                 index={item.index}
                 start={item.start}
                 measureElement={virtual.measureElement}
@@ -338,29 +336,148 @@ export function DataTable({
   )
 }
 
-// TanStack v8 rebuilds Row wrappers when data changes. Compare their original
+type MediaHeader = ReturnType<
+  MediaTable["getHeaderGroups"]
+>[number]["headers"][number]
+
+// Only the sort indicator reads the sorting atom, so a sort change redraws the
+// three sortable headers and nothing else. Headers keep their identity across
+// table renders, so a selection or data change does not touch them.
+const TableHeaderCell = memo(
+  function TableHeaderCell({
+    table,
+    header,
+  }: {
+    table: MediaTable
+    header: MediaHeader
+  }) {
+    if (!header.column.getCanSort())
+      return (
+        <th scope="col">
+          <FlexRender header={header} />
+        </th>
+      )
+    return (
+      <Subscribe
+        source={table.atoms.sorting}
+        selector={() => header.column.getIsSorted()}
+      >
+        {(sorted) => {
+          const Icon =
+            sorted === "asc"
+              ? ArrowUp
+              : sorted === "desc"
+                ? ArrowDown
+                : ArrowUpDown
+          return (
+            <th
+              scope="col"
+              aria-sort={
+                sorted === "asc"
+                  ? "ascending"
+                  : sorted === "desc"
+                    ? "descending"
+                    : undefined
+              }
+            >
+              <button onClick={header.column.getToggleSortingHandler()}>
+                <FlexRender header={header} />
+                <Icon size={14} />
+              </button>
+            </th>
+          )
+        }}
+      </Subscribe>
+    )
+  },
+  (previous, next) =>
+    previous.header.id === next.header.id &&
+    previous.header.column.columnDef === next.header.column.columnDef
+)
+
+// The bulk-action bar covers the last rows, so the scroll area keeps room
+// for it while anything is selected.
+function TableSpacer({
+  table,
+  height,
+  columns,
+}: {
+  table: MediaTable
+  height: number
+  columns: number
+}) {
+  return (
+    <Subscribe
+      source={table.atoms.rowSelection}
+      selector={(selection) => Object.keys(selection).length > 0}
+    >
+      {(hasSelection) => (
+        <tr
+          aria-hidden="true"
+          className="table-spacer"
+          style={{ height: height + (hasSelection ? 88 : 0) }}
+        >
+          <td colSpan={columns} />
+        </tr>
+      )}
+    </Subscribe>
+  )
+}
+
+type MediaRowProps = {
+  row: MediaRow
+  meta: MediaTableMeta
+  mobile: boolean
+  selectionMode: boolean
+  index: number
+  start: number
+  measureElement: Ref<HTMLTableRowElement>
+}
+
+// A row subscribes to its own entry in the selection, so toggling one row
+// renders that row and no other.
+const MediaTableRowBoundary = memo(
+  function MediaTableRowBoundary(props: MediaRowProps) {
+    const { row } = props
+    return (
+      <Subscribe
+        source={row.table.atoms.rowSelection}
+        selector={(selection) => Boolean(selection[row.id])}
+      >
+        {(selected) => <MediaTableRow {...props} selected={selected} />}
+      </Subscribe>
+    )
+  },
+  (previous, next) => sameRowProps(previous, next)
+)
+
+// TanStack rebuilds Row wrappers when data changes. Compare their original
 // records and explicit presentation state so unrelated rows remain untouched.
+function sameRowProps(previous: MediaRowProps, next: MediaRowProps) {
+  return (
+    previous.row.original === next.row.original &&
+    previous.mobile === next.mobile &&
+    previous.selectionMode === next.selectionMode &&
+    previous.index === next.index &&
+    previous.start === next.start &&
+    previous.measureElement === next.measureElement &&
+    sameStrings(previous.meta.allTags, next.meta.allTags) &&
+    previous.meta.tagColors === next.meta.tagColors &&
+    previous.meta.sets === next.meta.sets
+  )
+}
+
 const MediaTableRow = memo(
   function MediaTableRow({
     row,
-    table,
+    meta,
     mobile,
     selectionMode,
     selected,
     index,
     start,
     measureElement,
-  }: {
-    row: Row<Media>
-    table: Table<Media>
-    meta: MediaTableMeta
-    mobile: boolean
-    selectionMode: boolean
-    selected: boolean
-    index: number
-    start: number
-    measureElement: Ref<HTMLTableRowElement>
-  }) {
+  }: MediaRowProps & { selected: boolean }) {
     return (
       <tr
         key={row.id}
@@ -384,7 +501,7 @@ const MediaTableRow = memo(
           <>
             <td className="mobile-media-main">
               <MediaName
-                table={table}
+                table={row.table}
                 id={row.original.id}
                 name={row.original.display_name}
                 video={row.original.mime_type.startsWith("video/")}
@@ -396,47 +513,23 @@ const MediaTableRow = memo(
               />
             </td>
             <td className="mobile-media-actions">
-              <MobileMetadata
-                media={row.original}
-                meta={table.options.meta as MediaTableMeta}
-                kind="tags"
-              />
-              <MobileMetadata
-                media={row.original}
-                meta={table.options.meta as MediaTableMeta}
-                kind="sets"
-              />
-              <MediaActions
-                media={row.original}
-                sets={(table.options.meta as MediaTableMeta).sets}
-                mobile
-              />
+              <MobileMetadata media={row.original} meta={meta} kind="tags" />
+              <MobileMetadata media={row.original} meta={meta} kind="sets" />
+              <MediaActions media={row.original} sets={meta.sets} mobile />
             </td>
           </>
         ) : (
-          row
-            .getVisibleCells()
-            .map((cell) => (
-              <td key={cell.id}>
-                {flexRender(cell.column.columnDef.cell, cell.getContext())}
-              </td>
-            ))
+          row.getAllCells().map((cell) => (
+            <td key={cell.id}>
+              <FlexRender cell={cell} />
+            </td>
+          ))
         )}
       </tr>
     )
   },
   (previous, next) =>
-    previous.row.original === next.row.original &&
-    previous.table === next.table &&
-    previous.mobile === next.mobile &&
-    previous.selectionMode === next.selectionMode &&
-    previous.selected === next.selected &&
-    previous.index === next.index &&
-    previous.start === next.start &&
-    previous.measureElement === next.measureElement &&
-    sameStrings(previous.meta.allTags, next.meta.allTags) &&
-    previous.meta.tagColors === next.meta.tagColors &&
-    previous.meta.sets === next.meta.sets
+    sameRowProps(previous, next) && previous.selected === next.selected
 )
 
 const MediaCheckbox = memo(function MediaCheckbox({
@@ -445,7 +538,7 @@ const MediaCheckbox = memo(function MediaCheckbox({
   label,
   checked,
 }: {
-  table: Table<Media>
+  table: MediaCoreTable
   id: string
   label: string
   checked: boolean
@@ -458,6 +551,28 @@ const MediaCheckbox = memo(function MediaCheckbox({
     />
   )
 })
+
+// Everything the table currently holds is selected, some of it, or none.
+function SelectAllCheckbox({ table }: { table: MediaCoreTable }) {
+  return (
+    <Subscribe
+      source={table.atoms.rowSelection}
+      selector={() => {
+        const all = table.getIsAllRowsSelected()
+        return all ? "all" : table.getIsSomeRowsSelected() ? "some" : "none"
+      }}
+    >
+      {(state) => (
+        <SelectionCheckbox
+          label="Select all matching media"
+          checked={state === "all"}
+          mixed={state === "some"}
+          onChange={table.getToggleAllRowsSelectedHandler()}
+        />
+      )}
+    </Subscribe>
+  )
+}
 
 function SelectionCheckbox({
   label,
@@ -542,7 +657,7 @@ const MediaName = memo(function MediaName({
   uploadedAt,
   size,
 }: {
-  table: Table<Media>
+  table: MediaCoreTable
   id: string
   name: string
   rawName?: string
@@ -558,7 +673,7 @@ const MediaName = memo(function MediaName({
   // this cell, and opening/prefetching still sees the latest catalog metadata.
   const intent = () => {
     const media = table.getCoreRowModel().rowsById[id]?.original
-    return media && (table.options.meta as MediaTableMeta).previewIntent(media)
+    return media && table.options.meta!.previewIntent(media)
   }
   return (
     <button
@@ -577,7 +692,7 @@ const MediaName = memo(function MediaName({
         const row = table.getCoreRowModel().rowsById[id]
         if (!row) return
         if (selectionMode) row.toggleSelected()
-        else (table.options.meta as MediaTableMeta).onOpen(row.original)
+        else table.options.meta!.onOpen(row.original)
       }}
     >
       <div className="table-thumbnail">
@@ -605,14 +720,6 @@ const MediaName = memo(function MediaName({
   )
 })
 
-type MediaTableMeta = {
-  previewIntent: ReturnType<typeof useMediaPreviewIntent>
-  onOpen: (media: Media) => void
-  allTags: string[]
-  tagColors: Record<string, string>
-  sets: MediaSet[]
-  selectionMode: boolean
-}
 export const MediaTags = memo(
   function MediaTags({
     media,
@@ -802,43 +909,46 @@ export function MediaSelectionActions({
   table,
   allTags,
 }: {
-  table: Table<Media>
+  table: MediaTable
   allTags: string[]
 }) {
-  const selected = table
-    .getFilteredSelectedRowModel()
-    .rows.map((row) => row.original.id)
-  if (!selected.length) return null
   return (
-    <div
-      className="media-selection-overlay"
-      role="toolbar"
-      aria-label="Selected media actions"
-    >
-      <span aria-live="polite">{selected.length} selected</span>
-      <TagPopover
-        ids={selected}
-        mediaItems={table
+    <Subscribe source={table.atoms.rowSelection}>
+      {() => {
+        const mediaItems = table
           .getFilteredSelectedRowModel()
-          .rows.map((row) => row.original)}
-        allTags={allTags}
-        label="Add tags to selected media"
-        bulk
-      />
-      <MediaSets
-        mediaItems={table
-          .getFilteredSelectedRowModel()
-          .rows.map((row) => row.original)}
-        sets={(table.options.meta as MediaTableMeta).sets}
-        bulk
-      />
-      <button
-        className="icon-button"
-        aria-label="Clear selection"
-        onClick={() => table.resetRowSelection()}
-      >
-        <X size={16} />
-      </button>
-    </div>
+          .rows.map((row) => row.original)
+        if (!mediaItems.length) return null
+        const selected = mediaItems.map((media) => media.id)
+        return (
+          <div
+            className="media-selection-overlay"
+            role="toolbar"
+            aria-label="Selected media actions"
+          >
+            <span aria-live="polite">{selected.length} selected</span>
+            <TagPopover
+              ids={selected}
+              mediaItems={mediaItems}
+              allTags={allTags}
+              label="Add tags to selected media"
+              bulk
+            />
+            <MediaSets
+              mediaItems={mediaItems}
+              sets={table.options.meta!.sets}
+              bulk
+            />
+            <button
+              className="icon-button"
+              aria-label="Clear selection"
+              onClick={() => table.resetRowSelection()}
+            >
+              <X size={16} />
+            </button>
+          </div>
+        )
+      }}
+    </Subscribe>
   )
 }
