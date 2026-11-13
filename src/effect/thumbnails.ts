@@ -60,28 +60,19 @@ export const makeThumbnailCache = Effect.fn("makeThumbnailCache")(function* (
     }
   )
   return {
-    get: Effect.fn("thumbnails.get")(
-      function* (key: string) {
-        const reused = yield* Cache.has(cache, key)
-        const [duration, thumbnail] = yield* Cache.get(cache, key).pipe(
-          Effect.timed
-        )
-        const ms = Duration.toMillis(duration)
-        yield* Effect.logInfo("thumbnail served", {
-          cache: reused ? "hit-or-shared" : "miss",
-          durationMs: Math.round(ms),
-          bytes: thumbnail.bytes.byteLength,
-        })
-        return { ...thumbnail, ms, cache: reused ? "hit-or-shared" : "miss" }
-      },
-      Effect.tapError((error) =>
-        Effect.logWarning("thumbnail failed", {
-          status: error.status,
-          message: error.message,
-        })
-      ),
-      Effect.withLogSpan("thumbnail")
-    ),
+    get: Effect.fn("thumbnails.get")(function* (key: string) {
+      const reused = yield* Cache.has(cache, key)
+      const [duration, thumbnail] = yield* Cache.get(cache, key).pipe(
+        Effect.timed
+      )
+      const ms = Duration.toMillis(duration)
+      yield* Effect.logInfo("thumbnail served", {
+        cache: reused ? "hit-or-shared" : "miss",
+        durationMs: Math.round(ms),
+        bytes: thumbnail.bytes.byteLength,
+      })
+      return { ...thumbnail, ms, cache: reused ? "hit-or-shared" : "miss" }
+    }, Effect.withLogSpan("thumbnail")),
   }
 })
 

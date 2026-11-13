@@ -42,13 +42,13 @@ The image validates runtime configuration, retries transient MySQL connection fa
 
 Optional runtime variables:
 
-| Variable                             | Default / purpose                                                                                                                                                               |
-| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `DB_PORT`                            | `3306`; override for a different database port.                                                                                                                                 |
-| `DRIVE_WEBHOOK_URL`                  | Defaults to `MEDIABINDER_URL` + `/api/drive/webhook` for HTTPS deployments. Optional override for a separate public callback URL. HTTP/local development disables registration. |
-| `ALLOW_SIGNUPS`                      | Disabled. First verified Google user becomes superuser; `true` permits additional accounts.                                                                                     |
-| `DRIVE_WORKER_ENABLED`               | Enabled. Set `false` only when running a separate worker; the repository's Docker Compose setup does this for its web container.                                                |
-| `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | Unset. Optional thumbnail span export, described below.                                                                                                                         |
+| Variable                      | Default / purpose                                                                                                                                                               |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DB_PORT`                     | `3306`; override for a different database port.                                                                                                                                 |
+| `DRIVE_WEBHOOK_URL`           | Defaults to `MEDIABINDER_URL` + `/api/drive/webhook` for HTTPS deployments. Optional override for a separate public callback URL. HTTP/local development disables registration. |
+| `ALLOW_SIGNUPS`               | Disabled. First verified Google user becomes superuser; `true` permits additional accounts.                                                                                     |
+| `DRIVE_WORKER_ENABLED`        | Enabled. Set `false` only when running a separate worker; the repository's Docker Compose setup does this for its web container.                                                |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | Unset. Optional OpenTelemetry export; see [Observability](#observability).                                                                                                      |
 
 Configuration references: [Coolify Dockerfile build pack](https://coolify.io/docs/applications/build-packs/dockerfile), [Better Auth Google callback setup](https://better-auth.com/docs/authentication/google).
 
@@ -126,6 +126,25 @@ Each MediaBinder account still sees only the folders it linked. The service acco
 
 `scripts/test-shared-folders.ts` checks these linking rules against a disposable database with mocked Google responses. `scripts/try-shared-folder-link.ts` exercises the share, link, sync and unlink path against real Google APIs for the first signed-in user; it creates and deletes a temporary folder in that user's Drive.
 
+## Observability
+
+MediaBinder can export OpenTelemetry traces, logs and metrics over OTLP/HTTP (protobuf) to any backend, such as an OpenTelemetry Collector, Grafana Tempo and Loki, or a hosted service. It is configured only through the standard `OTEL_*` variables, all optional. Nothing is exported, and nothing is logged about it, unless an endpoint is set. No collector is deployed by default. The web and worker processes report as service `mediabinder`, with `service.version` and `vcs.ref.head.revision` set to the build commit.
+
+| Variable                                            | Default / purpose                                                                                                                                                        |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `OTEL_EXPORTER_OTLP_ENDPOINT`                       | Unset (export off). Base URL of the collector, such as `http://collector:4318`; `/v1/traces`, `/v1/logs` and `/v1/metrics` are appended.                                 |
+| `OTEL_EXPORTER_OTLP_{TRACES,LOGS,METRICS}_ENDPOINT` | Unset. Per-signal URL, used as given (include the path). `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` from earlier releases keeps working, but is now protobuf rather than JSON. |
+| `OTEL_EXPORTER_OTLP_HEADERS`                        | Unset. Comma-separated `key=value` pairs, such as an auth token. Values are URI-decoded, so write `=` inside a value as `%3D`.                                           |
+| `OTEL_TRACES_EXPORTER`, `OTEL_LOGS_EXPORTER`        | `otlp`. Set `none` to turn one signal off.                                                                                                                               |
+| `OTEL_METRICS_EXPORTER`                             | Off. Set `otlp` to export metrics, since some backends reject them.                                                                                                      |
+| `OTEL_TRACES_SAMPLER_ARG`                           | `1`. Share of traces kept, from `0` to `1`. Decided once per trace at its first span. Logs are never sampled.                                                            |
+| `OTEL_RESOURCE_ATTRIBUTES`                          | Unset. Extra resource attributes, such as `deployment.environment.name=production`.                                                                                      |
+| `OTEL_SDK_DISABLED`                                 | `false`. `true` turns all export off.                                                                                                                                    |
+
+Traces and logs are on whenever an endpoint is set; metrics are opt-in with `OTEL_METRICS_EXPORTER=otlp`. A request is one trace: its server span has the Drive, thumbnail and database-lock work as children. Span names are stable (`Library.post`, `Media.get`, `Thumbnail.get`, `Drive.get`); they never contain file names, tags or user data. An invalid `OTEL_*` value disables export with one console error instead of stopping the server. Logs still go to the container's stdout as JSON either way.
+
+Errors are exported as error logs, not span events. Each carries `exception.type`, `exception.message` and `exception.stacktrace`, plus a stable `error.fingerprint` (the error type, its message with ids and numbers removed, and the operation) to group occurrences, and `mediabinder.operation`. Expected outcomes, such as a rejected request, a validation error, a cancelled request or a missing thumbnail, are not reported.
+
 ## Development and checks
 
 Node 24 and pnpm 11 are used in Docker. On the host, `pnpm install --frozen-lockfile`, `pnpm typecheck`, `pnpm test`, and `pnpm build` check the code. Runtime development is simplest through `pnpm dev:docker`; container startup runs idempotent migrations before serving. For host-only runtime commands, supply the environment and a reachable MySQL URL yourself.
@@ -144,13 +163,13 @@ Thumbnails use a focused Effect service; the rest of the app still uses TanStack
 
 Thumbnail responses use a private five-minute browser cache (`Vary: Cookie`) with ETags for revalidation. The web process caches at most 64 thumbnails for fifteen minutes, each capped at 1 MiB, with six concurrent Google loads. Concurrent requests for the same user/file share a lookup; failed loads are not cached. Nothing is written to disk. A cold server restart empties this cache. Drive image replacements can take up to twenty minutes to appear across the two cache layers. Every network request still checks the session, ownership, and current availability before accessing the server cache. Original images and video streams retain `no-store` and byte-range streaming.
 
-Each thumbnail response includes `Server-Timing` for duration and cache reuse. Effect emits JSON timing/error logs in the web container, without tokens, signed URLs, file names, or user IDs. Inspect them with `docker compose logs web`. Set `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` to an OTLP HTTP/JSON collector (including `/v1/traces`) to export the thumbnail/token/lookup/download spans. No collector is required or deployed by default.
+Each thumbnail response includes `Server-Timing` for duration and cache reuse. Effect emits JSON timing/error logs in the web container, without tokens, signed URLs, file names, or user IDs. Inspect them with `docker compose logs web`. Spans and error logs can be exported as described under [Observability](#observability).
 
 ### Production OAuth and request handling
 
 Set Google Auth Platform's homepage to your `MEDIABINDER_URL` and privacy-policy URL to `/privacy` on that origin. Deploy the privacy page before switching Audience to **In production**, then reconnect Google to replace Testing-mode authorization. Production status does not remove Google's unverified-app warning.
 
-Library JSON requests and Google Drive JSON/watch requests use Effect HttpClient with a 30-second timeout, cancellation and tagged errors. Mutations are not automatically retried. Video proxy requests use Effect's Promise integration and retain the incoming request signal for the entire streamed response. Network spans share the optional `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` exporter with thumbnails. Database transaction and worker orchestration remain separate from this networking migration.
+Library JSON requests and Google Drive JSON/watch requests use Effect HttpClient with a 30-second timeout, cancellation and tagged errors. Mutations are not automatically retried. Video proxy requests use Effect's Promise integration and retain the incoming request signal for the entire streamed response. Network spans use the same optional exporter as thumbnails. Database transaction and worker orchestration remain separate from this networking migration.
 
 The login button uses Google's unmodified pre-approved asset; see `public/google-signin-NOTICE.txt` for its source.
 

@@ -1,4 +1,4 @@
-import { runServer } from "@/effect/runtime.server"
+import { reportAppError, runAppEffect } from "@/effect/runtime.server"
 import { createFileRoute } from "@tanstack/react-router"
 import { requireSession } from "@/lib/auth.server"
 import { library, mutate } from "@/lib/library.server"
@@ -13,9 +13,14 @@ export const Route = createFileRoute("/api/library")({
         })
       },
       POST: ({ request }) =>
-        runServer(
-          libraryPost(request, { session: requireSession, mutate }),
-          request.signal
+        runAppEffect(
+          "Library.post",
+          libraryPost(request, {
+            session: requireSession,
+            mutate,
+            report: reportAppError,
+          }),
+          { signal: request.signal }
         ),
     },
   },

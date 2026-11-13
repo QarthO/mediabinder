@@ -3,7 +3,7 @@ import {
   resolveCatalog,
   withDriveLock,
 } from "./catalog.server"
-import { runServer } from "@/effect/runtime.server"
+import { runAppEffect } from "@/effect/runtime.server"
 import { Effect } from "effect"
 import { jsonRequest } from "@/effect/http"
 import { randomUUID } from "node:crypto"
@@ -36,7 +36,8 @@ export interface DriveFile {
   inheritedPermissionsDisabled?: boolean
 }
 export async function driveToken(headers?: Headers, userId?: string) {
-  return runServer(
+  return runAppEffect(
+    "Drive.token",
     Effect.gen(function* () {
       const result = yield* Effect.tryPromise({
         try: () =>
@@ -51,7 +52,7 @@ export async function driveToken(headers?: Headers, userId?: string) {
           new Error("Reconnect Google Drive in settings.")
         )
       return result.accessToken
-    }).pipe(Effect.withSpan("drive.token"))
+    })
   )
 }
 
@@ -68,7 +69,8 @@ export async function driveJson<T>(
   path: string,
   params: Record<string, string> = {}
 ): Promise<T> {
-  return runServer(
+  return runAppEffect(
+    "Drive.get",
     jsonRequest<T>(
       `https://www.googleapis.com/drive/v3/${path}?${new URLSearchParams(params)}`,
       {

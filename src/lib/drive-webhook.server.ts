@@ -1,4 +1,4 @@
-import { runServer } from "@/effect/runtime.server"
+import { runAppEffect } from "@/effect/runtime.server"
 import { Effect } from "effect"
 import { jsonRequest } from "@/effect/http"
 import { driveWebhookUrl as webhookUrl } from "./config"
@@ -98,7 +98,8 @@ async function drivePost<T>(
   body: unknown,
   params: Record<string, string> = {}
 ): Promise<T> {
-  return runServer(
+  return runAppEffect(
+    "Drive.post",
     jsonRequest<T>(
       `https://www.googleapis.com/drive/v3/${path}?${new URLSearchParams(params)}`,
       {
@@ -116,7 +117,8 @@ async function stopWatch(
   channel: { id: string; resource_id: string | null }
 ) {
   if (channel.resource_id) {
-    await runServer(
+    await runAppEffect(
+      "Drive.stopWatch",
       Effect.tryPromise(() =>
         drivePost(token, "channels/stop", {
           id: channel.id,
