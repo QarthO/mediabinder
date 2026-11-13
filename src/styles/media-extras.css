@@ -97,6 +97,14 @@
   outline-offset: -4px;
 }
 
+/* The scroll containers are focusable for keyboard scrolling. A ring inside
+   their edge stays visible without a large outer outline around the library. */
+.bounded-media-grid:focus-visible,
+tbody[aria-label="Scrollable media rows"]:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+}
+
 .bounded-media-grid {
   position: relative;
   overflow-x: hidden;

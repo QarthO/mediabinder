@@ -37,6 +37,14 @@ select:focus-visible {
   outline: 1px solid var(--primary);
   outline-offset: 1px;
 }
+/* Rings are for keyboard users. Browsers treat any keydown (Shift, Cmd,
+   Escape) as keyboard use and ring the next mouse-focused element, so
+   src/lib/input-modality.ts sets data-input on <html> and everything but text
+   fields drops its ring unless the last input was a navigation key. */
+:root:not([data-input="keyboard"])
+  :focus-visible:not(input, textarea, select, [contenteditable]) {
+  outline: none;
+}
 button {
   color: inherit;
 }

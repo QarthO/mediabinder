@@ -8,6 +8,7 @@ import {
   beginLibraryOpen,
   startBrowserTelemetry,
 } from "./lib/browser-telemetry"
+import { startInputModality } from "./lib/input-modality"
 import { createRenderAudit } from "./lib/render-audit"
 
 // Profiling only: `VITE_REACT_SCAN=true pnpm dev`. Otherwise `react-scan`
@@ -22,6 +23,7 @@ if (import.meta.env.DEV && import.meta.env.VITE_REACT_SCAN) {
 
 // Does nothing unless the server turned browser telemetry on. The exporter
 // loads once the page is idle; "Library open" is queued until it does.
+startInputModality()
 startBrowserTelemetry()
 beginLibraryOpen()
 startTransition(() => {
