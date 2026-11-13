@@ -7,6 +7,7 @@ import {
   Exit,
   Layer,
   Redacted,
+  Result,
   Scope,
   ScopedCache,
 } from "effect"
@@ -99,11 +100,11 @@ export class Database extends Context.Service<
 
 /**
  * Connection settings for the Effect client, from the same DB_* /
- * DATABASE_URL variables as the mysql2 `pool`.
+ * DATABASE_URL variables as Better Auth's mysql2 pool.
  *
  * `MysqlClient` builds its pool from `poolConfig` spread under its own
  * fields, so `dateStrings` and `timezone` reach mysql2 and DATETIME columns
- * keep coming back as strings, exactly as from `pool`. Its URL mode ignores
+ * keep coming back as strings, exactly as from that pool. Its URL mode ignores
  * `poolConfig`, so a DATABASE_URL is split into fields here.
  */
 export function databaseClientConfig(
@@ -120,11 +121,10 @@ export function databaseClientConfig(
     const extra: Record<string, unknown> = {}
     // Like mysql2, which reads options such as `ssl` from the query string.
     url.searchParams.forEach((value, key) => {
-      try {
-        extra[key] = JSON.parse(value)
-      } catch {
-        extra[key] = value
-      }
+      extra[key] = Result.getOrElse(
+        Result.try(() => JSON.parse(value)),
+        () => value
+      )
     })
     return {
       host: decodeURIComponent(url.hostname),
@@ -148,15 +148,20 @@ export function databaseClientConfig(
 }
 
 /**
- * Connections: the legacy mysql2 `pool` (Better Auth and modules not yet
- * converted) allows 8. This client has two pools of its own. Queries and
- * transactions share 4. Lock sessions (`withNamedLock`) come from a separate
- * pool of 8, because a session holds its connection for as long as its lock,
- * which for a Drive sync is the whole run, and a sync waits on queries (its
- * progress writes) before it can finish. Locks sharing the query pool would
- * deadlock once as many syncs ran as it has connections. Each pool opens
- * connections only on demand, so the ceiling for a web process is 20 of
- * MySQL's default 151, and the Drive worker process adds the same again.
+ * Connections per process, at most, each pool opening them only on demand:
+ *
+ * - queries and transactions share `QUERY_POOL_SIZE` (4);
+ * - lock sessions (`withNamedLock`) come from a separate pool of
+ *   `LOCK_POOL_SIZE` (8), because a session holds its connection for as long
+ *   as its lock, which for a Drive sync is the whole run, and a sync waits on
+ *   queries (its progress writes) before it can finish. Locks sharing the
+ *   query pool would deadlock once as many syncs ran as it has connections;
+ * - Better Auth's own mysql2 pool (`AUTH_POOL_SIZE`, 4, in
+ *   `src/lib/auth.server.ts`), the only mysql2 pool left.
+ *
+ * That is 4 + 8 + 4 = 16 for the web process, and the Drive worker process
+ * the same again (it reads Google tokens through Better Auth too): 32 of
+ * MySQL's default 151, down from 40 when the legacy pool had 8.
  */
 export const QUERY_POOL_SIZE = 4
 const LOCK_POOL_SIZE = 8
@@ -206,7 +211,7 @@ export const DatabaseClientLive = Layer.effect(
         lockClient: yield* makeDatabaseClient(LOCK_POOL_SIZE),
       })
     // Vite program reloads rebuild the app runtime without disposing the old
-    // one, so development keeps one pool of each for the process, like `pool`.
+    // one, so development keeps one pool of each for the process, like Better Auth's.
     const clients = (globalDatabase.mediabinderDatabaseClients ??= {
       client: yield* makeDatabaseClient(QUERY_POOL_SIZE).pipe(
         Scope.provide(Scope.makeUnsafe())

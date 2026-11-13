@@ -4,12 +4,6 @@ import type { RowDataPacket } from "mysql2/promise"
 import { Database } from "@/effect/database"
 import type { DatabaseSession, LockedSession } from "@/effect/database"
 import { DatabaseError, LockBusyError, NotFoundError } from "@/effect/errors"
-import { runTracedAppEffect } from "@/effect/runtime.server"
-import {
-  legacyConnection,
-  legacySession,
-  type LegacyConnection,
-} from "./database.server"
 import type { DriveFile } from "./drive.server"
 
 // MySQL named locks are server-wide, so these names also exclude other
@@ -121,7 +115,7 @@ export const requireAccessible = Effect.fn("Catalog.requireAccessible")(
   }
 )
 
-export const markEntryCataloged = Effect.fn("Catalog.markCataloged")(function* (
+export const markCataloged = Effect.fn("Catalog.markCataloged")(function* (
   session: DatabaseSession,
   target: string
 ) {
@@ -241,46 +235,3 @@ export const resolve = Effect.fnUntraced(function* (
     )
   return target
 })
-
-// Facades for the library mutations that still hold a mysql2 connection.
-// Remove each with its last caller (layer 19).
-
-const promiseWork = <TResult>(work: () => Promise<TResult>) =>
-  Effect.tryPromise({ try: work, catch: (error) => error }).pipe(
-    // mysql2 statements can't be cancelled; let them finish before the
-    // transaction rolls back or the lock is released.
-    Effect.uninterruptible
-  )
-
-export function catalogTransaction<A>(
-  work: (connection: LegacyConnection) => Promise<A>
-) {
-  return runTracedAppEffect(
-    transaction((session) => promiseWork(() => work(legacyConnection(session))))
-  )
-}
-
-export function accessible(
-  connection: LegacyConnection,
-  userId: string,
-  kind: "media" | "set",
-  target: string
-) {
-  return runTracedAppEffect(
-    requireAccessible(
-      legacySession("catalog.requireAccessible", connection),
-      userId,
-      kind,
-      target
-    )
-  )
-}
-
-export function markCataloged(connection: LegacyConnection, target: string) {
-  return runTracedAppEffect(
-    markEntryCataloged(
-      legacySession("catalog.markCataloged", connection),
-      target
-    )
-  )
-}

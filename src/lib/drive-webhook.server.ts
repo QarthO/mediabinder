@@ -12,6 +12,8 @@ import { DriveApiError, LockBusyError } from "@/effect/errors"
 import { driveWebhookUrl as webhookUrl } from "./config"
 import { sync } from "./drive.server"
 import { revokeLegacy } from "./google-grants.server"
+import { isExpectedAppError } from "@/observability/error-policy"
+import * as Telemetry from "@/telemetry"
 import { SYNC_BUSY_MESSAGE } from "./http-errors"
 
 export { driveWebhookUrl as webhookUrl } from "./config"
@@ -283,6 +285,7 @@ type SyncJob = {
   user_id: string
   requested: number
   attempts: number
+  last_error: string | null
 } & RowDataPacket
 
 /** Users whose sync was requested and is due. Not traced: the worker's idle check. */
@@ -290,7 +293,7 @@ export const dueSyncJobs = Effect.fnUntraced(function* (userId?: string) {
   const database = yield* Database
   return yield* database.queryRows<SyncJob>(
     "driveWorker.dueSyncJobs",
-    "SELECT user_id,requested,attempts FROM drive_sync_state WHERE requested>completed AND next_attempt<=NOW(3)" +
+    "SELECT user_id,requested,attempts,last_error FROM drive_sync_state WHERE requested>completed AND next_attempt<=NOW(3)" +
       (userId ? " AND user_id=?" : "") +
       " LIMIT 20",
     userId ? [userId] : []
@@ -319,19 +322,41 @@ const syncJob = Effect.fn("DriveWorker.syncUser")(function* (job: SyncJob) {
       if (Cause.hasInterruptsOnly(cause)) return Effect.void
       const error = Cause.squash(cause)
       const delay = Math.min(3600, 10 * 2 ** Math.min(job.attempts, 9))
-      return Effect.asVoid(
-        database.execute(
-          "driveWorker.syncFailed",
-          "UPDATE drive_sync_state SET attempts=attempts+1,last_error=?,next_attempt=DATE_ADD(NOW(3),INTERVAL ? SECOND) WHERE user_id=?",
-          [
-            // The user's own sync lock being busy has always read as this.
-            error instanceof LockBusyError && error.lock.startsWith("drive:")
-              ? SYNC_BUSY_MESSAGE
-              : errorText(error, "Sync failed"),
-            delay,
-            job.user_id,
-          ]
-        )
+      // The user's own sync lock being busy has always read as this.
+      const message =
+        error instanceof LockBusyError && error.lock.startsWith("drive:")
+          ? SYNC_BUSY_MESSAGE
+          : errorText(error, "Sync failed")
+      // A job retries with a backoff for as long as it fails, so only a
+      // failure that differs from the one already recorded is logged.
+      const logFailure =
+        message === job.last_error
+          ? Effect.void
+          : isExpectedAppError(error)
+            ? Effect.logWarning("Drive sync job failed").pipe(
+                Effect.annotateLogs({
+                  "mediabinder.user_id": job.user_id,
+                  "mediabinder.job.attempts": job.attempts + 1,
+                  "error.type":
+                    error instanceof Error ? error.name : typeof error,
+                })
+              )
+            : Telemetry.logException(cause, {
+                operation: "DriveWorker.syncUser",
+                attributes: {
+                  "mediabinder.user_id": job.user_id,
+                  "mediabinder.job.attempts": job.attempts + 1,
+                },
+              })
+      return logFailure.pipe(
+        Effect.andThen(
+          database.execute(
+            "driveWorker.syncFailed",
+            "UPDATE drive_sync_state SET attempts=attempts+1,last_error=?,next_attempt=DATE_ADD(NOW(3),INTERVAL ? SECOND) WHERE user_id=?",
+            [message, delay, job.user_id]
+          )
+        ),
+        Effect.asVoid
       )
     })
   )

@@ -5,14 +5,17 @@ import { z } from "zod"
 import { Database, QUERY_POOL_SIZE } from "@/effect/database"
 import type { DatabaseSession } from "@/effect/database"
 import * as Drive from "@/effect/drive-api.server"
-import { UnknownActionError, ValidationError } from "@/effect/errors"
+import {
+  NotFoundError,
+  UnknownActionError,
+  ValidationError,
+} from "@/effect/errors"
 import { mutation, parseInput } from "@/effect/operation"
 import type { MutationContext, MutationHandler } from "@/effect/operation"
 import { driveWebhookUrl } from "./config"
 import {
-  accessible,
-  catalogTransaction,
   markCataloged,
+  requireAccessible,
   transaction,
   withUserLock,
 } from "./catalog.server"
@@ -24,7 +27,7 @@ import {
 } from "./drive-access.server"
 import { startSync } from "./drive.server"
 import { status as syncStatus } from "./sync-progress.server"
-import { ensureTags } from "./tags.server"
+import * as Tags from "./tags.server"
 import type { Library, Media, MediaSet, Post, DriveSource } from "./types"
 import {
   metadata,
@@ -492,51 +495,332 @@ const sourceActions = {
   }),
 }
 
-// Layer 19 converts these. Until then each runs the Promise code below as it
-// always has, in the one catalog transaction, behind the same table.
-type LegacyAction =
-  | "tag-color"
-  | "create-set"
-  | "add-sets"
-  | "set-membership"
-  | "add-tags"
-  | "remove-tags"
-  | "remove-tag"
-  | "metadata"
-  | "create-post"
-  | "delete-post"
-  | "delete-set"
+const insertSet = (
+  session: DatabaseSession,
+  userId: string,
+  setId: string,
+  name: string,
+  tags: ReadonlyArray<string>
+) =>
+  session.execute(
+    "INSERT INTO media_set(id,user_id,display_name,raw_name,tags,created_at) VALUES (?,?,?,?,?,NOW(3))",
+    [setId, userId, name, name, JSON.stringify(tags)]
+  )
 
-const legacy = (action: LegacyAction) =>
-  mutation(action, {
-    run: (data, { userId }) =>
-      Effect.tryPromise({
-        try: () => legacyMutate(action, data, userId),
-        catch: (error) => error,
-      }),
-  })
+const catalogTags = Effect.fnUntraced(function* (
+  session: DatabaseSession,
+  target: string
+) {
+  const [item] = yield* session.queryRows<{ tags: string[] } & RowDataPacket>(
+    "SELECT tags FROM catalog WHERE id=?",
+    [target]
+  )
+  return item?.tags ?? []
+})
+
+const writeTags = (
+  session: DatabaseSession,
+  target: string,
+  value: ReadonlyArray<string>
+) =>
+  session.execute("UPDATE catalog SET tags=? WHERE id=?", [
+    JSON.stringify(value),
+    target,
+  ])
+
+// Every edit below runs in the one catalog transaction (the catalog lock plus
+// BEGIN/COMMIT), so a failure anywhere rolls the whole action back, including
+// the tags it created.
+const editActions = {
+  "tag-color": mutation("tag-color", {
+    input: z.object({
+      name: z.string().trim().min(1).max(50),
+      color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+    }),
+    run: (value, { userId }) =>
+      transaction((session) =>
+        Effect.gen(function* () {
+          const visible = yield* session.queryRows(
+            `SELECT name FROM catalog_tag t WHERE name=? AND (
+        EXISTS(SELECT 1 FROM catalog c JOIN media m ON m.catalog_id=c.id WHERE m.user_id=? AND m.available=TRUE AND JSON_CONTAINS(c.tags,JSON_QUOTE(t.name))) OR
+        EXISTS(SELECT 1 FROM media_set s WHERE JSON_CONTAINS(s.tags,JSON_QUOTE(t.name)) AND (s.user_id=? OR EXISTS(
+          SELECT 1 FROM catalog_set_member sm JOIN media m ON m.catalog_id=sm.catalog_id WHERE sm.set_id=s.id AND m.user_id=? AND m.available=TRUE))))`,
+            [value.name, userId, userId, userId]
+          )
+          if (!visible.length)
+            return yield* new NotFoundError({ resource: "Tag" })
+          yield* session.execute(
+            "UPDATE catalog_tag SET color=? WHERE name=?",
+            [value.color, value.name]
+          )
+          return { ok: true }
+        })
+      ),
+  }),
+  "create-set": mutation("create-set", {
+    input: newSet,
+    run: (value, { userId }) =>
+      transaction((session) =>
+        Effect.gen(function* () {
+          const setId = randomUUID()
+          yield* insertSet(
+            session,
+            userId,
+            setId,
+            value.displayName,
+            value.tags
+          )
+          yield* Tags.ensure(value.tags, session)
+          return { id: setId }
+        })
+      ),
+  }),
+  "add-sets": mutation("add-sets", {
+    input: addMediaSets,
+    run: (value, { userId }) =>
+      transaction((session) =>
+        Effect.gen(function* () {
+          for (const target of value.ids)
+            yield* requireAccessible(session, userId, "media", target)
+          const visible = yield* session.queryRows<
+            { id: string; display_name: string } & RowDataPacket
+          >(
+            `SELECT s.id,s.display_name FROM media_set s WHERE s.user_id=? OR EXISTS(
+          SELECT 1 FROM catalog_set_member sm JOIN media m ON m.catalog_id=sm.catalog_id
+          WHERE sm.set_id=s.id AND m.user_id=? AND m.available=TRUE)`,
+            [userId, userId]
+          )
+          for (const name of value.names) {
+            const matches = visible.filter(
+              (set) => set.display_name.toLowerCase() === name.toLowerCase()
+            )
+            if (matches.length > 1)
+              return yield* new ValidationError({
+                message: `Multiple sets named “${name}”. Choose one individually.`,
+              })
+            const setId = matches[0]?.id ?? randomUUID()
+            if (!matches.length)
+              yield* insertSet(session, userId, setId, name, [])
+            for (const target of value.ids)
+              yield* session.execute(
+                "INSERT IGNORE INTO catalog_set_member VALUES (?,?)",
+                [setId, target]
+              )
+          }
+          for (const target of value.ids) yield* markCataloged(session, target)
+          return { count: value.ids.length }
+        })
+      ),
+  }),
+  "set-membership": mutation("set-membership", {
+    input: z
+      .object({
+        id: id.optional(),
+        ids: addMediaTags.shape.ids.optional(),
+        setId: id.optional(),
+        displayName: setName.optional(),
+        remove: z.boolean().default(false),
+      })
+      .refine(
+        (v) => Boolean(v.id) !== Boolean(v.ids),
+        "Provide a media ID or media IDs"
+      )
+      .refine(
+        (v) =>
+          Boolean(v.setId) !== Boolean(v.displayName) &&
+          (!v.remove || Boolean(v.setId))
+      ),
+    run: (value, { userId }) =>
+      transaction((session) =>
+        Effect.gen(function* () {
+          const targets = value.ids ?? [value.id!]
+          for (const target of targets)
+            yield* requireAccessible(session, userId, "media", target)
+          const setId = value.setId ?? randomUUID()
+          if (value.setId)
+            yield* requireAccessible(session, userId, "set", setId)
+          else yield* insertSet(session, userId, setId, value.displayName!, [])
+          for (const target of targets) {
+            yield* value.remove
+              ? session.execute(
+                  "DELETE FROM catalog_set_member WHERE set_id=? AND catalog_id=?",
+                  [setId, target]
+                )
+              : session.execute(
+                  "INSERT IGNORE INTO catalog_set_member VALUES (?,?)",
+                  [setId, target]
+                )
+            yield* markCataloged(session, target)
+          }
+          return { id: setId }
+        })
+      ),
+  }),
+  "add-tags": mutation("add-tags", {
+    input: addMediaTags,
+    run: (value, { userId }) =>
+      transaction((session) =>
+        Effect.gen(function* () {
+          for (const target of value.ids)
+            yield* requireAccessible(session, userId, "media", target)
+          yield* Tags.ensure(value.tags, session)
+          for (const target of value.ids) {
+            const current = yield* catalogTags(session, target)
+            const merged = yield* parseInput(tags, [
+              ...new Set([...current, ...value.tags]),
+            ])
+            yield* writeTags(session, target, merged)
+            yield* markCataloged(session, target)
+          }
+          return { count: value.ids.length }
+        })
+      ),
+  }),
+  "remove-tags": mutation("remove-tags", {
+    input: addMediaTags,
+    run: (value, { userId }) =>
+      transaction((session) =>
+        Effect.gen(function* () {
+          for (const target of value.ids)
+            yield* requireAccessible(session, userId, "media", target)
+          for (const target of value.ids) {
+            const current = yield* catalogTags(session, target)
+            const remaining = yield* parseInput(
+              tags,
+              current.filter((tag) => !value.tags.includes(tag))
+            )
+            yield* writeTags(session, target, remaining)
+            yield* markCataloged(session, target)
+          }
+          return { count: value.ids.length }
+        })
+      ),
+  }),
+  "remove-tag": mutation("remove-tag", {
+    input: removeMediaTag,
+    run: (value, { userId }) =>
+      transaction((session) =>
+        Effect.gen(function* () {
+          yield* requireAccessible(session, userId, "media", value.id)
+          const current = yield* catalogTags(session, value.id)
+          yield* writeTags(
+            session,
+            value.id,
+            current.filter((tag) => tag !== value.tag)
+          )
+          yield* markCataloged(session, value.id)
+          return { ok: true }
+        })
+      ),
+  }),
+  metadata: mutation("metadata", {
+    input: metadata,
+    run: (value, { userId }) =>
+      transaction((session) =>
+        Effect.gen(function* () {
+          yield* requireAccessible(session, userId, value.kind, value.id)
+          if (value.kind === "media" && value.setIds)
+            for (const setId of value.setIds)
+              yield* requireAccessible(session, userId, "set", setId)
+          yield* session.execute(
+            `UPDATE ${value.kind === "media" ? "catalog" : "media_set"} SET display_name=?,${value.tags ? "tags=?," : ""}created_at=? WHERE id=?`,
+            [
+              value.displayName,
+              ...(value.tags ? [JSON.stringify(value.tags)] : []),
+              new Date(value.createdAt),
+              value.id,
+            ]
+          )
+          if (value.tags) yield* Tags.ensure(value.tags, session)
+          if (value.kind === "media") {
+            if (value.setIds) {
+              yield* session.execute(
+                "DELETE FROM catalog_set_member WHERE catalog_id=?",
+                [value.id]
+              )
+              for (const setId of new Set(value.setIds))
+                yield* session.execute(
+                  "INSERT INTO catalog_set_member VALUES (?,?)",
+                  [setId, value.id]
+                )
+            }
+            yield* markCataloged(session, value.id)
+          }
+          return { ok: true }
+        })
+      ),
+  }),
+  "create-post": mutation("create-post", {
+    input: newPost,
+    run: (value, { userId }) =>
+      transaction((session) =>
+        Effect.gen(function* () {
+          yield* requireAccessible(session, userId, value.kind, value.targetId)
+          const [physical] =
+            value.kind === "media"
+              ? yield* session.queryRows<{ id: string } & RowDataPacket>(
+                  "SELECT id FROM media WHERE catalog_id=? AND user_id=? AND available=TRUE LIMIT 1",
+                  [value.targetId, userId]
+                )
+              : []
+          yield* session.execute(
+            "INSERT INTO post(id,user_id,media_id,catalog_id,set_id,platform,url,external_id,created_at) VALUES (?,?,?,?,?,?,?,?,?)",
+            [
+              randomUUID(),
+              userId,
+              value.kind === "media" ? physical!.id : null,
+              value.kind === "media" ? value.targetId : null,
+              value.kind === "set" ? value.targetId : null,
+              value.platform,
+              value.url,
+              value.externalId,
+              new Date(value.createdAt),
+            ]
+          )
+          if (value.kind === "media")
+            yield* markCataloged(session, value.targetId)
+          return { ok: true }
+        })
+      ),
+  }),
+  "delete-post": mutation("delete-post", {
+    input: z.object({ id }),
+    run: ({ id: target }, { userId }) =>
+      transaction((session) =>
+        Effect.gen(function* () {
+          const [post] = yield* session.queryRows<
+            { catalog_id: string | null; set_id: string | null } & RowDataPacket
+          >("SELECT catalog_id,set_id FROM post WHERE id=?", [target])
+          if (!post) return yield* new NotFoundError({ resource: "Post" })
+          yield* post.catalog_id
+            ? requireAccessible(session, userId, "media", post.catalog_id)
+            : requireAccessible(session, userId, "set", post.set_id!)
+          yield* session.execute("DELETE FROM post WHERE id=?", [target])
+          return { ok: true }
+        })
+      ),
+  }),
+  "delete-set": mutation("delete-set", {
+    input: z.object({ id }),
+    run: ({ id: target }, { userId }) =>
+      transaction((session) =>
+        Effect.gen(function* () {
+          yield* requireAccessible(session, userId, "set", target)
+          yield* session.execute("DELETE FROM media_set WHERE id=?", [target])
+          return { ok: true }
+        })
+      ),
+  }),
+}
 
 /**
  * Every library action, by the name the client posts. This is the one place
  * that lists them: the route dispatches through it and nothing else mutates
  * the library. Each handler runs for `context.userId`, the signed-in user.
  */
-export type ActionName = LegacyAction | keyof typeof sourceActions
+export const actions = { ...sourceActions, ...editActions }
 
-export const actions: Record<ActionName, MutationHandler> = {
-  ...sourceActions,
-  "tag-color": legacy("tag-color"),
-  "create-set": legacy("create-set"),
-  "add-sets": legacy("add-sets"),
-  "set-membership": legacy("set-membership"),
-  "add-tags": legacy("add-tags"),
-  "remove-tags": legacy("remove-tags"),
-  "remove-tag": legacy("remove-tag"),
-  metadata: legacy("metadata"),
-  "create-post": legacy("create-post"),
-  "delete-post": legacy("delete-post"),
-  "delete-set": legacy("delete-set"),
-}
+export type ActionName = keyof typeof actions
 
 /** Runs one library action for a user; an unknown name is a 404. */
 export const mutate = (
@@ -547,251 +831,6 @@ export const mutate = (
 ) => {
   const context: MutationContext = { userId, headers }
   return Object.hasOwn(actions, action)
-    ? actions[action as ActionName](data, context)
+    ? (actions as Record<string, MutationHandler>)[action](data, context)
     : Effect.fail(new UnknownActionError())
-}
-
-async function legacyMutate(
-  action: LegacyAction,
-  input: unknown,
-  userId: string
-) {
-  return catalogTransaction(async (connection) => {
-    if (action === "tag-color") {
-      const value = z
-        .object({
-          name: z.string().trim().min(1).max(50),
-          color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
-        })
-        .parse(input)
-      const [visible] = await connection.query<RowDataPacket[]>(
-        `SELECT name FROM catalog_tag t WHERE name=? AND (
-        EXISTS(SELECT 1 FROM catalog c JOIN media m ON m.catalog_id=c.id WHERE m.user_id=? AND m.available=TRUE AND JSON_CONTAINS(c.tags,JSON_QUOTE(t.name))) OR
-        EXISTS(SELECT 1 FROM media_set s WHERE JSON_CONTAINS(s.tags,JSON_QUOTE(t.name)) AND (s.user_id=? OR EXISTS(
-          SELECT 1 FROM catalog_set_member sm JOIN media m ON m.catalog_id=sm.catalog_id WHERE sm.set_id=s.id AND m.user_id=? AND m.available=TRUE))))`,
-        [value.name, userId, userId, userId]
-      )
-      if (!visible.length) throw new Response("Tag not found.", { status: 404 })
-      await connection.execute("UPDATE catalog_tag SET color=? WHERE name=?", [
-        value.color,
-        value.name,
-      ])
-      return { ok: true }
-    }
-    if (action === "create-set") {
-      const value = newSet.parse(input),
-        setId = randomUUID()
-      await connection.execute(
-        "INSERT INTO media_set(id,user_id,display_name,raw_name,tags,created_at) VALUES (?,?,?,?,?,NOW(3))",
-        [
-          setId,
-          userId,
-          value.displayName,
-          value.displayName,
-          JSON.stringify(value.tags),
-        ]
-      )
-      await ensureTags(userId, value.tags, connection)
-      return { id: setId }
-    }
-    if (action === "add-sets") {
-      const value = addMediaSets.parse(input)
-      for (const target of value.ids)
-        await accessible(connection, userId, "media", target)
-      const [visible] = await connection.query<RowDataPacket[]>(
-        `SELECT s.id,s.display_name FROM media_set s WHERE s.user_id=? OR EXISTS(
-          SELECT 1 FROM catalog_set_member sm JOIN media m ON m.catalog_id=sm.catalog_id
-          WHERE sm.set_id=s.id AND m.user_id=? AND m.available=TRUE)`,
-        [userId, userId]
-      )
-      for (const name of value.names) {
-        const matches = visible.filter(
-          (set) => set.display_name.toLowerCase() === name.toLowerCase()
-        )
-        if (matches.length > 1)
-          throw new Response(
-            `Multiple sets named “${name}”. Choose one individually.`,
-            { status: 400 }
-          )
-        const setId = matches[0]?.id ?? randomUUID()
-        if (!matches.length) {
-          await connection.execute(
-            "INSERT INTO media_set(id,user_id,display_name,raw_name,tags,created_at) VALUES (?,?,?,?,?,NOW(3))",
-            [setId, userId, name, name, "[]"]
-          )
-        }
-        for (const target of value.ids)
-          await connection.execute(
-            "INSERT IGNORE INTO catalog_set_member VALUES (?,?)",
-            [setId, target]
-          )
-      }
-      for (const target of value.ids) await markCataloged(connection, target)
-      return { count: value.ids.length }
-    }
-    if (action === "set-membership") {
-      const value = z
-        .object({
-          id: id.optional(),
-          ids: addMediaTags.shape.ids.optional(),
-          setId: id.optional(),
-          displayName: setName.optional(),
-          remove: z.boolean().default(false),
-        })
-        .refine(
-          (v) => Boolean(v.id) !== Boolean(v.ids),
-          "Provide a media ID or media IDs"
-        )
-        .refine(
-          (v) =>
-            Boolean(v.setId) !== Boolean(v.displayName) &&
-            (!v.remove || Boolean(v.setId))
-        )
-        .parse(input)
-      const targets = value.ids ?? [value.id!]
-      for (const target of targets)
-        await accessible(connection, userId, "media", target)
-      const setId = value.setId ?? randomUUID()
-      if (value.setId) await accessible(connection, userId, "set", setId)
-      else
-        await connection.execute(
-          "INSERT INTO media_set(id,user_id,display_name,raw_name,tags,created_at) VALUES (?,?,?,?,?,NOW(3))",
-          [setId, userId, value.displayName!, value.displayName!, "[]"]
-        )
-      for (const target of targets) {
-        if (value.remove)
-          await connection.execute(
-            "DELETE FROM catalog_set_member WHERE set_id=? AND catalog_id=?",
-            [setId, target]
-          )
-        else
-          await connection.execute(
-            "INSERT IGNORE INTO catalog_set_member VALUES (?,?)",
-            [setId, target]
-          )
-        await markCataloged(connection, target)
-      }
-      return { id: setId }
-    }
-    if (action === "add-tags" || action === "remove-tags") {
-      const value = addMediaTags.parse(input)
-      for (const target of value.ids)
-        await accessible(connection, userId, "media", target)
-      if (action === "add-tags")
-        await ensureTags(userId, value.tags, connection)
-      for (const target of value.ids) {
-        const [items] = await connection.query<RowDataPacket[]>(
-          "SELECT tags FROM catalog WHERE id=?",
-          [target]
-        )
-        const merged = tags.parse(
-          action === "remove-tags"
-            ? items[0].tags.filter((tag: string) => !value.tags.includes(tag))
-            : [...new Set([...items[0].tags, ...value.tags])]
-        )
-        await connection.execute("UPDATE catalog SET tags=? WHERE id=?", [
-          JSON.stringify(merged),
-          target,
-        ])
-        await markCataloged(connection, target)
-      }
-      return { count: value.ids.length }
-    }
-    if (action === "remove-tag") {
-      const value = removeMediaTag.parse(input)
-      await accessible(connection, userId, "media", value.id)
-      const [items] = await connection.query<RowDataPacket[]>(
-        "SELECT tags FROM catalog WHERE id=?",
-        [value.id]
-      )
-      await connection.execute("UPDATE catalog SET tags=? WHERE id=?", [
-        JSON.stringify(items[0].tags.filter((t: string) => t !== value.tag)),
-        value.id,
-      ])
-      await markCataloged(connection, value.id)
-      return { ok: true }
-    }
-    if (action === "metadata") {
-      const value = metadata.parse(input)
-      await accessible(connection, userId, value.kind, value.id)
-      if (value.kind === "media" && value.setIds)
-        for (const setId of value.setIds)
-          await accessible(connection, userId, "set", setId)
-      await connection.execute(
-        `UPDATE ${value.kind === "media" ? "catalog" : "media_set"} SET display_name=?,${value.tags ? "tags=?," : ""}created_at=? WHERE id=?`,
-        [
-          value.displayName,
-          ...(value.tags ? [JSON.stringify(value.tags)] : []),
-          new Date(value.createdAt),
-          value.id,
-        ]
-      )
-      if (value.tags) await ensureTags(userId, value.tags, connection)
-      if (value.kind === "media") {
-        if (value.setIds) {
-          await connection.execute(
-            "DELETE FROM catalog_set_member WHERE catalog_id=?",
-            [value.id]
-          )
-          for (const setId of new Set(value.setIds))
-            await connection.execute(
-              "INSERT INTO catalog_set_member VALUES (?,?)",
-              [setId, value.id]
-            )
-        }
-        await markCataloged(connection, value.id)
-      }
-      return { ok: true }
-    }
-    if (action === "create-post") {
-      const value = newPost.parse(input)
-      await accessible(connection, userId, value.kind, value.targetId)
-      const [physical] =
-        value.kind === "media"
-          ? await connection.query<RowDataPacket[]>(
-              "SELECT id FROM media WHERE catalog_id=? AND user_id=? AND available=TRUE LIMIT 1",
-              [value.targetId, userId]
-            )
-          : [[]]
-      await connection.execute(
-        "INSERT INTO post(id,user_id,media_id,catalog_id,set_id,platform,url,external_id,created_at) VALUES (?,?,?,?,?,?,?,?,?)",
-        [
-          randomUUID(),
-          userId,
-          value.kind === "media" ? physical[0].id : null,
-          value.kind === "media" ? value.targetId : null,
-          value.kind === "set" ? value.targetId : null,
-          value.platform,
-          value.url,
-          value.externalId,
-          new Date(value.createdAt),
-        ]
-      )
-      if (value.kind === "media")
-        await markCataloged(connection, value.targetId)
-      return { ok: true }
-    }
-    if (action === "delete-post") {
-      const target = id.parse((input as { id: unknown }).id)
-      const [items] = await connection.query<RowDataPacket[]>(
-        "SELECT catalog_id,set_id FROM post WHERE id=?",
-        [target]
-      )
-      if (!items.length) throw new Response("Post not found.", { status: 404 })
-      await accessible(
-        connection,
-        userId,
-        items[0].catalog_id ? "media" : "set",
-        items[0].catalog_id ?? items[0].set_id
-      )
-      await connection.execute("DELETE FROM post WHERE id=?", [target])
-      return { ok: true }
-    }
-    if (action === "delete-set") {
-      const target = id.parse((input as { id: unknown }).id)
-      await accessible(connection, userId, "set", target)
-      await connection.execute("DELETE FROM media_set WHERE id=?", [target])
-      return { ok: true }
-    }
-  })
 }

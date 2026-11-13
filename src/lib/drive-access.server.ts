@@ -1,6 +1,6 @@
 import { createSign } from "node:crypto"
 import { readFileSync } from "node:fs"
-import { Cache, Duration, Effect, Exit, Schedule, Schema } from "effect"
+import { Cache, Duration, Effect, Exit, Result, Schedule, Schema } from "effect"
 import { HttpClientRequest } from "effect/http"
 import {
   DRIVE_API,
@@ -36,14 +36,14 @@ export function parseServiceAccount(
   const text = raw.startsWith("{")
     ? raw
     : Buffer.from(raw, "base64").toString("utf8")
-  let value: Partial<ServiceAccount> & { type?: string }
-  try {
-    value = JSON.parse(text)
-  } catch {
-    throw new Error(
-      "GOOGLE_SERVICE_ACCOUNT_KEY must be a service account JSON key (raw or base64)."
+  const value: Partial<ServiceAccount> & { type?: string } =
+    Result.getOrThrowWith(
+      Result.try(() => JSON.parse(text)),
+      () =>
+        new Error(
+          "GOOGLE_SERVICE_ACCOUNT_KEY must be a service account JSON key (raw or base64)."
+        )
     )
-  }
   if (
     value.type !== "service_account" ||
     !value.client_email ||

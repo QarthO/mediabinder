@@ -2,9 +2,37 @@ import { betterAuth } from "better-auth"
 import { APIError } from "better-auth/api"
 import { Effect } from "effect"
 import { AuthenticationError } from "@/effect/errors"
-import { pool, rows } from "./database.server"
-import { appUrl } from "./config"
+import mysql from "mysql2/promise"
+import type { RowDataPacket } from "mysql2/promise"
+import { appUrl, databaseOptions } from "./config"
 import { sharedFolderMode } from "./drive-access.server"
+/**
+ * Better Auth's connections, and nothing else's: it takes a mysql2 pool, so
+ * this is the one place MediaBinder still has one. Everything else goes
+ * through the Database service. Better Auth makes a handful of short queries
+ * per request (session lookup, token reads, the sign-up hooks below), so four
+ * connections, opened on demand, are plenty. `src/effect/database.ts` has the
+ * per-process connection total.
+ */
+export const AUTH_POOL_SIZE = 4
+const pool = mysql.createPool({
+  ...databaseOptions(),
+  connectionLimit: AUTH_POOL_SIZE,
+  timezone: "Z",
+  dateStrings: true,
+})
+if (import.meta.hot) import.meta.hot.dispose(() => pool.end())
+
+/** Closes Better Auth's connections, for a process that is shutting down. */
+export const closeAuthPool = () => pool.end()
+
+const ownerOf = async () => {
+  const [result] = await pool.execute<RowDataPacket[]>(
+    "SELECT owner_id FROM workspace WHERE id = 1"
+  )
+  return (result[0] as { owner_id: string | null }).owner_id
+}
+
 export const auth = betterAuth({
   appName: "MediaBinder",
   baseURL: appUrl(),
@@ -39,10 +67,7 @@ export const auth = betterAuth({
             throw new APIError("FORBIDDEN", {
               message: "A verified Google account is required.",
             })
-          const [workspace] = await rows<{ owner_id: string | null }>(
-            "SELECT owner_id FROM workspace WHERE id = 1"
-          )
-          if (workspace.owner_id && process.env.ALLOW_SIGNUPS !== "true")
+          if ((await ownerOf()) && process.env.ALLOW_SIGNUPS !== "true")
             throw new APIError("FORBIDDEN", {
               message: "New account registration is disabled.",
             })
@@ -54,10 +79,7 @@ export const auth = betterAuth({
             "UPDATE workspace SET owner_id = ? WHERE id = 1 AND owner_id IS NULL",
             [user.id]
           )
-          const [workspace] = await rows<{ owner_id: string }>(
-            "SELECT owner_id FROM workspace WHERE id = 1"
-          )
-          if (workspace.owner_id === user.id)
+          if ((await ownerOf()) === user.id)
             await pool.execute("UPDATE user SET role = ? WHERE id = ?", [
               "superuser",
               user.id,

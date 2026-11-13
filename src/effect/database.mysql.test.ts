@@ -3,7 +3,8 @@ import { layer } from "@effect/vitest"
 import type { RowDataPacket } from "mysql2/promise"
 import { Deferred, Effect, Exit, Fiber, Schema } from "effect"
 
-import { rows } from "@/lib/database.server"
+import mysql from "mysql2/promise"
+import { databaseOptions } from "@/lib/config"
 import { describeMysql, resetDatabase, TestDatabase } from "@/test/database"
 import { Database } from "./database"
 import { LockBusyError } from "./errors"
@@ -140,7 +141,19 @@ describeMysql("database", () => {
           { id: 1, at: "2024-01-02 03:04:05.678" },
           { id: 2, at: "2024-03-10 02:30:00.123" },
         ])
-        const viaPool = yield* Effect.promise(() => rows(sql))
+        // Better Auth's pool is configured the same way.
+        const viaPool = yield* Effect.promise(async () => {
+          const pool = mysql.createPool({
+            ...databaseOptions(),
+            timezone: "Z",
+            dateStrings: true,
+          })
+          try {
+            return (await pool.execute(sql))[0]
+          } finally {
+            await pool.end()
+          }
+        })
         expect(viaPool).toEqual(viaDatabase.map((row) => ({ ...row })))
       })
     )

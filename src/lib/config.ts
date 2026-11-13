@@ -1,15 +1,15 @@
+import { Result } from "effect"
+
 type Environment = Record<string, string | undefined>
 
 export function appUrl(env: Environment = process.env) {
   const value = env.MEDIABINDER_URL || env.BETTER_AUTH_URL
   if (!value)
     throw new Error("Set MEDIABINDER_URL to the public application URL.")
-  let url: URL
-  try {
-    url = new URL(value)
-  } catch {
-    throw new Error("MEDIABINDER_URL must be an absolute http or https URL.")
-  }
+  const url = Result.getOrThrowWith(
+    Result.try(() => new URL(value)),
+    () => new Error("MEDIABINDER_URL must be an absolute http or https URL.")
+  )
   if (
     !["http:", "https:"].includes(url.protocol) ||
     url.username ||
@@ -28,13 +28,13 @@ export function appUrl(env: Environment = process.env) {
 // keeps manual/fresh-load syncing without attempting watch registration.
 export function driveWebhookUrl(env: Environment = process.env) {
   const override = env.DRIVE_WEBHOOK_URL
-  let url: URL
-  try {
-    url = new URL(override || `${appUrl(env)}/api/drive/webhook`)
-  } catch (error) {
-    if (!override) throw error
-    throw new Error("DRIVE_WEBHOOK_URL must be a public HTTPS URL.")
-  }
+  // Without an override the URL comes from appUrl, whose own error is kept.
+  const url = override
+    ? Result.getOrThrowWith(
+        Result.try(() => new URL(override)),
+        () => new Error("DRIVE_WEBHOOK_URL must be a public HTTPS URL.")
+      )
+    : new URL(`${appUrl(env)}/api/drive/webhook`)
   const local = /^(localhost$|.*\.localhost$|127\.|\[::1\]$)/.test(url.hostname)
   if (!override && (url.protocol !== "https:" || local)) return null
   if (

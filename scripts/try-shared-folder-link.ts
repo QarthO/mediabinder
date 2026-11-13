@@ -3,12 +3,23 @@
 // Creates a folder with the signed-in user's drive.file token (app-created files
 // are visible to that token, like a folder chosen in the picker), then runs the
 // same link flow the settings page uses: share with the service account, link, sync.
-import { rows, pool } from "../src/lib/database.server"
+import type { RowDataPacket } from "mysql2/promise"
+import { closeAuthPool } from "../src/lib/auth.server"
+import { Database } from "../src/effect/database"
 import * as Drive from "../src/effect/drive-api.server"
-import { syncDrive } from "../src/lib/drive.server"
-import { runTracedAppEffect } from "../src/effect/runtime.server"
+import { sync } from "../src/lib/drive.server"
+import {
+  disposeAppRuntime,
+  runTracedAppEffect,
+} from "../src/effect/runtime.server"
 import { mutate } from "../src/lib/library.server"
 
+const rows = <T>(sql: string, values: Array<string> = []) =>
+  runTracedAppEffect(
+    Database.use((database) =>
+      database.queryRows<T & RowDataPacket>("script.query", sql, values)
+    )
+  ) as Promise<T[]>
 const [user] = await rows<{ id: string; email: string }>(
   "SELECT u.id,u.email FROM user u JOIN account a ON a.userId=u.id AND a.providerId='google' ORDER BY u.createdAt LIMIT 1"
 )
@@ -38,7 +49,7 @@ const [linked] = await rows<{ share_permission_id: string | null }>(
   [user.id, folder.id]
 )
 console.log("stored share permission:", Boolean(linked?.share_permission_id))
-console.log("sync:", JSON.stringify(await syncDrive(user.id)))
+console.log("sync:", JSON.stringify(await runTracedAppEffect(sync(user.id))))
 await runTracedAppEffect(
   mutate("remove-source", { folderId: folder.id }, user.id, headers)
 )
@@ -59,4 +70,5 @@ await fetch(`https://www.googleapis.com/drive/v3/files/${folder.id}`, {
   headers: { Authorization: `Bearer ${token}` },
 })
 console.log("deleted test folder")
-await pool.end()
+await disposeAppRuntime()
+await closeAuthPool()

@@ -1,11 +1,9 @@
 import { randomInt } from "node:crypto"
-import type { PoolConnection, RowDataPacket } from "mysql2/promise"
+import type { RowDataPacket } from "mysql2/promise"
 import { Effect } from "effect"
 import { Database } from "@/effect/database"
 import type { DatabaseSession } from "@/effect/database"
-import { runTracedAppEffect } from "@/effect/runtime.server"
 import { tagColorChoices } from "./tag-colors"
-import { legacySession } from "./database.server"
 
 /**
  * Creates the catalog tags in `names` that don't exist yet, each with a color
@@ -40,14 +38,3 @@ export const ensure = Effect.fn("Tags.ensure")(function* (
     known.add(name)
   }
 })
-
-// For callers inside a legacy mysql2 transaction (library.server.ts).
-export function ensureTags(
-  _userId: string,
-  names: string[],
-  connection: Pick<PoolConnection, "execute" | "query">
-) {
-  return runTracedAppEffect(
-    ensure(names, legacySession("tags.ensure", connection))
-  )
-}
