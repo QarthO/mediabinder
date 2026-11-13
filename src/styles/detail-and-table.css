@@ -365,3 +365,120 @@
     font-size: 1rem;
   }
 }
+/* "N copies": a muted badge in the table and cards, a button in the detail. */
+.copy-badge,
+.copies-link {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  height: 18px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--muted);
+  color: var(--muted-foreground);
+  font: 0.6875rem var(--font-mono);
+  white-space: nowrap;
+}
+.media-info .copy-badge {
+  margin-left: 1px;
+}
+.copies-link {
+  margin-left: 8px;
+  cursor: pointer;
+  transition:
+    color 150ms,
+    border-color 150ms;
+}
+.copies-link:hover {
+  color: var(--primary);
+  border-color: var(--primary);
+}
+.detail-copies {
+  margin-top: 26px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+  scroll-margin-top: 8px;
+  outline: none;
+}
+.copy-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.copy-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 4px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+.copy-row:first-child {
+  padding-top: 0;
+}
+.copy-locations {
+  display: grid;
+  gap: 4px;
+}
+.copy-path {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.8125rem;
+  color: var(--muted-foreground);
+}
+.copy-path li {
+  overflow-wrap: anywhere;
+}
+.copy-path li[data-root] {
+  color: var(--foreground);
+  font-weight: 520;
+}
+.copy-path svg {
+  flex-shrink: 0;
+  opacity: 0.6;
+}
+.copy-path-pending {
+  margin-left: 4px;
+  font-size: 0.75rem;
+  font-style: italic;
+  opacity: 0.8;
+}
+.copy-name {
+  font: 0.75rem var(--font-mono);
+  font-weight: 400;
+  color: var(--foreground);
+  overflow-wrap: anywhere;
+}
+.copy-meta {
+  font: 0.75rem var(--font-mono);
+  color: var(--muted-foreground);
+}
+.copy-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  margin-top: 2px;
+}
+.copy-actions a {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.8125rem;
+  color: var(--primary);
+}
+.copy-actions a:hover {
+  text-decoration: underline;
+}
+.copy-actions button {
+  margin-left: -4px;
+}
+.copy-row:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}

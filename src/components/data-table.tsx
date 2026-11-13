@@ -47,6 +47,7 @@ import { toast } from "sonner"
 import { action } from "@/lib/api"
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip"
 import { Thumbnail } from "./thumbnail"
+import { CopyBadge } from "./copies"
 import { bytes } from "@/lib/utils"
 import { TagPopover } from "./tag-popover"
 import { mediaDate } from "@/lib/media-date"
@@ -766,10 +767,8 @@ const MediaName = memo(function MediaName({
         <div>
           <strong>{name}</strong>
           <small>
-            <span className="raw-filename">
-              {rawName}
-              {copyCount! > 1 && ` · ${copyCount} copies`}
-            </span>
+            <span className="raw-filename">{rawName}</span>
+            {copyCount! > 1 && <CopyBadge count={copyCount!} />}
           </small>
         </div>
       )}

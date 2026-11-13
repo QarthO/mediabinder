@@ -309,6 +309,12 @@ describeMysql("shared folders", () => {
         call.url.searchParams.get("q")?.includes(`'${foreign}' in parents`)
       )
     ).toBe(false)
+    // Nor is it part of the stored folder tree.
+    const nodes = await rows<{ folder_id: string }>(
+      "SELECT folder_id FROM drive_folder_node WHERE user_id=? ORDER BY folder_id",
+      [user.id]
+    )
+    expect(nodes.map((node) => node.folder_id)).toEqual([open, owned].sort())
   })
 
   test("a limited-access subfolder the user doesn't own makes no set", async () => {

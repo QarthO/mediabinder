@@ -144,6 +144,8 @@ export function DriveSyncMonitor() {
     if (update.retire) toast.dismiss(`drive-sync-${update.retire}`)
     if (update.refreshLibrary)
       void client.invalidateQueries({ queryKey: ["library"] })
+    if (update.refreshLibrary)
+      void client.invalidateQueries({ queryKey: ["copies"] })
     const id = `drive-sync-${run.run_id}`
     if (update.toast === "progress") {
       const current = watcher.current

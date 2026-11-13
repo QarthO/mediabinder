@@ -2,6 +2,7 @@ import type { useMediaPreviewIntent } from "@/lib/media-preview"
 import { memo, type CSSProperties } from "react"
 import { Film, ImageIcon, Link2 } from "lucide-react"
 import { Thumbnail } from "./thumbnail"
+import { CopyBadge } from "./copies"
 import { keepTextUnselected, MediaTags } from "./data-table"
 import {
   hasModifier,
@@ -94,10 +95,8 @@ export const MediaCard = memo(function MediaCard({
             ) : (
               <ImageIcon size={12} />
             )}
-            <span>
-              {media.raw_name.split(".").pop()?.toUpperCase()}
-              {media.copy_count > 1 && ` · ${media.copy_count} copies`}
-            </span>
+            <span>{media.raw_name.split(".").pop()?.toUpperCase()}</span>
+            {media.copy_count > 1 && <CopyBadge count={media.copy_count} />}
             <span className="dot-separator">·</span>
             {bytes(media.size)}
           </span>

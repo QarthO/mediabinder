@@ -28,6 +28,7 @@ import {
 import { Button } from "./ui/button"
 import { Input } from "./ui/input"
 import { PostDialog } from "./post-dialog"
+import { CopiesSection } from "./copies"
 import {
   Thumbnail,
   MediaCensorContext,
@@ -121,6 +122,7 @@ export function Detail({
     [failed, setFailed] = useState(false),
     [confirmDelete, setConfirmDelete] = useState(false)
   const dialogRef = useRef<HTMLDivElement>(null)
+  const copiesRef = useRef<HTMLElement>(null)
   const client = useQueryClient()
   const router = useRouter()
   const save = useMutation({
@@ -438,9 +440,21 @@ export function Detail({
                     <dt>Raw name</dt>
                     <dd>
                       {item.raw_name}
-                      {media && media.copy_count > 1
-                        ? ` · ${media.copy_count} copies`
-                        : ""}
+                      {media && media.copy_count > 1 && (
+                        <button
+                          type="button"
+                          className="copies-link"
+                          onClick={() => {
+                            copiesRef.current?.scrollIntoView({
+                              block: "start",
+                              behavior: "smooth",
+                            })
+                            copiesRef.current?.focus({ preventScroll: true })
+                          }}
+                        >
+                          {media.copy_count} copies
+                        </button>
+                      )}
                     </dd>
                   </div>
                   <div>
@@ -475,6 +489,13 @@ export function Detail({
                   </div>
                 )}
               </form>
+              {media && media.copy_count > 1 && (
+                <CopiesSection
+                  catalogId={media.id}
+                  count={media.copy_count}
+                  ref={copiesRef}
+                />
+              )}
               <section className="detail-posts">
                 <div className="section-heading">
                   <h3>

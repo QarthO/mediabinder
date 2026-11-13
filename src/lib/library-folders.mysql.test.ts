@@ -151,6 +151,51 @@ describeMysql("library edits", () => {
     expect(await count("catalog_set_member WHERE set_id=?", [setId])).toBe(1)
   })
 
+  test("copies lists only the user's own available copies, under their own folders", async () => {
+    const user = newUser()
+    const other = newUser()
+    await insertFolder(user.id, "a", "Mine")
+    await insertFolder(other.id, "a", "Theirs")
+    const catalogId = randomUUID()
+    const first = await insertMedia({ userId: user.id, catalogId, folder: "a" })
+    const second = await insertMedia({
+      userId: user.id,
+      catalogId,
+      folder: "a",
+      uploadedAt: "2026-09-02",
+    })
+    // Not listed: a copy that is gone, one the user's folders don't reach, and
+    // another user's copy of the same item.
+    await insertMedia({
+      userId: user.id,
+      catalogId,
+      folder: "a",
+      available: false,
+    })
+    await insertMedia({ userId: user.id, catalogId })
+    await insertMedia({ userId: other.id, catalogId, folder: "a" })
+    const alone = await insertMedia({ userId: other.id, folder: "a" })
+
+    const copies = (await act(user, "copies", { id: catalogId })) as {
+      drive_id: string
+      locations: { folder_name: string; path: string[] | null }[]
+    }[]
+    expect(copies.map((copy) => copy.drive_id)).toEqual([first, second])
+    // The tree isn't stored until a sync: the linked folder, no path yet.
+    expect(copies[0].locations).toEqual([{ folder_name: "Mine", path: null }])
+
+    // Another user's item, and unknown ids, are the same not-found.
+    expect(await rejectedStatus(act(user, "copies", { id: alone }))).toBe(404)
+    expect(
+      await rejectedStatus(act(user, "copies", { id: randomUUID() }))
+    ).toBe(404)
+    expect(
+      await rejectedStatus(act(newUser(), "copies", { id: catalogId }))
+    ).toBe(404)
+    const theirs = (await act(other, "copies", { id: catalogId })) as unknown[]
+    expect(theirs).toHaveLength(1)
+  })
+
   test("equal upload dates keep their order across tag and set edits", async () => {
     const user = newUser()
     const ids = Array.from({ length: 30 }, () => randomUUID()).sort()
@@ -412,6 +457,103 @@ describeMysql("subfolder sets", () => {
     await syncDrive(user.id)
     expect(await count("catalog_set_member")).toBe(4)
     expect(await sets(user.id)).toHaveLength(3)
+  })
+
+  // Which folders (by ID) the stored tree holds, as `id<-parent` pairs.
+  const stored = async (userId: string) =>
+    (
+      await rows<{ folder_id: string; parent_id: string; root: string }>(
+        "SELECT folder_id,parent_id,root_folder_id AS root FROM drive_folder_node WHERE user_id=? ORDER BY root_folder_id,folder_id",
+        [userId]
+      )
+    ).map(
+      (node) =>
+        `${node.root.replace(`${userId}-`, "")}:${node.folder_id.replace(`${userId}-`, "")}<-${node.parent_id.replace(`${userId}-`, "")}`
+    )
+
+  test("copies show the path from the linked folder to each file's folder", async () => {
+    const { user, p } = await setup()
+    await syncDrive(user.id)
+    expect(await stored(user.id)).toEqual([
+      "root:cats<-root",
+      "root:flowers<-root",
+      "root:macro<-flowers",
+    ])
+    // Put a nested file, a file in a first-level folder and a file straight
+    // in the linked folder into one item, as byte-identical files would be.
+    // (These files have no checksum, so a sync gives each its own item.)
+    const merge = async () => {
+      const [{ catalog_id: target }] = await rows<{ catalog_id: string }>(
+        "SELECT catalog_id FROM media WHERE user_id=? AND drive_id=?",
+        [user.id, `${p}-loose`]
+      )
+      for (const file of ["bee", "rose"])
+        await execute(
+          "UPDATE media SET catalog_id=? WHERE user_id=? AND drive_id=?",
+          [target, user.id, `${p}-${file}`]
+        )
+      return target
+    }
+    const target = await merge()
+
+    const copies = (await act(user, "copies", { id: target })) as {
+      drive_id: string
+      locations: { folder_name: string; path: string[] }[]
+    }[]
+    expect(
+      Object.fromEntries(
+        copies.map((copy) => [
+          copy.drive_id.replace(`${p}-`, ""),
+          copy.locations,
+        ])
+      )
+    ).toEqual({
+      bee: [{ folder_name: "Root", path: ["flowers", "macro"] }],
+      rose: [{ folder_name: "Root", path: ["flowers"] }],
+      loose: [{ folder_name: "Root", path: [] }],
+    })
+
+    // Linking a folder inside the tree adds a second location for its files.
+    await insertFolder(p, `${p}-flowers`, "Flowers root")
+    await syncDrive(user.id)
+    const again = (await act(user, "copies", { id: await merge() })) as {
+      drive_id: string
+      locations: { folder_name: string; path: string[] }[]
+    }[]
+    expect(
+      again.find((copy) => copy.drive_id === `${p}-bee`)?.locations
+    ).toEqual([
+      { folder_name: "Flowers root", path: ["macro"] },
+      { folder_name: "Root", path: ["flowers", "macro"] },
+    ])
+  })
+
+  test("a successful scan replaces the stored folders, a failed one keeps them", async () => {
+    const { user, p } = await setup()
+    await syncDrive(user.id)
+    expect(await stored(user.id)).toHaveLength(3)
+
+    // macro is gone from Drive and a new folder appeared.
+    tree[`${p}-flowers`] = {
+      folders: [[`${p}-bouquets`, "bouquets"]],
+      files: [`${p}-rose`],
+    }
+    failing = true
+    await expect(syncDrive(user.id)).rejects.toThrow()
+    expect(await stored(user.id)).toHaveLength(3)
+    expect(await stored(user.id)).toContain("root:macro<-flowers")
+
+    failing = false
+    await syncDrive(user.id)
+    expect(await stored(user.id)).toEqual([
+      "root:bouquets<-flowers",
+      "root:cats<-root",
+      "root:flowers<-root",
+    ])
+
+    // Unlinking the folder takes its tree with it.
+    await act(user, "remove-source", { folderId: `${p}-root` })
+    expect(await stored(user.id)).toEqual([])
   })
 
   test("a failed scan creates no sets", async () => {
