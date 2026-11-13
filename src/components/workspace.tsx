@@ -77,6 +77,7 @@ const DriveSettings = lazy(() =>
     default: module.DriveSettings,
   }))
 )
+import { endLibraryOpen } from "@/lib/browser-telemetry"
 import { libraryQuery, action } from "@/lib/api"
 import { authClient } from "@/lib/auth-client"
 import {
@@ -195,7 +196,7 @@ function WorkspaceContent({
   )
   const keyboardShortcuts = useCallback((node: HTMLDivElement | null) => {
     if (!node) return
-    performance.mark("mediabinder-interactive")
+    endLibraryOpen()
     const handler = (e: KeyboardEvent) => {
       if (
         (e.metaKey || e.ctrlKey) &&

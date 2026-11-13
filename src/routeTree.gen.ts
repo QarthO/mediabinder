@@ -22,6 +22,7 @@ import { Route as AppSetsSetIdRouteImport } from './routes/_app.sets.$setId'
 import { Route as ApiAuthSplatRouteImport } from './routes/api.auth.$'
 import { Route as ApiDriveWebhookRouteImport } from './routes/api.drive.webhook'
 import { Route as ApiMediaIdRouteImport } from './routes/api.media.$id'
+import { Route as ApiTelemetryV1SignalRouteImport } from './routes/api.telemetry.v1.$signal'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -87,6 +88,11 @@ const ApiMediaIdRoute = ApiMediaIdRouteImport.update({
   path: '/api/media/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiTelemetryV1SignalRoute = ApiTelemetryV1SignalRouteImport.update({
+  id: '/api/telemetry/v1/$signal',
+  path: '/api/telemetry/v1/$signal',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -101,6 +107,7 @@ export interface FileRoutesByFullPath {
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/drive/webhook': typeof ApiDriveWebhookRoute
   '/api/media/$id': typeof ApiMediaIdRoute
+  '/api/telemetry/v1/$signal': typeof ApiTelemetryV1SignalRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -115,6 +122,7 @@ export interface FileRoutesByTo {
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/drive/webhook': typeof ApiDriveWebhookRoute
   '/api/media/$id': typeof ApiMediaIdRoute
+  '/api/telemetry/v1/$signal': typeof ApiTelemetryV1SignalRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -131,6 +139,7 @@ export interface FileRoutesById {
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/drive/webhook': typeof ApiDriveWebhookRoute
   '/api/media/$id': typeof ApiMediaIdRoute
+  '/api/telemetry/v1/$signal': typeof ApiTelemetryV1SignalRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -147,6 +156,7 @@ export interface FileRouteTypes {
     | '/api/auth/$'
     | '/api/drive/webhook'
     | '/api/media/$id'
+    | '/api/telemetry/v1/$signal'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -161,6 +171,7 @@ export interface FileRouteTypes {
     | '/api/auth/$'
     | '/api/drive/webhook'
     | '/api/media/$id'
+    | '/api/telemetry/v1/$signal'
   id:
     | '__root__'
     | '/'
@@ -176,6 +187,7 @@ export interface FileRouteTypes {
     | '/api/auth/$'
     | '/api/drive/webhook'
     | '/api/media/$id'
+    | '/api/telemetry/v1/$signal'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -188,6 +200,7 @@ export interface RootRouteChildren {
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   ApiDriveWebhookRoute: typeof ApiDriveWebhookRoute
   ApiMediaIdRoute: typeof ApiMediaIdRoute
+  ApiTelemetryV1SignalRoute: typeof ApiTelemetryV1SignalRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -283,6 +296,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiMediaIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/telemetry/v1/$signal': {
+      id: '/api/telemetry/v1/$signal'
+      path: '/api/telemetry/v1/$signal'
+      fullPath: '/api/telemetry/v1/$signal'
+      preLoaderRoute: typeof ApiTelemetryV1SignalRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -321,6 +341,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   ApiDriveWebhookRoute: ApiDriveWebhookRoute,
   ApiMediaIdRoute: ApiMediaIdRoute,
+  ApiTelemetryV1SignalRoute: ApiTelemetryV1SignalRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

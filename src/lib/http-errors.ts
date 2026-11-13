@@ -8,17 +8,6 @@ import {
   ValidationError,
 } from "@/effect/errors"
 
-// Tagged errors that describe a request the app refused or couldn't satisfy,
-// so they are answered but not reported. error-policy.ts shares this list.
-export const EXPECTED_ERROR_TAGS: ReadonlySet<string> = new Set([
-  "AuthenticationError",
-  "DriveReconnectError",
-  "LockBusyError",
-  "NotFoundError",
-  "UnknownActionError",
-  "ValidationError",
-])
-
 export const SYNC_BUSY_MESSAGE = "A sync is already running. Try again shortly."
 
 /**

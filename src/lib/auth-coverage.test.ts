@@ -22,6 +22,8 @@ const publicServerFunctions: Record<string, string> = {
     "Tells the login page whether to redirect; returns only a signed-in flag",
   "_app.tsx:sessionCheck":
     "The shell's redirect check; returns the visitor's own view cookies and a signed-in flag, never library data",
+  "__root.tsx:browserTelemetryConfig":
+    "Tells the page whether to send browser telemetry; returns only the trace sample ratio, or null",
 }
 
 const root = resolve(import.meta.dirname, "../..")

@@ -18,7 +18,7 @@ import { Thumbnails } from "./thumbnails"
 // Vite replaces this at build time. The worker and migration scripts run
 // under tsx, where `import.meta.env` doesn't exist, so they fall back to the
 // environment (Coolify sets SOURCE_COMMIT).
-const sourceCommit =
+export const sourceCommit =
   Result.getOrElse(
     Result.try(() => import.meta.env.VITE_MEDIABINDER_SOURCE_SHA),
     () => undefined
@@ -140,11 +140,22 @@ export function forkAppEffectInTrace<TResult, TError>(
 export function traceAppPromise<TResult>(
   name: string,
   run: (span: Tracer.Span) => Promise<TResult>,
-  attributes?: Record<string, unknown>
+  attributes?: Record<string, unknown>,
+  // A span from another service, such as the browser's, to continue.
+  parent?: Tracer.AnySpan
 ): Promise<TResult> {
   return runtime.runPromise(
     Telemetry.withActiveParent(
-      Telemetry.spanPromise(name, run, attributes ? { attributes } : undefined)
+      Telemetry.spanPromise(
+        name,
+        run,
+        attributes || parent
+          ? {
+              ...(attributes ? { attributes } : {}),
+              ...(parent ? { parent } : {}),
+            }
+          : undefined
+      )
     )
   )
 }

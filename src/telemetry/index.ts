@@ -19,8 +19,8 @@
  * Errors are exported as error logs carrying `exception.*` attributes and a
  * stable `error.fingerprint`, so they can be grouped without span events.
  *
- * Ported from Kiln's packages/telemetry. Kiln's `otlpTarget`, which forwards
- * browser-sent signals, is left out; a browser layer may need it later.
+ * Ported from Kiln's packages/telemetry. `otlpTarget` serves the browser
+ * telemetry proxy, which forwards browser-sent signals with these settings.
  */
 import type { AsyncLocalStorage } from "node:async_hooks"
 
@@ -32,6 +32,7 @@ import {
   Layer,
   Option,
   Predicate,
+  Schema,
   Tracer,
 } from "effect"
 import { FetchHttpClient } from "effect/http"
@@ -49,6 +50,13 @@ export interface ErrorContext {
   readonly attributes?:
     | Readonly<Record<string, string | number | boolean | null | undefined>>
     | undefined
+}
+
+/** Where to send a signal received from elsewhere, such as a browser. */
+export interface OtlpTarget {
+  readonly url: string
+  readonly headers: Readonly<Record<string, string>>
+  readonly sampleRatio: number
 }
 
 export interface ExceptionDetails {
@@ -113,6 +121,57 @@ const configDefaults = ConfigProvider.layerAdd(
   })
 )
 
+const headersConfig = (name: string) =>
+  Config.Record(Schema.String, Schema.StringFromUriComponent, name)
+
+/**
+ * Where to forward a signal received from elsewhere, such as a browser, using
+ * the same OTEL_* configuration as `layer`. None when the signal is disabled,
+ * no endpoint is set, or the configuration is invalid.
+ */
+export const otlpTarget = (
+  signal: "logs" | "traces"
+): Effect.Effect<Option.Option<OtlpTarget>> => {
+  const name = signal.toUpperCase()
+  return Effect.gen(function* () {
+    const disabled = yield* Config.Boolean("OTEL_SDK_DISABLED").pipe(
+      Config.withDefault(false)
+    )
+    const exporters = yield* Config.Array(
+      Schema.String,
+      `OTEL_${name}_EXPORTER`
+    ).pipe(Config.withDefault<ReadonlyArray<string>>([]))
+    if (
+      disabled ||
+      !exporters.some((value) => value.trim().toLowerCase() === "otlp")
+    ) {
+      return Option.none()
+    }
+    const signalEndpoint = yield* Config.URL(
+      `OTEL_EXPORTER_OTLP_${name}_ENDPOINT`
+    ).pipe(Config.withDefault(undefined))
+    const baseEndpoint = yield* Config.URL("OTEL_EXPORTER_OTLP_ENDPOINT").pipe(
+      Config.withDefault(undefined)
+    )
+    if (!signalEndpoint && baseEndpoint) {
+      // The path is extended, not the string, so query parameters survive.
+      baseEndpoint.pathname = `${baseEndpoint.pathname.replace(/\/$/u, "")}/v1/${signal}`
+    }
+    const url = (signalEndpoint ?? baseEndpoint)?.toString()
+    if (!url) return Option.none()
+    const headers = yield* headersConfig(
+      `OTEL_EXPORTER_OTLP_${name}_HEADERS`
+    ).pipe(
+      Config.orElse(() => headersConfig("OTEL_EXPORTER_OTLP_HEADERS")),
+      Config.withDefault({})
+    )
+    return Option.some({ url, headers, sampleRatio: yield* sampleRatio })
+  }).pipe(
+    Effect.provide(configDefaults),
+    Effect.orElseSucceed(() => Option.none())
+  )
+}
+
 /**
  * Wraps a tracer so only roots are sampled and the active span is visible to
  * promise code. Exported for tests; `layer` uses it.
@@ -170,8 +229,13 @@ export const spanPromise = <A>(
 export const logException = (
   cause: unknown,
   context: ErrorContext = {}
+): Effect.Effect<void> => logExceptionDetails(describeException(cause), context)
+
+/** Logs an error described elsewhere, such as a browser report. */
+export const logExceptionDetails = (
+  exception: ExceptionDetails,
+  context: ErrorContext = {}
 ): Effect.Effect<void> => {
-  const exception = describeException(cause)
   const annotations: Record<string, unknown> = {
     "exception.type": exception.type,
     "exception.message": exception.message,
