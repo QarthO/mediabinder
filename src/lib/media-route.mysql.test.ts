@@ -5,7 +5,6 @@ import { describeMysql, useTestDatabase } from "@/test/database"
 import {
   insertMedia,
   newUser,
-  rejectedStatus,
   routeHandler,
   stubAccessToken,
   stubGoogle,
@@ -42,7 +41,7 @@ describeMysql("media proxy", () => {
     const id = await insertMedia({ userId: owner.id })
     signIn(null)
 
-    expect(await rejectedStatus(get(id).response)).toBe(401)
+    expect((await get(id).response).status).toBe(401)
   })
 
   test("someone else's media and unavailable media are not found", async () => {

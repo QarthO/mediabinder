@@ -1,5 +1,7 @@
 import { betterAuth } from "better-auth"
 import { APIError } from "better-auth/api"
+import { Effect } from "effect"
+import { AuthenticationError } from "@/effect/errors"
 import { pool, rows } from "./database.server"
 import { appUrl } from "./config"
 import { sharedFolderMode } from "./drive-access.server"
@@ -71,8 +73,17 @@ export const auth = betterAuth({
     },
   },
 })
-export async function requireSession(headers: Headers) {
-  const session = await auth.api.getSession({ headers })
-  if (!session) throw new Response("Sign in to continue.", { status: 401 })
+
+/**
+ * The signed-in session for a request, or an `AuthenticationError` (401).
+ * Better Auth rejecting the lookup itself, for instance because MySQL is
+ * down, is a defect rather than a missing session, so it never reads as the
+ * user being signed out.
+ */
+export const requireSession = Effect.fn("Auth.requireSession")(function* (
+  headers: Headers
+) {
+  const session = yield* Effect.promise(() => auth.api.getSession({ headers }))
+  if (!session) return yield* new AuthenticationError()
   return session
-}
+})

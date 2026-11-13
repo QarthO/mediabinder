@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, vi } from "vite-plus/test"
 import { it } from "@effect/vitest"
 import { Effect, Tracer } from "effect"
+import { AuthenticationError } from "@/effect/errors"
 import { libraryPost } from "./library-http"
 
 afterEach(() => {
@@ -17,7 +18,7 @@ describe("library POST", () => {
         let calls = 0
         const reported: unknown[] = []
         const dependencies = {
-          session: async () => ({ user: { id: "owner" } }),
+          session: () => Effect.succeed({ user: { id: "owner" } }),
           mutate: async (action: string) => {
             calls++
             expect(action).toBe("folders")
@@ -52,9 +53,7 @@ describe("library POST", () => {
 
         const signedOut = yield* libraryPost(request("https://rien.cloud"), {
           ...dependencies,
-          session: async () => {
-            throw new Response("Sign in", { status: 401 })
-          },
+          session: () => Effect.fail(new AuthenticationError()),
         })
         expect(signedOut.status).toBe(401)
         expect(reported).toEqual([])
@@ -95,7 +94,7 @@ describe("library POST", () => {
         body: JSON.stringify({ action: "tags", data: { name: "secret tag" } }),
       })
       yield* libraryPost(request, {
-        session: async () => ({ user: { id: "owner" } }),
+        session: () => Effect.succeed({ user: { id: "owner" } }),
         mutate: async () => [],
         report: () => undefined,
       }).pipe(
