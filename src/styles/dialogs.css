@@ -336,3 +336,14 @@
   font: 0.75rem var(--font-mono);
   color: #6c829e;
 }
+.confirm-dialog {
+  max-width: 400px;
+}
+.confirm-dialog .dialog-header {
+  margin-bottom: 0;
+}
+.confirm-dialog-error {
+  margin-top: 14px;
+  font-size: 0.8125rem;
+  color: var(--color-destructive);
+}

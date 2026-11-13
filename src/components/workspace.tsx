@@ -46,7 +46,6 @@ import {
   PanelLeft,
   SlidersHorizontal,
   X,
-  LogOut,
 } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "./ui/button"
@@ -80,7 +79,7 @@ const DriveSettings = lazy(() =>
 )
 import { endLibraryOpen } from "@/lib/browser-telemetry"
 import { libraryQuery, action } from "@/lib/api"
-import { authClient } from "@/lib/auth-client"
+import { SignOutButton } from "./sign-out-button"
 import {
   workspacePreferencesCookie,
   type WorkspacePreferences,
@@ -445,16 +444,7 @@ function WorkspaceContent({
             >
               <Settings size={17} />
             </button>
-            <button
-              title="Sign out of MediaBinder"
-              aria-label="Sign out of MediaBinder"
-              onClick={async () => {
-                await authClient.signOut()
-                window.location.assign("/")
-              }}
-            >
-              <LogOut size={15} />
-            </button>
+            <SignOutButton />
           </div>
         </div>
       </aside>
