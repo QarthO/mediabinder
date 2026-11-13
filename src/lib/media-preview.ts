@@ -11,7 +11,13 @@ import type { Media } from "./types"
 export const MAX_CACHED_PREVIEWS = 6
 const PREVIEW_KEY = "media-preview"
 const previewKey = (media: Media) =>
-  [PREVIEW_KEY, media.id, media.drive_id, media.sha256, media.uploaded_at] as const
+  [
+    PREVIEW_KEY,
+    media.id,
+    media.drive_id,
+    media.sha256,
+    media.uploaded_at,
+  ] as const
 
 export function canPreview(media: Media) {
   return (
@@ -27,8 +33,9 @@ export function previewQuery(client: QueryClient, media: Media) {
     queryKey: previewKey(media),
     queryFn: ({ signal }) => {
       makePreviewRoom(client, media)
-      return import("./media-preview-download").then(({ downloadMediaPreview }) =>
-        downloadMediaPreview(client, media.id, signal)
+      return import("./media-preview-download").then(
+        ({ downloadMediaPreview }) =>
+          downloadMediaPreview(client, media.id, signal)
       )
     },
     staleTime: 60_000,
@@ -61,7 +68,9 @@ export function prioritizeMediaPreview(client: QueryClient, media: Media) {
     exact: true,
   })
   if (current?.state.fetchStatus !== "fetching") return
-  for (const query of client.getQueryCache().findAll({ queryKey: [PREVIEW_KEY] })) {
+  for (const query of client
+    .getQueryCache()
+    .findAll({ queryKey: [PREVIEW_KEY] })) {
     if (
       query !== current &&
       query.getObserversCount() === 0 &&
@@ -76,10 +85,14 @@ function makePreviewRoom(client: QueryClient, current?: Media) {
   const count = previews.length - MAX_CACHED_PREVIEWS + (current ? 0 : 1)
   if (count <= 0) return true
   const protectedQuery = current
-    ? client.getQueryCache().find({ queryKey: previewKey(current), exact: true })
+    ? client
+        .getQueryCache()
+        .find({ queryKey: previewKey(current), exact: true })
     : undefined
   const unused = previews
-    .filter((query) => query !== protectedQuery && query.getObserversCount() === 0)
+    .filter(
+      (query) => query !== protectedQuery && query.getObserversCount() === 0
+    )
     .sort((a, b) => a.state.dataUpdatedAt - b.state.dataUpdatedAt)
   if (unused.length < count) return false
   for (const query of unused.slice(0, count))
@@ -89,9 +102,11 @@ function makePreviewRoom(client: QueryClient, current?: Media) {
 
 export function allowsPreviewPrefetch() {
   if (typeof navigator === "undefined") return false
-  const connection = (navigator as Navigator & {
-    connection?: { saveData?: boolean; effectiveType?: string }
-  }).connection
+  const connection = (
+    navigator as Navigator & {
+      connection?: { saveData?: boolean; effectiveType?: string }
+    }
+  ).connection
   return (
     !connection?.saveData &&
     !["slow-2g", "2g", "3g"].includes(connection?.effectiveType ?? "")

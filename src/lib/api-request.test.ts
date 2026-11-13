@@ -7,7 +7,12 @@ test("lazy library requests preserve payloads, server errors, auth redirects and
   const redirects: string[] = []
   Object.defineProperty(globalThis, "window", {
     configurable: true,
-    value: { location: { origin: "https://mediabinder.test", assign: (url: string) => redirects.push(url) } },
+    value: {
+      location: {
+        origin: "https://mediabinder.test",
+        assign: (url: string) => redirects.push(url),
+      },
+    },
   })
   t.after(() => {
     if (descriptor) Object.defineProperty(globalThis, "window", descriptor)
@@ -15,14 +20,21 @@ test("lazy library requests preserve payloads, server errors, auth redirects and
   })
   const requests: { url: string; method?: string; body?: string }[] = []
   let status = 200
-  t.mock.method(globalThis, "fetch", async (url: unknown, init?: RequestInit) => {
-    requests.push({
-      url: String(url),
-      method: init?.method,
-      body: init?.body ? await new Response(init.body).text() : undefined,
-    })
-    return Response.json(status === 200 ? { ok: true } : { error: "Folder is unavailable." }, { status })
-  })
+  t.mock.method(
+    globalThis,
+    "fetch",
+    async (url: unknown, init?: RequestInit) => {
+      requests.push({
+        url: String(url),
+        method: init?.method,
+        body: init?.body ? await new Response(init.body).text() : undefined,
+      })
+      return Response.json(
+        status === 200 ? { ok: true } : { error: "Folder is unavailable." },
+        { status }
+      )
+    }
+  )
   assert.deepEqual(await requestLibrary({}), { ok: true })
   const body = { action: "create_set", data: { name: "Summer" } }
   await requestLibrary({ method: "POST", body })
@@ -31,7 +43,10 @@ test("lazy library requests preserve payloads, server errors, auth redirects and
   assert.equal(requests[1].method, "POST")
   assert.equal(requests[1].body, JSON.stringify(body))
   status = 400
-  await assert.rejects(requestLibrary({ method: "POST", body }), /Folder is unavailable/)
+  await assert.rejects(
+    requestLibrary({ method: "POST", body }),
+    /Folder is unavailable/
+  )
   status = 401
   await assert.rejects(requestLibrary({}), /Sign in to continue/)
   assert.deepEqual(redirects, ["/"])

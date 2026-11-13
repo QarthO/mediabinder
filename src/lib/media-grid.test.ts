@@ -32,25 +32,28 @@ test("the grid server render mounts at most sixteen of 178 media cards", () => {
   }))
   const client = new QueryClient()
   try {
-    const render = () => renderToString(createElement(QueryClientProvider, {
-      client,
-      children: createElement(MediaGrid, {
-        items,
-        selection: { "media-0": true },
-        previewIntent: () => ({
-          onPointerEnter: () => {},
-          onPointerLeave: () => {},
-          onFocus: () => {},
-          onBlur: () => {},
-        }),
-        mobile: false,
-        selectionMode: false,
-        onOpen: () => {},
-        onToggleSelection: () => {},
-        allTags: [],
-        colors: {},
-      }),
-    }))
+    const render = () =>
+      renderToString(
+        createElement(QueryClientProvider, {
+          client,
+          children: createElement(MediaGrid, {
+            items,
+            selection: { "media-0": true },
+            previewIntent: () => ({
+              onPointerEnter: () => {},
+              onPointerLeave: () => {},
+              onFocus: () => {},
+              onBlur: () => {},
+            }),
+            mobile: false,
+            selectionMode: false,
+            onOpen: () => {},
+            onToggleSelection: () => {},
+            allTags: [],
+            colors: {},
+          }),
+        })
+      )
     const html = render()
     assert.equal((html.match(/class="media-card"/g) ?? []).length, 16)
     assert.match(html, /data-selected="true"/)
