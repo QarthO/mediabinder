@@ -48,12 +48,7 @@ import {
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 import { action } from "@/lib/api"
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "./ui/tooltip"
+import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip"
 import { Thumbnail } from "./thumbnail"
 import { bytes } from "@/lib/utils"
 import { TagPopover } from "./tag-popover"
@@ -261,89 +256,85 @@ export function DataTable({
     overscan: 8,
   })
   return (
-    <TooltipProvider>
-      <div className="data-table-frame">
-        <table
-          className={`data-table ${mobile ? "mobile-media-table" : ""}`}
-          aria-label="Media"
-          aria-rowcount={rows.length + 1}
-        >
-          <thead style={{ paddingInlineEnd: scrollbar }}>
-            {table.getHeaderGroups().map((group) => (
-              <tr key={group.id}>
-                {group.headers.map((header) => {
-                  const sorted = header.column.getIsSorted()
-                  const Icon =
-                    sorted === "asc"
-                      ? ArrowUp
-                      : sorted === "desc"
-                        ? ArrowDown
-                        : ArrowUpDown
-                  return (
-                    <th
-                      key={header.id}
-                      scope="col"
-                      aria-sort={
-                        sorted === "asc"
-                          ? "ascending"
-                          : sorted === "desc"
-                            ? "descending"
-                            : undefined
-                      }
-                    >
-                      {header.column.getCanSort() ? (
-                        <button
-                          onClick={header.column.getToggleSortingHandler()}
-                        >
-                          {flexRender(
-                            header.column.columnDef.header,
-                            header.getContext()
-                          )}
-                          <Icon size={14} />
-                        </button>
-                      ) : (
-                        flexRender(
+    <div className="data-table-frame">
+      <table
+        className={`data-table ${mobile ? "mobile-media-table" : ""}`}
+        aria-label="Media"
+        aria-rowcount={rows.length + 1}
+      >
+        <thead style={{ paddingInlineEnd: scrollbar }}>
+          {table.getHeaderGroups().map((group) => (
+            <tr key={group.id}>
+              {group.headers.map((header) => {
+                const sorted = header.column.getIsSorted()
+                const Icon =
+                  sorted === "asc"
+                    ? ArrowUp
+                    : sorted === "desc"
+                      ? ArrowDown
+                      : ArrowUpDown
+                return (
+                  <th
+                    key={header.id}
+                    scope="col"
+                    aria-sort={
+                      sorted === "asc"
+                        ? "ascending"
+                        : sorted === "desc"
+                          ? "descending"
+                          : undefined
+                    }
+                  >
+                    {header.column.getCanSort() ? (
+                      <button onClick={header.column.getToggleSortingHandler()}>
+                        {flexRender(
                           header.column.columnDef.header,
                           header.getContext()
-                        )
-                      )}
-                    </th>
-                  )
-                })}
-              </tr>
-            ))}
-          </thead>
-          <tbody ref={bodyRef} tabIndex={0} aria-label="Scrollable media rows">
-            <tr
-              aria-hidden="true"
-              className="table-spacer"
-              style={{
-                height: virtual.getTotalSize() + (selected.length ? 88 : 0),
-              }}
-            >
-              <td colSpan={table.getVisibleLeafColumns().length} />
+                        )}
+                        <Icon size={14} />
+                      </button>
+                    ) : (
+                      flexRender(
+                        header.column.columnDef.header,
+                        header.getContext()
+                      )
+                    )}
+                  </th>
+                )
+              })}
             </tr>
-            {virtual.getVirtualItems().map((item) => {
-              const row = rows[item.index]
-              return (
-                <MediaTableRow
-                  key={row.id}
-                  row={row}
-                  table={table}
-                  meta={table.options.meta as MediaTableMeta}
-                  mobile={mobile}
-                  selectionMode={selectionMode}
-                  selected={row.getIsSelected()}
-                  index={item.index}
-                  start={item.start}
-                  measureElement={virtual.measureElement}
-                />
-              )
-            })}
-          </tbody>
-        </table>
-      </div>
-    </TooltipProvider>
+          ))}
+        </thead>
+        <tbody ref={bodyRef} tabIndex={0} aria-label="Scrollable media rows">
+          <tr
+            aria-hidden="true"
+            className="table-spacer"
+            style={{
+              height: virtual.getTotalSize() + (selected.length ? 88 : 0),
+            }}
+          >
+            <td colSpan={table.getVisibleLeafColumns().length} />
+          </tr>
+          {virtual.getVirtualItems().map((item) => {
+            const row = rows[item.index]
+            return (
+              <MediaTableRow
+                key={row.id}
+                row={row}
+                table={table}
+                meta={table.options.meta as MediaTableMeta}
+                mobile={mobile}
+                selectionMode={selectionMode}
+                selected={row.getIsSelected()}
+                index={item.index}
+                start={item.start}
+                measureElement={virtual.measureElement}
+              />
+            )
+          })}
+        </tbody>
+      </table>
+    </div>
   )
 }
 
