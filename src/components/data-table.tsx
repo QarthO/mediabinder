@@ -59,6 +59,13 @@ import {
   useAppTable,
   type MediaTableMeta,
 } from "@/lib/data-table"
+import {
+  applySelectionClick,
+  hasModifier,
+  modifiersOf,
+  type SelectionAnchor,
+  type SelectionModifiers,
+} from "@/lib/range-selection"
 import type { Media, MediaSet } from "@/lib/types"
 
 const emptySelection: RowSelectionState = {}
@@ -68,6 +75,24 @@ type MediaRow = Row<typeof mediaTableFeatures, Media>
 // the component that owns the table, unlike the table `useMediaTable` returns.
 type MediaCoreTable = Table<typeof mediaTableFeatures, Media>
 export type MediaTable = ReturnType<typeof useMediaTable>
+
+// Select an item in the order the table displays, with the file-explorer
+// modifiers in `modifiers`.
+export function selectMedia(
+  table: MediaCoreTable | MediaTable,
+  id: string,
+  modifiers: SelectionModifiers
+) {
+  table.options.meta!.select(id, modifiers, () =>
+    table.getRowModel().rows.map((row) => row.id)
+  )
+}
+
+// Shift-click would otherwise start a text selection across the rows.
+export function keepTextUnselected(event: React.MouseEvent) {
+  if (event.shiftKey && !(event.target as HTMLElement).closest("input"))
+    event.preventDefault()
+}
 
 const columnHelper = createAppColumnHelper<Media>()
 const mediaColumns = columnHelper.columns([
@@ -154,22 +179,43 @@ export function useMediaTable(
   const previewIntent = useMediaPreviewIntent()
   const itemIds = useMemo(() => items.map((item) => item.id).join(","), [items])
   const scope = `${itemIds}:${search}`
-  const [selection, setSelection] = useState({
-    scope,
-    rows: emptySelection,
-  })
+  // The anchor for range selection lives with the selection, so a scope
+  // change resets both at once. Updaters read the scope from the state they
+  // are given, which the render-phase reset below keeps current, so the
+  // callbacks keep one identity and the cards that receive them do not render.
+  const [selection, setSelection] = useState<{
+    scope: string
+    rows: RowSelectionState
+    anchor: SelectionAnchor | null
+  }>({ scope, rows: emptySelection, anchor: null })
   const rowSelection =
     selection.scope === scope ? selection.rows : emptySelection
-  if (selection.scope !== scope && Object.keys(selection.rows).length)
-    setSelection({ scope, rows: emptySelection })
-  const setRowSelection: OnChangeFn<RowSelectionState> = (update) =>
-    setSelection((current) => {
-      const rows = current.scope === scope ? current.rows : emptySelection
-      return {
-        scope,
-        rows: typeof update === "function" ? update(rows) : update,
-      }
-    })
+  if (selection.scope !== scope)
+    setSelection({ scope, rows: emptySelection, anchor: null })
+  // Whole-table changes (select all, clear) leave no anchor.
+  const setRowSelection = useCallback<OnChangeFn<RowSelectionState>>(
+    (update) =>
+      setSelection((current) => ({
+        scope: current.scope,
+        rows: typeof update === "function" ? update(current.rows) : update,
+        anchor: null,
+      })),
+    []
+  )
+  const select = useCallback<MediaTableMeta["select"]>(
+    (id, modifiers, orderedIds) =>
+      setSelection((current) => ({
+        scope: current.scope,
+        ...applySelectionClick({
+          ids: modifiers.range ? orderedIds() : [],
+          anchor: current.anchor,
+          target: id,
+          selection: current.rows,
+          modifiers,
+        }),
+      })),
+    []
+  )
   const data = useMemo(
     () => filterMediaBySearch(items, search),
     [items, search]
@@ -185,6 +231,7 @@ export function useMediaTable(
         tagColors,
         sets,
         selectionMode,
+        select,
       },
       state: { sorting, rowSelection },
       onRowSelectionChange: setRowSelection,
@@ -482,14 +529,16 @@ const MediaTableRow = memo(
       <tr
         key={row.id}
         data-index={index}
+        onMouseDown={keepTextUnselected}
         onClick={(event) => {
+          const modifiers = modifiersOf(event)
           if (
-            selectionMode &&
+            (selectionMode || hasModifier(modifiers)) &&
             !(event.target as HTMLElement).closest(
               "button, a, input, [role=dialog]"
             )
           )
-            row.toggleSelected()
+            selectMedia(row.table, row.id, modifiers)
         }}
         aria-selected={selected}
         data-selected={selected || undefined}
@@ -547,7 +596,7 @@ const MediaCheckbox = memo(function MediaCheckbox({
     <SelectionCheckbox
       label={label}
       checked={checked}
-      onChange={() => table.getRow(id).toggleSelected()}
+      onClick={(event) => selectMedia(table, id, modifiersOf(event))}
     />
   )
 })
@@ -574,16 +623,21 @@ function SelectAllCheckbox({ table }: { table: MediaCoreTable }) {
   )
 }
 
+const noop = () => {}
+
 function SelectionCheckbox({
   label,
   checked,
   mixed = false,
   onChange,
+  onClick,
 }: {
   label: string
   checked: boolean
   mixed?: boolean
-  onChange: (event: React.ChangeEvent<HTMLInputElement>) => void
+  onChange?: (event: React.ChangeEvent<HTMLInputElement>) => void
+  // For checkboxes that need the click's modifier keys.
+  onClick?: (event: React.MouseEvent<HTMLInputElement>) => void
 }) {
   return (
     <input
@@ -594,7 +648,8 @@ function SelectionCheckbox({
       type="checkbox"
       aria-label={label}
       checked={checked}
-      onChange={onChange}
+      onChange={onChange ?? noop}
+      onClick={onClick}
     />
   )
 }
@@ -688,10 +743,12 @@ const MediaName = memo(function MediaName({
             onBlur: () => intent()?.onBlur(),
           }
         : {})}
-      onClick={() => {
+      onClick={(event) => {
         const row = table.getCoreRowModel().rowsById[id]
         if (!row) return
-        if (selectionMode) row.toggleSelected()
+        const modifiers = modifiersOf(event)
+        if (selectionMode || hasModifier(modifiers))
+          selectMedia(table, id, modifiers)
         else table.options.meta!.onOpen(row.original)
       }}
     >

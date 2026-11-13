@@ -48,7 +48,7 @@ describe("MediaGrid", () => {
               mobile: false,
               selectionMode: false,
               onOpen: () => {},
-              onToggleSelection: () => {},
+              onSelect: () => {},
               allTags: [],
               colors: {},
             }),

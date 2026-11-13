@@ -9,6 +9,7 @@ import {
   type SortingState,
 } from "@tanstack/react-table"
 import type { useMediaPreviewIntent } from "./media-preview"
+import type { SelectionModifiers } from "./range-selection"
 import type { Media, MediaSet } from "./types"
 
 export type MediaTableMeta = {
@@ -18,6 +19,12 @@ export type MediaTableMeta = {
   tagColors: Record<string, string>
   sets: MediaSet[]
   selectionMode: boolean
+  // Selects like a file explorer. `orderedIds` is read only for a range.
+  select: (
+    id: string,
+    modifiers: SelectionModifiers,
+    orderedIds: () => string[]
+  ) => void
 }
 
 // Names, dates and sizes use the sort functions v8 picked automatically for

@@ -2,7 +2,12 @@ import type { useMediaPreviewIntent } from "@/lib/media-preview"
 import { memo, type CSSProperties } from "react"
 import { Film, ImageIcon, Link2 } from "lucide-react"
 import { Thumbnail } from "./thumbnail"
-import { MediaTags } from "./data-table"
+import { keepTextUnselected, MediaTags } from "./data-table"
+import {
+  hasModifier,
+  modifiersOf,
+  type SelectionModifiers,
+} from "@/lib/range-selection"
 import { bytes } from "@/lib/utils"
 import type { Media } from "@/lib/types"
 
@@ -13,7 +18,7 @@ export const MediaCard = memo(function MediaCard({
   selected,
   selectionMode,
   onOpen,
-  onToggleSelection,
+  onSelect,
   allTags,
   colors,
   style,
@@ -24,7 +29,7 @@ export const MediaCard = memo(function MediaCard({
   selected: boolean
   selectionMode: boolean
   onOpen: (media: Media) => void
-  onToggleSelection: (id: string) => void
+  onSelect: (id: string, modifiers: SelectionModifiers) => void
   allTags: string[]
   colors: Record<string, string>
   style?: CSSProperties
@@ -34,6 +39,7 @@ export const MediaCard = memo(function MediaCard({
       className="media-card"
       style={style}
       data-selected={selected || undefined}
+      onMouseDown={keepTextUnselected}
     >
       {!mobile && (
         <input
@@ -41,16 +47,20 @@ export const MediaCard = memo(function MediaCard({
           type="checkbox"
           aria-label={`Select ${media.display_name}`}
           checked={selected}
-          onChange={() => onToggleSelection(media.id)}
+          onChange={() => {}}
+          onClick={(event) => onSelect(media.id, modifiersOf(event))}
         />
       )}
       <button
         {...(!selectionMode ? previewIntent(media) : {})}
         className="media-card-open"
         aria-pressed={selectionMode ? selected : undefined}
-        onClick={() =>
-          selectionMode ? onToggleSelection(media.id) : onOpen(media)
-        }
+        onClick={(event) => {
+          const modifiers = modifiersOf(event)
+          if (selectionMode || hasModifier(modifiers))
+            onSelect(media.id, modifiers)
+          else onOpen(media)
+        }}
       >
         <div className="media-image">
           <Thumbnail
