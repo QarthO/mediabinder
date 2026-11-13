@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { action } from "@/lib/api"
+import { postLink } from "@/lib/post-date"
 import type { Post } from "@/lib/types"
 import { isoDate } from "@/lib/utils"
 import { postFields } from "@/lib/validation"
@@ -48,12 +49,18 @@ export function PostDialog({ target, post, onOpenChange }: PostDialogProps) {
   const [platform, setPlatform] = useState<string | null>(
     post ? post.platform : null
   )
-  const [externalId, setExternalId] = useState(post?.external_id ?? "")
-  const [date, setDate] = useState(initialDate)
+  const [typedId, setTypedId] = useState<string | null>(null)
+  const [typedDate, setTypedDate] = useState<string | null>(null)
   const urlRef = useRef<HTMLInputElement>(null)
   // The button that opened the dialog gets focus back when it closes.
   const opener = useRef(document.activeElement)
   const shownPlatform = platform ?? hostname(url)
+  // The date and ID some links carry, until the user types their own. An
+  // existing post keeps its values while its link is unchanged.
+  const fromLink = !post || url !== post.url ? postLink(url) : undefined
+  const date = typedDate ?? fromLink?.date ?? initialDate
+  const externalId = typedId ?? fromLink?.externalId ?? post?.external_id ?? ""
+  const dateFromLink = typedDate === null && !!fromLink
 
   const dateIso =
     date && !Number.isNaN(new Date(date).valueOf())
@@ -174,7 +181,7 @@ export function PostDialog({ target, post, onOpenChange }: PostDialogProps) {
               maxLength={255}
               value={externalId}
               aria-invalid={idError ? true : undefined}
-              onChange={(e) => setExternalId(e.target.value)}
+              onChange={(e) => setTypedId(e.target.value)}
             />
             {idError ? <small className="field-error">{idError}</small> : null}
           </label>
@@ -184,8 +191,9 @@ export function PostDialog({ target, post, onOpenChange }: PostDialogProps) {
               required
               type="date"
               value={date}
-              onChange={(e) => setDate(e.target.value)}
+              onChange={(e) => setTypedDate(e.target.value)}
             />
+            {dateFromLink ? <small>From the post link</small> : null}
           </label>
           {save.error ? (
             <p role="alert" className="confirm-dialog-error">
