@@ -19,11 +19,12 @@ describe("library POST", () => {
         const reported: unknown[] = []
         const dependencies = {
           session: () => Effect.succeed({ user: { id: "owner" } }),
-          mutate: async (action: string) => {
-            calls++
-            expect(action).toBe("folders")
-            return [{ id: "folder" }]
-          },
+          mutate: (action: string) =>
+            Effect.sync(() => {
+              calls++
+              expect(action).toBe("folders")
+              return [{ id: "folder" }]
+            }),
           report: (cause: unknown) => {
             reported.push(cause)
           },
@@ -62,9 +63,7 @@ describe("library POST", () => {
         const cause = new Error("database exploded at 10.0.0.5")
         const failed = yield* libraryPost(request("https://rien.cloud"), {
           ...dependencies,
-          mutate: async () => {
-            throw cause
-          },
+          mutate: () => Effect.fail(cause),
         })
         expect(failed.status).toBe(400)
         expect(yield* Effect.promise(() => failed.json())).toEqual({
@@ -95,7 +94,7 @@ describe("library POST", () => {
       })
       yield* libraryPost(request, {
         session: () => Effect.succeed({ user: { id: "owner" } }),
-        mutate: async () => [],
+        mutate: () => Effect.succeed([]),
         report: () => undefined,
       }).pipe(
         Effect.withSpan("Library.post"),

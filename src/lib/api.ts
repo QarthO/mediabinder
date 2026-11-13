@@ -5,16 +5,16 @@ import type { Library } from "./types"
 const loadLibrary = createServerFn({ method: "GET" }).handler(async () => {
   const { getRequestHeaders } = await import("@tanstack/react-start/server")
   const { requireSession } = await import("./auth.server")
-  const { library } = await import("./library.server")
+  const { load } = await import("./library.server")
   const { Effect } = await import("effect")
   const { errorResponse } = await import("./http-errors")
   const { runAppEffect } = await import("@/effect/runtime.server")
   const headers = getRequestHeaders()
   return runAppEffect(
-    "Library.load",
+    "Library.hydrate",
     Effect.gen(function* () {
       const session = yield* requireSession(headers)
-      return yield* Effect.promise(() => library(session.user))
+      return yield* load(session.user)
     }).pipe(
       // Thrown, as before: the framework turns a Response into the reply.
       Effect.catchTag("AuthenticationError", (error) =>

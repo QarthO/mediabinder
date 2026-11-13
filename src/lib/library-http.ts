@@ -3,7 +3,7 @@ import type { AuthenticationError } from "@/effect/errors"
 import { appUrl } from "./config"
 import { errorResponse, isHandledError } from "./http-errors"
 
-type Dependencies = {
+type Dependencies<TRequirements> = {
   session: (
     headers: Headers
   ) => Effect.Effect<{ user: { id: string } }, AuthenticationError>
@@ -12,13 +12,16 @@ type Dependencies = {
     data: unknown,
     userId: string,
     headers: Headers
-  ) => Promise<unknown>
+  ) => Effect.Effect<unknown, unknown, TRequirements>
   // Exports unexpected failures; injected so this module stays server-free.
   report: (cause: unknown, context: { operation: string }) => void
 }
 
 export const libraryPost = Effect.fnUntraced(
-  function* (request: Request, dependencies: Dependencies) {
+  function* <TRequirements>(
+    request: Request,
+    dependencies: Dependencies<TRequirements>
+  ) {
     const origin = yield* Effect.try({
       try: () => appUrl(),
       catch: (error) => error,
@@ -55,16 +58,12 @@ export const libraryPost = Effect.fnUntraced(
       }),
       Effect.ignore
     )
-    const result = yield* Effect.tryPromise({
-      try: () =>
-        dependencies.mutate(
-          input.value.action,
-          input.value.data,
-          session.user.id,
-          request.headers
-        ),
-      catch: (error) => error,
-    })
+    const result = yield* dependencies.mutate(
+      input.value.action,
+      input.value.data,
+      session.user.id,
+      request.headers
+    )
     return Response.json(result, { headers: { "Cache-Control": "no-store" } })
   },
   (self, _request, dependencies) => {
@@ -78,7 +77,7 @@ export const libraryPost = Effect.fnUntraced(
           "Could not save this change. Please try again."
         )
       })
-    // Defects too: `mutate` still throws whatever its callees throw.
+    // Defects too: the actions not yet converted still throw whatever their callees throw.
     return self.pipe(Effect.catch(respond), Effect.catchDefect(respond))
   }
 )

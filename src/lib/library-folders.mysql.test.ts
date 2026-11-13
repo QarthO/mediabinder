@@ -6,13 +6,13 @@ import {
   act,
   count,
   insertFolder,
+  library,
   insertMedia,
   insertSet,
   newUser,
   rejectedStatus,
 } from "@/test/fixtures"
 import { pool, rows } from "./database.server"
-import { library } from "./library.server"
 
 // Tagging, sets and folder unlinking through the library's mutate entry point.
 describeMysql("library edits", () => {

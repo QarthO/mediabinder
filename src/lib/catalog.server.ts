@@ -8,11 +8,8 @@ import { runTracedAppEffect } from "@/effect/runtime.server"
 import {
   legacyConnection,
   legacySession,
-  lockedSessionOf,
   type LegacyConnection,
-  type SessionConnection,
 } from "./database.server"
-import { SYNC_BUSY_MESSAGE } from "./http-errors"
 import type { DriveFile } from "./drive.server"
 
 // MySQL named locks are server-wide, so these names also exclude other
@@ -245,8 +242,8 @@ export const resolve = Effect.fnUntraced(function* (
   return target
 })
 
-// Facades for callers that still hold a mysql2 connection: library.server.ts
-// mutations and source edits. Remove each with its last caller (layers 18-19).
+// Facades for the library mutations that still hold a mysql2 connection.
+// Remove each with its last caller (layer 19).
 
 const promiseWork = <TResult>(work: () => Promise<TResult>) =>
   Effect.tryPromise({ try: work, catch: (error) => error }).pipe(
@@ -256,14 +253,10 @@ const promiseWork = <TResult>(work: () => Promise<TResult>) =>
   )
 
 export function catalogTransaction<A>(
-  work: (connection: LegacyConnection) => Promise<A>,
-  existing?: SessionConnection<LockedSession>
+  work: (connection: LegacyConnection) => Promise<A>
 ) {
   return runTracedAppEffect(
-    transaction(
-      (session) => promiseWork(() => work(legacyConnection(session))),
-      existing && lockedSessionOf(existing)
-    )
+    transaction((session) => promiseWork(() => work(legacyConnection(session))))
   )
 }
 
@@ -288,24 +281,6 @@ export function markCataloged(connection: LegacyConnection, target: string) {
     markEntryCataloged(
       legacySession("catalog.markCataloged", connection),
       target
-    )
-  )
-}
-
-// A busy lock keeps today's message for the unconverted callers that record it.
-export function withDriveLock<A>(
-  userId: string,
-  work: (connection: SessionConnection<LockedSession>) => Promise<A>
-) {
-  return runTracedAppEffect(
-    withUserLock(userId, (session) =>
-      promiseWork(() => work(legacyConnection(session)))
-    ).pipe(
-      Effect.catch((error) =>
-        Effect.fail(
-          error instanceof LockBusyError ? new Error(SYNC_BUSY_MESSAGE) : error
-        )
-      )
     )
   )
 }

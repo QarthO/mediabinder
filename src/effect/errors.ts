@@ -58,6 +58,19 @@ export class NotFoundError extends Schema.TaggedError<NotFoundError>()(
   }
 }
 
+/**
+ * The library route was asked for an action it doesn't have. Answered with 404;
+ * the action name stays out of the message.
+ */
+export class UnknownActionError extends Schema.TaggedError<UnknownActionError>()(
+  "UnknownActionError",
+  {}
+) {
+  override get message() {
+    return "Unknown action."
+  }
+}
+
 /** The input was refused. `message` is written for the user and is shown. */
 export class ValidationError extends Schema.TaggedError<ValidationError>()(
   "ValidationError",

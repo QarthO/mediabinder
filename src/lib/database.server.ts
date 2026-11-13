@@ -5,7 +5,7 @@ import mysql, {
   type RowDataPacket,
 } from "mysql2/promise"
 import { Effect } from "effect"
-import type { DatabaseSession, LockedSession } from "@/effect/database"
+import type { DatabaseSession } from "@/effect/database"
 import { DatabaseError } from "@/effect/errors"
 import { databaseOptions } from "./config"
 export const pool = mysql.createPool({
@@ -30,8 +30,8 @@ export type LegacyConnection = Pick<PoolConnection, "execute" | "query">
 const sessionOf = Symbol("mediabinder/legacyConnection/session")
 
 /**
- * A `LegacyConnection` that runs on a lock session of the Database service:
- * what `catalogTransaction` and `withDriveLock` hand their Promise callers.
+ * A `LegacyConnection` that runs on a session of the Database service: what
+ * `catalogTransaction` hands its Promise callers.
  */
 export interface SessionConnection<
   TSession extends DatabaseSession = DatabaseSession,
@@ -39,12 +39,8 @@ export interface SessionConnection<
   readonly [sessionOf]: TSession
 }
 
-/** The lock session behind a connection from `legacyConnection`. */
-export const lockedSessionOf = (connection: SessionConnection<LockedSession>) =>
-  connection[sessionOf]
-
 /**
- * Presents a Database lock session or transaction as a mysql2 connection, for
+ * Presents a Database transaction as a mysql2 connection, for
  * unconverted callers. Remove it with the last such caller.
  */
 export function legacyConnection<TSession extends DatabaseSession>(

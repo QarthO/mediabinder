@@ -4,6 +4,7 @@ import {
   DriveApiError,
   LockBusyError,
   NotFoundError,
+  UnknownActionError,
   ValidationError,
 } from "@/effect/errors"
 
@@ -14,6 +15,7 @@ export const EXPECTED_ERROR_TAGS: ReadonlySet<string> = new Set([
   "DriveReconnectError",
   "LockBusyError",
   "NotFoundError",
+  "UnknownActionError",
   "ValidationError",
 ])
 
@@ -43,6 +45,7 @@ export function isHandledError(error: unknown) {
     error instanceof AuthenticationError ||
     error instanceof LockBusyError ||
     error instanceof NotFoundError ||
+    error instanceof UnknownActionError ||
     error instanceof ValidationError
   )
 }
@@ -68,7 +71,7 @@ export function errorResponse(
     )
   if (error instanceof AuthenticationError)
     return new Response(error.message, { status: 401 })
-  if (error instanceof NotFoundError)
+  if (error instanceof NotFoundError || error instanceof UnknownActionError)
     return new Response(error.message, { status: 404 })
   // A user's sync lock is the only busy lock with a message of its own; a
   // busy catalog lock gets the caller's fallback, as it always has.

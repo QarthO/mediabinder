@@ -6,6 +6,7 @@ import {
   act,
   count,
   insertFolder,
+  library,
   newUser,
   rejectedStatus,
   stubAccessToken,
@@ -16,7 +17,6 @@ import { resolve, transaction } from "./catalog.server"
 import { runTracedAppEffect } from "@/effect/runtime.server"
 import { rows } from "./database.server"
 import { syncDrive, type DriveFile } from "./drive.server"
-import { library } from "./library.server"
 
 const hash = () => randomBytes(32).toString("hex")
 const file = (

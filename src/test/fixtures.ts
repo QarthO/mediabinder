@@ -5,9 +5,14 @@ import { auth } from "@/lib/auth.server"
 import { NotFoundError } from "@/effect/errors"
 import { pool, rows } from "@/lib/database.server"
 import { errorResponse } from "@/lib/http-errors"
-import { library, mutate } from "@/lib/library.server"
+import { runTracedAppEffect } from "@/effect/runtime.server"
+import * as Library from "@/lib/library.server"
 
-export type TestUser = Parameters<typeof library>[0]
+export type TestUser = Parameters<typeof Library.load>[0]
+
+/** `Library.load` for a Promise caller: what the library route returns. */
+export const library = (user: TestUser) =>
+  runTracedAppEffect(Library.load(user))
 
 export const newUser = (name = "Test user"): TestUser => {
   const id = randomUUID()
@@ -26,7 +31,7 @@ export async function insertUser(name = "Test user"): Promise<TestUser> {
 
 /** `mutate` as the signed-in user, the way the library route calls it. */
 export const act = (user: { id: string }, action: string, input: unknown) =>
-  mutate(action, input, user.id, new Headers())
+  runTracedAppEffect(Library.mutate(action, input, user.id, new Headers()))
 
 export async function insertFolder(
   userId: string,
