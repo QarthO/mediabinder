@@ -10,6 +10,9 @@ export interface Media {
   width: number | null
   height: number | null
   duration_ms: number | null
+  // Sample-entry fourcc of the video track (`avc1`, `hvc1`), `unknown` when the
+  // file couldn't be read, null when not looked at (images, WebM, not synced yet).
+  video_codec: string | null
   available: boolean
   cataloged: boolean
   cataloged_at: string | null
