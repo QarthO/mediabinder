@@ -311,6 +311,56 @@ describeMysql("shared folders", () => {
     ).toBe(false)
   })
 
+  test("a limited-access subfolder the user doesn't own makes no set", async () => {
+    const user = await insertUser()
+    const root = `${user.id}-root`,
+      foreign = `${user.id}-limited-foreign`,
+      open = `${user.id}-open`
+    await insertFolder(user.id, root, "Root")
+    const folder = (id: string, limited: boolean) => ({
+      id,
+      name: id,
+      mimeType: FOLDER,
+      inheritedPermissionsDisabled: limited,
+    })
+    drive(({ url }) => {
+      const parent = /'([^']+)' in parents/.exec(
+        url.searchParams.get("q") ?? ""
+      )?.[1]
+      if (parent === root)
+        return Response.json({
+          files: [folder(foreign, true), folder(open, false)],
+        })
+      if (parent)
+        return Response.json({
+          files: [
+            {
+              id: `${parent}-photo`,
+              name: "IMG.jpg",
+              mimeType: "image/jpeg",
+              createdTime: "2026-09-01T00:00:00Z",
+              size: "42",
+              parents: [parent],
+            },
+          ],
+        })
+      return Response.json({
+        id: url.pathname.split("/").pop(),
+        capabilities: { canListChildren: true },
+        owners: [{ emailAddress: "someone@example.com" }],
+      })
+    })
+
+    await syncDrive(user.id)
+
+    expect(
+      await rows<{ drive_folder_id: string }>(
+        "SELECT drive_folder_id FROM media_set WHERE user_id=?",
+        [user.id]
+      )
+    ).toEqual([{ drive_folder_id: open }])
+  })
+
   test("old full-Drive grants are revoked once so sign-in asks only for drive.file", async () => {
     const user = await insertUser()
     const legacy = randomUUID(),

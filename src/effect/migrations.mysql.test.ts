@@ -44,5 +44,20 @@ describeMysql("migrations", () => {
         expect(yield* ledger()).toEqual(first)
       })
     )
+    it.effect("007 upgrades a database that already holds sets", () =>
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        // Put the database back as release 006 left it, with a set in it.
+        yield* sql`DROP TABLE drive_folder_set_applied`
+        yield* sql`ALTER TABLE media_set DROP INDEX media_set_drive_folder, DROP COLUMN drive_folder_id`
+        yield* sql`DELETE FROM schema_migration WHERE name = '007-drive-folder-sets.sql'`
+        yield* sql`INSERT INTO media_set(id,user_id,display_name,raw_name,tags,created_at)
+          VALUES ('s1','u1','Kept','Kept','[]',NOW(3))`
+        expect(yield* migrate()).toBe(1)
+        const kept = yield* sql<{ drive_folder_id: string | null }>`
+          SELECT drive_folder_id FROM media_set WHERE id = 's1'`
+        expect(kept).toEqual([{ drive_folder_id: null }])
+      })
+    )
   })
 })
