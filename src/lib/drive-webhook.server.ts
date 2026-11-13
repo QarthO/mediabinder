@@ -15,6 +15,7 @@ import { revokeLegacy } from "./google-grants.server"
 import { isExpectedAppError } from "@/observability/error-policy"
 import * as Telemetry from "@/telemetry"
 import { SYNC_BUSY_MESSAGE } from "./http-errors"
+import { checkCodecs } from "./video-codecs.server"
 
 export { driveWebhookUrl as webhookUrl } from "./config"
 
@@ -449,12 +450,15 @@ export const processWatchRenewals = Effect.fn(
 
 /**
  * One pass of the Drive worker: under the worker lock, drops old grants,
- * renews watches, then runs due syncs. Returns `worked` when it found
- * something to do, `idle` when not, or when another worker holds the lock.
+ * renews watches, runs due syncs, then reads the codecs of videos that have
+ * none, up to one batch. Returns `worked` when it found something to do,
+ * `idle` when not, or when another worker holds the lock.
  *
  * It checks for work untraced and spans only a pass that has some, as the
- * `DriveWorker.pass` span, so an idle worker exports no traces. Each job
- * inside gets its own span.
+ * `DriveWorker.pass` span (renewals and syncs) and `DriveWorker.checkCodecs`
+ * (codecs), so an idle worker exports no traces. Each job inside gets its
+ * own span. Codec work comes last and is bounded in time, so it never holds
+ * a due sync back for long, and it takes no lock beyond the worker's.
  */
 export const pass = Effect.gen(function* () {
   const database = yield* Database
@@ -477,17 +481,26 @@ export const pass = Effect.gen(function* () {
           )
         const renewing = yield* dueWatchRenewals()
         const syncing = yield* dueSyncJobs()
-        if (renewing.length === 0 && syncing.length === 0)
-          return revoked ? ("worked" as const) : ("idle" as const)
-        // Selected again inside: renewals queue syncs that are due at once.
-        yield* Effect.gen(function* () {
-          yield* processWatchRenewals()
-          yield* processSyncJobs()
-        }).pipe(
-          Effect.withSpan("DriveWorker.pass"),
-          Effect.withTracerEnabled(true)
+        if (renewing.length || syncing.length)
+          // Selected again inside: renewals queue syncs that are due at once.
+          yield* Effect.gen(function* () {
+            yield* processWatchRenewals()
+            yield* processSyncJobs()
+          }).pipe(
+            Effect.withSpan("DriveWorker.pass"),
+            Effect.withTracerEnabled(true)
+          )
+        // After the syncs, which add the videos that need reading. A failed
+        // batch counts as idle, so the worker waits its full interval
+        // instead of retrying Drive every second.
+        const checked = yield* recover(checkCodecs, (error) =>
+          Telemetry.logException(error, {
+            operation: "DriveWorker.checkCodecs",
+          }).pipe(Effect.as(0))
         )
-        return "worked" as const
+        return revoked || renewing.length || syncing.length || checked > 0
+          ? ("worked" as const)
+          : ("idle" as const)
       })
   )
 }).pipe(

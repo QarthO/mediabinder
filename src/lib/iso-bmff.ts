@@ -2,8 +2,8 @@ import { Effect } from "effect"
 
 // Finds a video's codec by reading as little of an ISO base media file (MP4,
 // QuickTime, M4V, 3GPP) as possible. The top-level boxes are walked by header
-// alone, skipping `mdat`, until `moov` turns up, wherever it is. Only `moov` is
-// then read, and its video track's first sample entry names the codec.
+// alone, skipping `mdat`, until `moov` turns up, wherever it is, and its video
+// track's first sample entry names the codec.
 //
 // Pure and independent of where bytes come from: `read` is given an offset and
 // a length and returns up to that many bytes, so the same walk serves Drive
@@ -12,7 +12,12 @@ import { Effect } from "effect"
 
 /** `moov` is metadata; a bigger one is not worth fetching. */
 export const MAX_MOOV_BYTES = 16 * 1024 * 1024
-/** Top-level box headers read before giving up on finding `moov`. */
+/** Read from the start of a larger file: its first boxes, `ftyp` and often `moov`. */
+export const HEAD_BYTES = 64 * 1024
+/** Read from the end of a larger file, where an iPhone `.mov` keeps `moov`. */
+export const TAIL_BYTES = 1024 * 1024
+const HEADER_BYTES = 16
+/** Top-level box headers walked before giving up on finding `moov`. */
 export const MAX_BOX_HEADERS = 64
 
 /** Stored when a file can't be read, so it isn't retried on every sync. */
@@ -119,9 +124,17 @@ function videoCodec(moovBody: Uint8Array): CodecSniff {
 const failed = (reason: Extract<CodecSniff, { found: false }>["reason"]) =>
   ({ found: false, reason }) as const
 
+type Window = { start: number; bytes: Uint8Array }
+
 /**
- * The codec of the first video track of a file `size` bytes long. Reads a
- * 16-byte header per top-level box until `moov`, then `moov` itself (at most
+ * The codec of the first video track of a file `size` bytes long, in as few
+ * round trips as the layout allows. A file that fits in `TAIL_BYTES` is read
+ * whole. A larger one is read at both ends at once: its first `HEAD_BYTES`
+ * and last `TAIL_BYTES`, which between them hold `moov` for both an
+ * MP4 with `moov` first and an iPhone `.mov` with `moov` after the media. The
+ * top-level boxes are walked by header, through whichever buffer holds the
+ * next one; only a header that lies in neither costs a 16-byte read, and a
+ * `moov` that isn't whole in either costs one read of its own (at most
  * `MAX_MOOV_BYTES`). Fails only with what `read` fails with; a file that is
  * not readable as ISO base media is a `found: false` result.
  */
@@ -130,16 +143,42 @@ export const sniffVideoCodec = Effect.fnUntraced(function* <E>(
   read: CodecReader<E>
 ): Effect.fn.Return<CodecSniff, E> {
   if (!Number.isSafeInteger(size) || size < 8) return failed("malformed")
+  const windows: Window[] = []
+  if (size <= TAIL_BYTES)
+    windows.push({ start: 0, bytes: yield* read(0, size) })
+  else {
+    const tailStart = size - TAIL_BYTES
+    const [head, tail] = yield* Effect.all(
+      [read(0, HEAD_BYTES), read(tailStart, TAIL_BYTES)],
+      { concurrency: 2 }
+    )
+    windows.push({ start: 0, bytes: head }, { start: tailStart, bytes: tail })
+  }
+  // The bytes at [offset, offset + length), if one buffer holds all of them.
+  const held = (offset: number, length: number) => {
+    const window = windows.find(
+      ({ start, bytes }) =>
+        offset >= start && offset + length <= start + bytes.length
+    )
+    return window
+      ? window.bytes.subarray(
+          offset - window.start,
+          offset - window.start + length
+        )
+      : undefined
+  }
   let offset = 0
   for (let boxes = 0; boxes < MAX_BOX_HEADERS; boxes++) {
     if (offset >= size) return failed("no-moov")
-    const head = yield* read(offset, Math.min(16, size - offset))
+    const length = Math.min(HEADER_BYTES, size - offset)
+    const head = held(offset, length) ?? (yield* read(offset, length))
     const header = parseHeader(head, size - offset)
     if (!header) return failed("malformed")
     if (header.type === "moov") {
       if (header.size > MAX_MOOV_BYTES) return failed("moov-too-large")
       if (offset + header.size > size) return failed("malformed")
-      const moov = yield* read(offset, header.size)
+      const moov =
+        held(offset, header.size) ?? (yield* read(offset, header.size))
       if (moov.length !== header.size) return failed("malformed")
       return videoCodec(moov.subarray(header.headerSize))
     }
