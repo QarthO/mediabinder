@@ -38,19 +38,28 @@ import { action } from "@/lib/api"
 import { bytes, dateValue, isoDate } from "@/lib/utils"
 import type { Library, Media, Post } from "@/lib/types"
 import { canPreview, useMediaPreview } from "@/lib/media-preview"
+import { canRelabelAsMp4 } from "@/lib/media-formats"
 
 function PreviewImage({
   media,
   censored,
   onError,
+  onRendered,
   src,
 }: {
   media: Media
   censored: boolean
   onError: () => void
+  onRendered: () => void
   src?: string
 }) {
   const [loaded, setLoaded] = useState(false)
+  // The original failed to display (HEIC in most browsers): ask for Google's
+  // JPEG of it once. Failing again is the preview's failure.
+  const [rendered, setRendered] = useState(false)
+  const shown = rendered
+    ? `/api/media/${encodeURIComponent(media.id)}?rendered`
+    : src
   return (
     <>
       {!loaded && (
@@ -61,18 +70,68 @@ function PreviewImage({
           decoding="async"
         />
       )}
-      {src && (
+      {shown && (
         <img
           data-blurred={censored || undefined}
-          src={src}
+          src={shown}
           alt={loaded ? media.display_name : ""}
           decoding="async"
           style={loaded ? undefined : { position: "absolute", opacity: 0 }}
           onLoad={() => setLoaded(true)}
-          onError={onError}
+          onError={() => {
+            if (rendered) return onError()
+            setRendered(true)
+            setLoaded(false)
+            onRendered()
+          }}
         />
       )}
     </>
+  )
+}
+
+function PreviewVideo({
+  media,
+  censored,
+  onError,
+}: {
+  media: Media
+  censored: boolean
+  onError: () => void
+}) {
+  // A browser that refuses the stored label (Chrome on Windows and Linux with
+  // QuickTime) often plays the same bytes as MP4: label it so up front when
+  // canPlayType says no, or after the original fails to load.
+  const [asMp4, setAsMp4] = useState(
+    () => canRelabelAsMp4(media.mime_type) && cannotPlay(media.mime_type)
+  )
+  const id = encodeURIComponent(media.id)
+  return (
+    <video
+      data-blurred={censored || undefined}
+      controls={!censored}
+      tabIndex={censored ? -1 : undefined}
+      autoPlay={false}
+      playsInline
+      preload="metadata"
+      poster={`/api/media/${id}?thumbnail`}
+      src={`/api/media/${id}${asMp4 ? "?as=mp4" : ""}`}
+      onError={(event) => {
+        const unsupported =
+          event.currentTarget.error?.code ===
+          MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED
+        if (!asMp4 && unsupported && canRelabelAsMp4(media.mime_type))
+          setAsMp4(true)
+        else onError()
+      }}
+    />
+  )
+}
+
+function cannotPlay(mimeType: string) {
+  return (
+    typeof document !== "undefined" &&
+    document.createElement("video").canPlayType(mimeType) === ""
   )
 }
 
@@ -80,6 +139,7 @@ function CachedPreviewImage(props: {
   media: Media
   censored: boolean
   onError: () => void
+  onRendered: () => void
 }) {
   const src = useMediaPreview(props.media)
   return <PreviewImage {...props} src={src} />
@@ -120,6 +180,7 @@ export function Detail({
     ),
     [dialog, setDialog] = useState<"add" | Post | null>(null),
     [failed, setFailed] = useState(false),
+    [rendered, setRendered] = useState(false),
     [confirmDelete, setConfirmDelete] = useState(false)
   const dialogRef = useRef<HTMLDivElement>(null)
   const copiesRef = useRef<HTMLElement>(null)
@@ -299,7 +360,10 @@ export function Detail({
           </DialogClose>
         </header>
         <div className="detail-body">
-          <div className="detail-preview">
+          <div
+            className="detail-preview"
+            data-rendered={(media && rendered && !failed) || undefined}
+          >
             {media ? (
               failed || !media.available ? (
                 <div className="preview-error">
@@ -307,7 +371,9 @@ export function Detail({
                   <h3>Preview unavailable</h3>
                   <p>
                     {media.available
-                      ? "This format may not play in your browser. Open the original in Drive."
+                      ? media.mime_type.startsWith("video/")
+                        ? "This video may use a format your browser can't decode, such as HEVC. Open the original in Drive."
+                        : "This format may not display in your browser. Open the original in Drive."
                       : "The file is no longer in the connected folder."}
                   </p>
                   <a
@@ -319,15 +385,9 @@ export function Detail({
                   </a>
                 </div>
               ) : media.mime_type.startsWith("video/") ? (
-                <video
-                  data-blurred={censored || undefined}
-                  controls={!censored}
-                  tabIndex={censored ? -1 : undefined}
-                  autoPlay={false}
-                  playsInline
-                  preload="metadata"
-                  poster={`/api/media/${encodeURIComponent(media.id)}?thumbnail`}
-                  src={`/api/media/${media.id}`}
+                <PreviewVideo
+                  media={media}
+                  censored={censored}
                   onError={() => setFailed(true)}
                 />
               ) : canPreview(media) ? (
@@ -335,6 +395,7 @@ export function Detail({
                   media={media}
                   censored={censored}
                   onError={() => setFailed(true)}
+                  onRendered={() => setRendered(true)}
                 />
               ) : (
                 <PreviewImage
@@ -342,6 +403,7 @@ export function Detail({
                   censored={censored}
                   src={`/api/media/${encodeURIComponent(media.id)}`}
                   onError={() => setFailed(true)}
+                  onRendered={() => setRendered(true)}
                 />
               )
             ) : (
@@ -375,13 +437,31 @@ export function Detail({
                   </span>
                 </button>
               )}
-            <div className="preview-caption">
+            <div
+              className="preview-caption"
+              data-rendered={(media && rendered && !failed) || undefined}
+            >
               <span>
                 {media
                   ? `${media.width && media.height ? `${media.width} × ${media.height} · ` : ""}${bytes(media.size)}`
                   : `${members.length} items`}
               </span>
-              <span>Original preview</span>
+              {rendered && !failed && media ? (
+                <>
+                  <span className="preview-notice">
+                    Preview from Google Drive, not the original file
+                  </span>
+                  <a
+                    href={`https://drive.google.com/file/d/${media.drive_id}/view`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    Open original in Drive
+                  </a>
+                </>
+              ) : (
+                <span>Original preview</span>
+              )}
             </div>
           </div>
           <aside className="detail-panel">

@@ -200,3 +200,18 @@ tbody[aria-label="Scrollable media rows"]:focus-visible {
     opacity: 0.5;
   }
 }
+
+/* A preview rendered by Google instead of the original file: the caption
+   gets a second row for the notice, so the room under the image grows. */
+.detail-preview[data-rendered] {
+  padding-bottom: 92px;
+}
+.preview-caption[data-rendered] {
+  flex-wrap: wrap;
+  row-gap: 6px;
+}
+.preview-caption[data-rendered] .preview-notice {
+  order: 1;
+  flex: 1 0 100%;
+  white-space: normal;
+}

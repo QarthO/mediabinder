@@ -27,8 +27,10 @@ describeMysql("media proxy", () => {
   stubAccessToken()
   const signIn = stubSession()
 
-  const get = (id: string, init: RequestInit = {}) => {
-    const request = new Request(`https://example.com/api/media/${id}`, init)
+  // `target` is an ID, optionally followed by a query string.
+  const get = (target: string, init: RequestInit = {}) => {
+    const id = target.split("?")[0]
+    const request = new Request(`https://example.com/api/media/${target}`, init)
     const handler = routeHandler<{
       request: Request
       params: { id: string }
@@ -129,5 +131,148 @@ describeMysql("media proxy", () => {
       throw new Error("transport failure")
     })
     expect((await get(id).response).status).toBe(502)
+  })
+  test("a QuickTime video can be served labelled as MP4, ranges and headers intact", async () => {
+    const owner = newUser()
+    const id = await insertMedia({
+      userId: owner.id,
+      mimeType: "video/quicktime",
+    })
+    signIn(owner)
+    let range: string | null = null
+    google((_url, init) => {
+      range = new Headers(init.headers).get("range")
+      return new Response(upstreamBody(), {
+        status: 206,
+        headers: { "content-range": "bytes 0-2/300", "content-length": "3" },
+      })
+    })
+
+    const relabelled = await get(`${id}?as=mp4`, {
+      headers: { range: "bytes=0-2" },
+    }).response
+    expect(relabelled.status).toBe(206)
+    expect(relabelled.headers.get("content-type")).toBe("video/mp4")
+    expect(relabelled.headers.get("content-range")).toBe("bytes 0-2/300")
+    expect(relabelled.headers.get("x-content-type-options")).toBe("nosniff")
+    expect(relabelled.headers.get("content-security-policy")).toContain(
+      "sandbox"
+    )
+    expect(range).toBe("bytes=0-2")
+    await relabelled.body!.cancel()
+
+    // Without the option the stored type is still what the browser is told.
+    const plain = await get(id).response
+    expect(plain.headers.get("content-type")).toBe("video/quicktime")
+    await plain.body!.cancel()
+  })
+
+  test("the MP4 label is refused for anything but QuickTime-family videos", async () => {
+    const owner = newUser()
+    const photo = await insertMedia({ userId: owner.id })
+    const clip = await insertMedia({ userId: owner.id, mimeType: "video/webm" })
+    const quicktime = await insertMedia({
+      userId: owner.id,
+      mimeType: "video/quicktime",
+    })
+    signIn(owner)
+    // No Drive answer is installed: reaching it would fail as a 502.
+
+    expect((await get(`${photo}?as=mp4`).response).status).toBe(400)
+    expect((await get(`${clip}?as=mp4`).response).status).toBe(400)
+    expect((await get(`${quicktime}?as=html`).response).status).toBe(400)
+  })
+
+  test("fallback options still need a session and ownership", async () => {
+    const owner = newUser()
+    const other = newUser()
+    const clip = await insertMedia({
+      userId: owner.id,
+      mimeType: "video/quicktime",
+    })
+    const photo = await insertMedia({ userId: owner.id })
+
+    signIn(null)
+    expect((await get(`${clip}?as=mp4`).response).status).toBe(401)
+    expect((await get(`${photo}?rendered`).response).status).toBe(401)
+    signIn(other)
+    expect((await get(`${clip}?as=mp4`).response).status).toBe(404)
+    expect((await get(`${photo}?rendered`).response).status).toBe(404)
+  })
+
+  test("an image Google renders is served as a JPEG at the large size", async () => {
+    const owner = newUser()
+    const id = await insertMedia({ userId: owner.id, mimeType: "image/heic" })
+    signIn(owner)
+    const requested: string[] = []
+    google((url) => {
+      requested.push(url.href)
+      if (url.hostname === "www.googleapis.com")
+        return Response.json({
+          thumbnailLink: "https://lh3.googleusercontent.com/abc=s220",
+        })
+      return new Response(new Uint8Array([1, 2, 3]), {
+        headers: { "content-type": "image/jpeg" },
+      })
+    })
+
+    const response = await get(`${id}?rendered`).response
+
+    expect(response.status).toBe(200)
+    expect(response.headers.get("content-type")).toBe("image/jpeg")
+    expect(response.headers.get("x-content-type-options")).toBe("nosniff")
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(
+      new Uint8Array([1, 2, 3])
+    )
+    expect(requested.at(-1)).toBe("https://lh3.googleusercontent.com/abc=s2048")
+  })
+
+  test("a rendered image is refused for videos and combined options", async () => {
+    const owner = newUser()
+    const clip = await insertMedia({
+      userId: owner.id,
+      mimeType: "video/quicktime",
+    })
+    const photo = await insertMedia({ userId: owner.id })
+    signIn(owner)
+
+    expect((await get(`${clip}?rendered`).response).status).toBe(400)
+    expect((await get(`${photo}?rendered&as=mp4`).response).status).toBe(400)
+  })
+
+  test("rendered image failures keep Drive's status classes and details private", async () => {
+    const owner = newUser()
+    const id = await insertMedia({ userId: owner.id, mimeType: "image/heic" })
+    signIn(owner)
+
+    google(() => new Response("secret upstream detail", { status: 404 }))
+    const missing = await get(`${id}?rendered`).response
+    expect(missing.status).toBe(404)
+    expect(await missing.text()).not.toContain("secret")
+
+    google(() => Response.json({}))
+    expect((await get(`${id}?rendered`).response).status).toBe(404)
+
+    google((url) =>
+      url.hostname === "www.googleapis.com"
+        ? Response.json({
+            thumbnailLink: "https://lh3.googleusercontent.com/abc=s220",
+          })
+        : new Response("secret upstream detail", { status: 500 })
+    )
+    const broken = await get(`${id}?rendered`).response
+    expect(broken.status).toBe(502)
+    expect(await broken.text()).not.toContain("secret")
+
+    google((url) =>
+      url.hostname === "www.googleapis.com"
+        ? Response.json({
+            thumbnailLink: "https://lh3.googleusercontent.com/abc=s220",
+          })
+        : new Response(new Uint8Array(4 * 1024 * 1024 + 1), {
+            headers: { "content-type": "image/jpeg" },
+          })
+    )
+    expect((await get(`${id}?rendered`).response).status).toBe(502)
   })
 })

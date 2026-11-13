@@ -79,6 +79,7 @@ export async function insertMedia(options: {
   folder?: string
   uploadedAt?: string
   available?: boolean
+  mimeType?: string
 }) {
   const id = options.id ?? randomUUID()
   const catalogId = options.catalogId ?? id
@@ -90,13 +91,14 @@ export async function insertMedia(options: {
   )
   await execute(
     `INSERT INTO media(id,user_id,drive_id,catalog_id,display_name,raw_name,mime_type,tags,created_at,uploaded_at,size,available,synced_at)
-    VALUES (?,?,?,?,?,'fixture.jpg','image/jpeg','[]',NOW(3),?,42,?,NOW(3))`,
+    VALUES (?,?,?,?,?,'fixture.jpg',?,'[]',NOW(3),?,42,?,NOW(3))`,
     [
       id,
       options.userId,
       id,
       catalogId,
       name,
+      options.mimeType ?? "image/jpeg",
       uploadedAt,
       options.available ?? true,
     ]
