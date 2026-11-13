@@ -59,6 +59,21 @@ const syncDuration = Metric.histogram("mediabinder.sync.duration", {
   boundaries: [0.5, 1, 2.5, 5, 10, 30, 60, 120, 300, 600, 1800],
 })
 
+const folderSets = Metric.counter("mediabinder.sync.folder_sets", {
+  description:
+    "Sets driven by Drive subfolders during syncs: `created` or `adopted` sets, and `joined` file memberships added",
+  attributes: { unit: "{set}" },
+  incremental: true,
+})
+
+const countFolderSets = (
+  outcome: "created" | "adopted" | "joined",
+  count: number
+) =>
+  count > 0
+    ? Metric.update(Metric.withAttributes(folderSets, { outcome }), count)
+    : Effect.void
+
 const countFiles = (state: "found" | "saved", count: number) =>
   Metric.update(Metric.withAttributes(syncedFiles, { state }), count)
 
@@ -121,7 +136,7 @@ export const sync = Effect.fn("Drive.sync")(function* (
         if (options.onStarted) yield* options.onStarted(run.started)
         const folderIds = sources.map((source) => source.folder_id as string)
         return yield* Effect.gen(function* () {
-          const sourceFiles = yield* scanFolders(
+          const scan = yield* scanFolders(
             session,
             userId,
             token,
@@ -132,7 +147,7 @@ export const sync = Effect.fn("Drive.sync")(function* (
             session,
             userId,
             folderIds,
-            sourceFiles,
+            scan,
             run.report
           )
           yield* run.succeed(result.count)
@@ -248,6 +263,17 @@ const unopenable = () =>
       "MediaBinder can't open a linked folder. Share it with MediaBinder's sync account in Google Drive, then sync again.",
   })
 
+// A file's outermost subfolder under one linked folder. Files directly in the
+// linked folder have none.
+type Placement = { folderId: string; folderName: string; fileId: string }
+type Scan = {
+  sourceFiles: Map<string, DriveFile[]>
+  // By linked folder. Each linked folder is computed on its own, so a subfolder
+  // that is also linked, or reachable from two linked folders, pairs
+  // independently under each.
+  placements: Map<string, Placement[]>
+}
+
 type Page = { files: DriveFile[]; nextPageToken?: string }
 
 /**
@@ -267,6 +293,7 @@ const scanFolders = Effect.fn("Drive.scanFolders")(function* (
     folderIds.length
   )
   const sourceFiles = new Map<string, DriveFile[]>()
+  const placements = new Map<string, Placement[]>()
   const found = new Set<string>()
   let foldersScanned = 0
   const shared = sharedFolderMode()
@@ -312,11 +339,15 @@ const scanFolders = Effect.fn("Drive.scanFolders")(function* (
       if (root.capabilities?.canListChildren !== true)
         return yield* unopenable()
     }
-    const pending = [folderId],
+    // Each pending folder carries the first-level subfolder it sits under.
+    const pending: { id: string; top?: { id: string; name: string } }[] = [
+        { id: folderId },
+      ],
       visited = new Set<string>(),
-      files: DriveFile[] = []
+      files: DriveFile[] = [],
+      placed: Placement[] = []
     while (pending.length) {
-      const parent = pending.shift()!
+      const { id: parent, top } = pending.shift()!
       if (visited.has(parent)) continue
       visited.add(parent)
       let pageToken = ""
@@ -337,9 +368,18 @@ const scanFolders = Effect.fn("Drive.scanFolders")(function* (
               !file.inheritedPermissionsDisabled ||
               (yield* ownsFolder(file.id))
             )
-              pending.push(file.id)
+              pending.push({
+                id: file.id,
+                top: top ?? { id: file.id, name: file.name },
+              })
           } else {
             files.push(file)
+            if (top)
+              placed.push({
+                folderId: top.id,
+                folderName: top.name,
+                fileId: file.id,
+              })
             found.add(file.id)
           }
         }
@@ -350,8 +390,9 @@ const scanFolders = Effect.fn("Drive.scanFolders")(function* (
       yield* report({ folders_scanned: ++foldersScanned })
     }
     sourceFiles.set(folderId, files)
+    placements.set(folderId, placed)
   }
-  return sourceFiles
+  return { sourceFiles, placements } satisfies Scan
 })
 
 /**
@@ -363,7 +404,7 @@ const reconcile = Effect.fn("Drive.reconcile")(function* (
   session: LockedSession,
   userId: string,
   folderIds: string[],
-  sourceFiles: Map<string, DriveFile[]>,
+  { sourceFiles, placements }: Scan,
   report: (progress: Partial<SyncProgress>) => Effect.Effect<void>
 ) {
   yield* Effect.annotateCurrentSpan("mediabinder.user_id", userId)
@@ -429,7 +470,7 @@ const reconcile = Effect.fn("Drive.reconcile")(function* (
         // Locations and folder membership are written in batches rather than one
         // statement per file.
         const owned = yield* tx.queryRows<RowDataPacket>(
-          "SELECT id,drive_id FROM media WHERE user_id=?",
+          "SELECT id,drive_id,catalog_id FROM media WHERE user_id=?",
           [userId]
         )
         const mediaIds = new Map<string, string>(
@@ -458,6 +499,7 @@ const reconcile = Effect.fn("Drive.reconcile")(function* (
           "(?,?,?)",
           memberships
         )
+        yield* applyFolderSets(tx, userId, placements, owned)
         yield* tx.execute(
           "UPDATE drive_folder SET last_synced_at = NOW(3) WHERE user_id = ?",
           [userId]
@@ -467,6 +509,150 @@ const reconcile = Effect.fn("Drive.reconcile")(function* (
   )
   yield* countFiles("saved", files.length)
   return { count: files.length }
+})
+
+const inList = (values: unknown[]) => values.map(() => "?").join(",")
+
+/**
+ * Files inside a first-level subfolder of a linked folder join a set for that
+ * subfolder. Runs in the reconcile transaction, so it only happens once the
+ * whole scan succeeded and rolls back with it. It only ever adds:
+ * - Each (subfolder, media) pairing is applied once and recorded, so a photo
+ *   the user removed from the set stays out, and a file moved to another
+ *   subfolder joins that subfolder's set while keeping the old membership.
+ * - The set is the user's one tied to the subfolder's Drive ID. Without one,
+ *   the user's single unassociated set with the same name (case-insensitive,
+ *   among the sets they can see, like add-sets) is adopted; otherwise a set is
+ *   created. Renames on either side never create a duplicate.
+ * - A subfolder whose pairings were applied before but has no set now had its
+ *   set deleted: it isn't recreated, but a set the user makes with that name
+ *   is adopted.
+ * - Subfolders are taken per linked folder, and the pairing key ignores which
+ *   linked folder reached the file, so overlapping links never duplicate.
+ * Names are only used as data here, never in telemetry.
+ */
+const applyFolderSets = Effect.fn("Drive.applyFolderSets")(function* (
+  tx: DatabaseSession,
+  userId: string,
+  placements: Map<string, Placement[]>,
+  owned: ReadonlyArray<RowDataPacket>
+) {
+  const media = new Map<string, { id: string; catalogId: string }>(
+    owned.map((row) => [
+      row.drive_id as string,
+      { id: row.id as string, catalogId: row.catalog_id as string },
+    ])
+  )
+  const pairs = new Map<
+    string,
+    { folderId: string; mediaId: string; catalogId: string }
+  >()
+  const names = new Map<string, string>()
+  for (const list of placements.values())
+    for (const placement of list) {
+      const item = media.get(placement.fileId)
+      if (!item) continue
+      names.set(placement.folderId, placement.folderName)
+      pairs.set(`${placement.folderId}\u0000${item.id}`, {
+        folderId: placement.folderId,
+        mediaId: item.id,
+        catalogId: item.catalogId,
+      })
+    }
+  yield* Effect.annotateCurrentSpan("mediabinder.sync.folder_pairs", pairs.size)
+  if (!pairs.size) return
+  const folders = [...names.keys()]
+  const applied = new Set<string>()
+  const handled = new Set<string>()
+  for (let index = 0; index < folders.length; index += 500) {
+    const chunk = folders.slice(index, index + 500)
+    const rows = yield* tx.queryRows<RowDataPacket>(
+      `SELECT folder_id,media_id FROM drive_folder_set_applied WHERE user_id=? AND folder_id IN (${inList(chunk)})`,
+      [userId, ...chunk]
+    )
+    for (const row of rows) {
+      applied.add(`${row.folder_id}\u0000${row.media_id}`)
+      handled.add(row.folder_id as string)
+    }
+  }
+  const fresh = [...pairs.entries()].filter(([key]) => !applied.has(key))
+  if (!fresh.length) return
+  const pendingFolders = [...new Set(fresh.map(([, pair]) => pair.folderId))]
+  const setByFolder = new Map<string, string>()
+  for (let index = 0; index < pendingFolders.length; index += 500) {
+    const chunk = pendingFolders.slice(index, index + 500)
+    const rows = yield* tx.queryRows<RowDataPacket>(
+      `SELECT id,drive_folder_id FROM media_set WHERE user_id=? AND drive_folder_id IN (${inList(chunk)})`,
+      [userId, ...chunk]
+    )
+    for (const row of rows)
+      setByFolder.set(row.drive_folder_id as string, row.id as string)
+  }
+  let visible:
+    | { id: string; name: string; own: boolean; linked: boolean }[]
+    | undefined
+  let created = 0,
+    adopted = 0
+  for (const folderId of pendingFolders) {
+    if (setByFolder.has(folderId)) continue
+    if (!visible) {
+      const sets = yield* tx.queryRows<RowDataPacket>(
+        `SELECT s.id,s.display_name,s.user_id,s.drive_folder_id FROM media_set s WHERE s.user_id=? OR EXISTS(
+          SELECT 1 FROM catalog_set_member sm JOIN media m ON m.catalog_id=sm.catalog_id
+          WHERE sm.set_id=s.id AND m.user_id=? AND m.available=TRUE)`,
+        [userId, userId]
+      )
+      visible = sets.map((set) => ({
+        id: set.id as string,
+        name: (set.display_name as string).toLowerCase(),
+        own: set.user_id === userId,
+        linked: set.drive_folder_id !== null,
+      }))
+    }
+    const name = names.get(folderId)!.trim().slice(0, 255)
+    const matches = visible.filter((set) => set.name === name.toLowerCase())
+    const [match] = matches
+    if (matches.length === 1 && match.own && !match.linked) {
+      yield* tx.execute(
+        "UPDATE media_set SET drive_folder_id=? WHERE id=? AND user_id=? AND drive_folder_id IS NULL",
+        [folderId, match.id, userId]
+      )
+      match.linked = true
+      setByFolder.set(folderId, match.id)
+      adopted++
+    } else if (!handled.has(folderId) && name) {
+      const id = randomUUID()
+      yield* tx.execute(
+        "INSERT INTO media_set(id,user_id,display_name,raw_name,tags,created_at,drive_folder_id) VALUES (?,?,?,?,'[]',NOW(3),?)",
+        [id, userId, name, name, folderId]
+      )
+      visible.push({ id, name: name.toLowerCase(), own: true, linked: true })
+      setByFolder.set(folderId, id)
+      created++
+    }
+  }
+  let joined = 0
+  const members = fresh.flatMap(([, pair]) => {
+    const setId = setByFolder.get(pair.folderId)
+    return setId ? [[setId, pair.catalogId]] : []
+  })
+  for (let index = 0; index < members.length; index += 500) {
+    const chunk = members.slice(index, index + 500)
+    const result = yield* tx.execute(
+      `INSERT IGNORE INTO catalog_set_member(set_id,catalog_id) VALUES ${chunk.map(() => "(?,?)").join(",")}`,
+      chunk.flat()
+    )
+    joined += result.affectedRows
+  }
+  yield* insertInChunks(
+    tx,
+    "INSERT IGNORE INTO drive_folder_set_applied(user_id,folder_id,media_id) VALUES",
+    "(?,?,?)",
+    fresh.map(([, pair]) => [userId, pair.folderId, pair.mediaId])
+  )
+  yield* countFolderSets("created", created)
+  yield* countFolderSets("adopted", adopted)
+  yield* countFolderSets("joined", joined)
 })
 
 const insertInChunks = Effect.fnUntraced(function* (
