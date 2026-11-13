@@ -1,8 +1,6 @@
 import { memo } from "react"
 import {
   ArrowUpDown,
-  Eye,
-  EyeOff,
   Inbox,
   Images,
   FolderOpen,
@@ -13,7 +11,7 @@ import type { OnChangeFn, SortingState } from "@tanstack/react-table"
 import type { MediaSet } from "@/lib/types"
 import { Select } from "./ui/select"
 import { SearchSelect } from "./ui/search-select"
-import { Button } from "./ui/button"
+import { CensorControl } from "./censor-control"
 
 export const LibraryFilters = memo(function LibraryFilters({
   sortLabel = "Sort media",
@@ -28,6 +26,9 @@ export const LibraryFilters = memo(function LibraryFilters({
   setSorting,
   mediaCensored,
   onToggleCensor,
+  censorStep,
+  onPreviewCensorStep,
+  onCommitCensorStep,
   view,
   onView,
 }: {
@@ -43,6 +44,9 @@ export const LibraryFilters = memo(function LibraryFilters({
   setSorting: OnChangeFn<SortingState>
   mediaCensored: boolean
   onToggleCensor: () => void
+  censorStep: number
+  onPreviewCensorStep: (strength: number) => void
+  onCommitCensorStep: (strength: number) => void
   view: "grid" | "list"
   onView: (value: "grid" | "list") => void
 }) {
@@ -105,17 +109,13 @@ export const LibraryFilters = memo(function LibraryFilters({
             : []),
         ]}
       />
-      <Button
-        className="thumbnail-blur-toggle"
-        variant="outline"
-        size="icon"
-        aria-label="Censor media"
-        aria-pressed={mediaCensored}
-        title={mediaCensored ? "Uncensor media" : "Censor media"}
-        onClick={onToggleCensor}
-      >
-        {mediaCensored ? <EyeOff /> : <Eye />}
-      </Button>
+      <CensorControl
+        censored={mediaCensored}
+        strength={censorStep}
+        onToggle={onToggleCensor}
+        onPreview={onPreviewCensorStep}
+        onCommit={onCommitCensorStep}
+      />
       <div className="view-switch">
         {(["grid", "list"] as const).map((v) => (
           <button
