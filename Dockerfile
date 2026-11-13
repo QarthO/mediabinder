@@ -41,9 +41,10 @@ COPY --from=production-dependencies --chown=node:node /app/node_modules ./node_m
 COPY --from=build --chown=node:node /app/dist ./dist
 COPY --chown=node:node package.json tsconfig.json ./
 COPY --chown=node:node scripts ./scripts
-# The runtime scripts import these directories through tsx, which resolves the "@/" alias from tsconfig.json.
-COPY --chown=node:node src/lib ./src/lib
-COPY --chown=node:node src/effect ./src/effect
+# The runtime scripts (migrate, Drive worker) import server modules through
+# tsx, which resolves the "@/" alias from tsconfig.json. Ship all of src (under
+# 1 MB) so a new import can't break them in production only.
+COPY --chown=node:node src ./src
 COPY --chown=node:node migrations ./migrations
 EXPOSE 3100
 USER node
