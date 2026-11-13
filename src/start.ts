@@ -2,13 +2,20 @@ import { isNotFound, isRedirect } from "@tanstack/react-router"
 import { createMiddleware, createStart } from "@tanstack/react-start"
 
 import { tapPromiseError } from "./effect/promise"
-import { reportAppError, traceAppPromise } from "./effect/runtime.server"
+import {
+  reportAppError,
+  runTracedAppEffect,
+  traceAppPromise,
+} from "./effect/runtime.server"
+import { incomingTraceParent } from "./observability/incoming-trace.server"
 import {
   isUntracedRequest,
   requestSpanName,
 } from "./observability/request-span"
 
 // One trace per request; effects run while handling it become its children.
+// A signed-in browser's same-origin request that carries a `traceparent`
+// continues the browser's trace instead (see incomingTraceParent).
 // Server function failures are reported by errorMiddleware, because TanStack
 // serializes them into the response before they reach this middleware.
 // The span covers producing the response, not streaming its body, and the
@@ -18,22 +25,28 @@ const tracingMiddleware = createMiddleware().server(
   ({ request, pathname, serverFnMeta, next }) => {
     if (isUntracedRequest(pathname)) return next()
     const name = requestSpanName(request.method, pathname, serverFnMeta)
-    return traceAppPromise(
-      name,
-      async (span) => {
-        const result = await tapPromiseError(
-          async () => next(),
-          (cause) => {
-            // The browser hung up, as when it leaves a page mid-stream:
-            // Node ends the request with a connection reset.
-            if (request.signal.aborted && isConnectionReset(cause)) return
-            reportRequestError(cause, name)
-          }
-        )
-        span.attribute("http.response.status_code", result.response.status)
-        return result
-      },
-      { "http.request.method": request.method }
+    const parentSpan = request.headers.has("traceparent")
+      ? runTracedAppEffect(incomingTraceParent(request))
+      : Promise.resolve(undefined)
+    return parentSpan.then((parent) =>
+      traceAppPromise(
+        name,
+        async (span) => {
+          const result = await tapPromiseError(
+            async () => next(),
+            (cause) => {
+              // The browser hung up, as when it leaves a page mid-stream:
+              // Node ends the request with a connection reset.
+              if (request.signal.aborted && isConnectionReset(cause)) return
+              reportRequestError(cause, name)
+            }
+          )
+          span.attribute("http.response.status_code", result.response.status)
+          return result
+        },
+        { "http.request.method": request.method },
+        parent
+      )
     )
   }
 )

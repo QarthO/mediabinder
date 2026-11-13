@@ -4,6 +4,10 @@ import { startTransition } from "react"
 import { hydrateRoot } from "react-dom/client"
 import { StartClient } from "@tanstack/react-start/client"
 
+import {
+  beginLibraryOpen,
+  startBrowserTelemetry,
+} from "./lib/browser-telemetry"
 import { createRenderAudit } from "./lib/render-audit"
 
 // Profiling only: `VITE_REACT_SCAN=true pnpm dev`. Otherwise `react-scan`
@@ -16,7 +20,10 @@ if (import.meta.env.DEV && import.meta.env.VITE_REACT_SCAN) {
   scan({ enabled: true, showToolbar: true, onRender })
 }
 
-performance.mark("mediabinder-hydration-start")
+// Does nothing unless the server turned browser telemetry on. The exporter
+// loads once the page is idle; "Library open" is queued until it does.
+startBrowserTelemetry()
+beginLibraryOpen()
 startTransition(() => {
   hydrateRoot(document, <StartClient />)
 })

@@ -40,6 +40,6 @@ export function action<T = { ok: boolean }>(
   data: unknown = {}
 ): Promise<T> {
   return import("./api-request").then(({ requestLibrary }) =>
-    requestLibrary<T>({ method: "POST", body: { action, data } })
+    requestLibrary<T>({ method: "POST", body: { action, data }, action })
   )
 }

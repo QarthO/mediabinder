@@ -1,7 +1,18 @@
-import { APIError } from "better-auth/api"
 import { Predicate } from "effect"
-import { ZodError } from "zod"
-import { EXPECTED_ERROR_TAGS } from "@/lib/http-errors"
+
+// This module also runs in the browser's telemetry chunk, so it names Better
+// Auth's and Zod's errors by `name` instead of importing their classes.
+
+// Tagged errors that describe a request the app refused or couldn't satisfy,
+// so they are answered but not reported.
+const EXPECTED_ERROR_TAGS: ReadonlySet<string> = new Set([
+  "AuthenticationError",
+  "DriveReconnectError",
+  "LockBusyError",
+  "NotFoundError",
+  "UnknownActionError",
+  "ValidationError",
+])
 
 // Tagged errors that carry an HTTP status. Below 500 they describe a request
 // the app refused or couldn't satisfy, such as a missing thumbnail.
@@ -14,9 +25,11 @@ const STATUS_ERROR_TAGS = new Set([
 /** Outcomes the app handles on purpose, so they are not reported as errors. */
 export function isExpectedAppError(value: unknown): boolean {
   if (value instanceof Response) return value.status < 500
-  if (value instanceof ZodError) return true
-  if (value instanceof APIError) return value.statusCode < 500
   if (!Predicate.isObject(value)) return false
+  if ("name" in value && value.name === "ZodError") return true
+  if ("name" in value && value.name === "APIError") {
+    return !("statusCode" in value) || isClientStatus(value.statusCode)
+  }
   if ("name" in value && value.name === "AbortError") return true
   if (!("_tag" in value) || !Predicate.isString(value._tag)) return false
   if (EXPECTED_ERROR_TAGS.has(value._tag)) return true

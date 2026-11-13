@@ -4,8 +4,6 @@ import type { AnyRouter } from "@tanstack/react-router"
 import { reportBrowserError } from "@/lib/browser-telemetry"
 import { Button } from "@/components/ui/button"
 
-const reportedErrors = new WeakSet<Error>()
-
 interface AppErrorPageProps {
   error: unknown
   reset: () => void
@@ -13,10 +11,8 @@ interface AppErrorPageProps {
 
 export function AppErrorPage({ error, reset }: AppErrorPageProps) {
   React.useEffect(() => {
-    if (error instanceof Error) {
-      if (reportedErrors.has(error)) return
-      reportedErrors.add(error)
-    }
+    // reportBrowserError reports each error object once, so a re-render or a
+    // window error event for the same error is not counted twice.
     reportBrowserError(error, { operation: "app.error_page" })
   }, [error])
 
