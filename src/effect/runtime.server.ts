@@ -67,7 +67,10 @@ export async function runAppEffect<TResult, TError>(
   throw Cause.squash(exit.cause)
 }
 
-/** Runs a background check, such as a worker's idle poll, without tracing it. */
+/**
+ * Runs a check too frequent to trace, such as a health probe or a worker's
+ * idle poll.
+ */
 export function runAppEffectUntraced<TResult, TError>(
   effect: Effect.Effect<TResult, TError, AppServices>
 ): Promise<TResult> {

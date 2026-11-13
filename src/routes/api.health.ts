@@ -1,5 +1,5 @@
 import { Effect } from "effect"
-import { runAppEffect, reportAppError } from "@/effect/runtime.server"
+import { reportAppError, runAppEffectUntraced } from "@/effect/runtime.server"
 import { Database } from "@/effect/database"
 import { createFileRoute } from "@tanstack/react-router"
 export const Route = createFileRoute("/api/health")({
@@ -7,8 +7,9 @@ export const Route = createFileRoute("/api/health")({
     handlers: {
       GET: async () => {
         try {
-          await runAppEffect(
-            "Health.check",
+          // Docker probes this every 30 seconds; a trace per probe would bury
+          // real requests, as the request middleware's exclusion intends.
+          await runAppEffectUntraced(
             Effect.gen(function* () {
               const database = yield* Database
               return yield* database.queryRows("health.ping", "SELECT 1")
